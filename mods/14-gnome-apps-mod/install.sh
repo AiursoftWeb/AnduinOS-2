@@ -81,13 +81,22 @@ apt install $INTERACTIVE \
     --no-install-recommends
 judge "Install accessibility packages"
 
+# Install order matters: plymouth (ubuntu) first, then our plymouth-theme-spinner.
+# Our package has Replaces: plymouth — which only protects when OUR package is
+# the one being installed over plymouth's already-present files. If plymouth
+# were installed second, dpkg would reject the file conflict.
 print_ok "Installing plymouth..."
 apt install $INTERACTIVE \
     plymouth \
     plymouth-label \
-    plymouth-theme-spinner \
     plymouth-theme-ubuntu-text --no-install-recommends
 judge "Install plymouth"
+
+# plymouth-theme-spinner is a swap package: same name as ubuntu's, version
+# $(UpstreamVersion)-anduinos. APT priority 1001 ensures ours wins. No hold/pin.
+print_ok "Installing plymouth-theme-spinner (AnduinOS branded)..."
+apt install $INTERACTIVE plymouth-theme-spinner
+judge "Install plymouth-theme-spinner"
 
 print_ok "Installing network manager vpn packages..."
 case $TARGET_UBUNTU_VERSION in
