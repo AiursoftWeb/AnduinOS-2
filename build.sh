@@ -122,11 +122,6 @@ EOF
     print_ok "Upgrading base system packages..."
     sudo chroot new_building_os apt -y upgrade
     judge "Upgrade base system"
-
-    # Swap packages (base-files, plymouth-theme-spinner, etc.) are
-    # installed by mod 01-install-swap-packages-mod — not here.
-    # This keeps setup_apt() single-responsibility: it only configures
-    # APT sources and upgrades the base system, nothing more.
 }
 
 function run_chroot() {
