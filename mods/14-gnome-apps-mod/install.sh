@@ -9,7 +9,6 @@ print_ok "Installing basic CLI tools..."
 apt install $INTERACTIVE \
     apt-transport-https \
     cifs-utils \
-    cloud-init \
     coreutils \
     gnupg \
     gpg \
