@@ -23,6 +23,8 @@ packages=(
     gnome-contacts
     gnome-terminal
     zutty
+    update-notifier
+    update-notifier-common
     update-manager-core
     gnome-shell-extension-ubuntu-dock
     libreoffice-*
@@ -36,6 +38,7 @@ packages=(
     ubuntu-advantage-desktop-daemon
     ubuntu-advantage-tools
     ubuntu-pro-client-l10n
+    ubuntu-release-upgrader-core
     popularity-contest
     ubuntu-report
     ubuntu-wallpaper
