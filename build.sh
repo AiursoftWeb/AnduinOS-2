@@ -170,14 +170,16 @@ function build_iso() {
 
     # copy kernel files
     print_ok "Copying kernel files as /casper/vmlinuz and /casper/initrd..."
-    # Pick the latest kernel version — apt upgrade may have pulled in a newer one.
-    KERNEL_VERSION=$(ls -1 new_building_os/boot/vmlinuz-* 2>/dev/null | sort -V | tail -n 1 | sed 's/.*vmlinuz-//')
-    if [ -z "$KERNEL_VERSION" ]; then
-        print_error "No kernel found in new_building_os/boot/"
+    # Resolve the distro-maintained symlinks — they always point to the
+    # current kernel, so we never pick a stale one left behind by apt.
+    REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz || readlink -f new_building_os/boot/vmlinuz)
+    REAL_INITRD=$(readlink -f new_building_os/initrd.img || readlink -f new_building_os/boot/initrd.img)
+    if [ -z "$REAL_VMLINUZ" ] || [ ! -f "$REAL_VMLINUZ" ]; then
+        print_error "No kernel found via vmlinuz symlink in new_building_os/"
         exit 1
     fi
-    sudo cp "new_building_os/boot/vmlinuz-$KERNEL_VERSION" image/casper/vmlinuz
-    sudo cp "new_building_os/boot/initrd.img-$KERNEL_VERSION" image/casper/initrd
+    sudo cp "$REAL_VMLINUZ" image/casper/vmlinuz
+    sudo cp "$REAL_INITRD" image/casper/initrd
     judge "Copy kernel files"
 
     print_ok "Generating grub.cfg..."

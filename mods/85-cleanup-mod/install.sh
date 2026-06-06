@@ -11,10 +11,15 @@ judge "Clean up /root/"
 
 # Clean up apt cache
 print_ok "Cleaning up apt cache..."
-apt update
 apt clean -y
 rm -rf /var/cache/apt/archives/*
 judge "Clean up apt cache"
+
+# Clean up apt lists (save ~50-80MB in the squashfs; the installed system
+# will re-fetch them on first apt update anyway)
+print_ok "Cleaning up apt lists..."
+find /var/lib/apt/lists -mindepth 1 -maxdepth 1 ! -name 'lock' ! -name 'partial' -delete 2>/dev/null || true
+judge "Clean up apt lists"
 
 # Clean up log files
 print_ok "Cleaning up log files..."
