@@ -42,17 +42,24 @@ export LC_MONETARY=en_US.UTF-8
 export LANG=en_US.UTF-8
 export LANGUAGE=en_US:en
 
-# Language pack codes tightly matched with AnduinOS Official Website localizations.
-# This ensures 100% offline coverage for all 28 regions / 25 languages listed on the download portal.
-# Ubiquity will still dynamically fetch unlisted rare languages if chosen during online installation.
+# ── Language pack codes ────────────────────────────────────────────────────
 #
-# en: English     de: German      es: Spanish     fr: French      it: Italian
-# pt: Portuguese  ru: Russian     ja: Japanese    ko: Korean      vi: Vietnamese
-# th: Thai        ar: Arabic      nl: Dutch       sv: Swedish     pl: Polish
-# tr: Turkish     ro: Romanian    da: Danish      uk: Ukrainian   id: Indonesian
-# fi: Finnish     hi: Hindi       el: Greek       zh-hans: S-Ch   zh-hant: T-Ch
-# Language pack codes tightly matched with AnduinOS Official Website localizations.
-# This ensures 100% offline coverage for all languages listed on the download portal.
+# 28 website languages (25 language-pack codes — en/pt/zh-hans/zh-hant
+# each cover two website options):
+#
+#   en-US English (US)    zh-CN 中文 (CN)       de-DE Deutsch
+#   en-GB English (UK)    zh-TW 中文 (TW)       fr-FR Français
+#                         zh-HK 中文 (HK)       es-ES Español
+#   ja-JP 日本語           ko-KR 한국어          it-IT Italiano
+#   vi-VN Tiếng Việt      th-TH ภาษาไทย        pt-PT Português
+#   ar-SA العربية          nl-NL Nederlands      pt-BR Português (Brasil)
+#   sv-SE Svenska          pl-PL Polski          ru-RU Русский
+#   tr-TR Türkçe           ro-RO Română          da-DK Dansk
+#   uk-UA Українська       id-ID Bahasa Indonesia
+#   fi-FI Suomi            hi-IN हिन्दी          el-GR Ελληνικά
+#
+# All verified present in Ubuntu apt repos (2026-06).
+# Ubiquity will dynamically fetch unlisted languages if chosen online.
 export LANG_PACK_CODES="en de es fr it pt ru zh-hans ja zh-hant ko vi th ar nl sv pl tr ro da uk id fi hi el"
 _LP=""
 for _c in $LANG_PACK_CODES; do
@@ -61,9 +68,11 @@ done
 export LANGUAGE_PACKS="${_LP# }"
 unset _LP _c
 
-# GRUB locale submenu entries for the live ISO boot menu.
-# Format: locale_code|Display Label (one entry per line)
-# These are rendered as a submenu under "Try and Install in Other Languages..."
+# ── GRUB boot menu locale submenu ──────────────────────────────────────────
+#
+# 28 entries — one per website language. Rendered under
+# "Try and Install in Other Languages..." on the live ISO boot screen.
+# Format: locale_code|Display Label
 export GRUB_LOCALES="
 en_US|English (United States)
 en_GB|English (United Kingdom)
