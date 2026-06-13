@@ -372,7 +372,7 @@ EOF
         mkdir efi && \
         sudo mount efiboot.img efi
 
-        if ! sudo grub-install --efi-directory=efi --uefi-secure-boot --removable --no-nvram; then
+        if ! sudo grub-install --target=x86_64-efi --efi-directory=efi --boot-directory=boot --uefi-secure-boot --removable --no-nvram; then
             sudo umount efi
             print_error "grub-install failed!"
             exit 1
