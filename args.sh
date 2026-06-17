@@ -123,7 +123,7 @@ export TARGET_NAME="anduinos"
 export TARGET_BUSINESS_NAME="AnduinOS"
 
 # Version number. Must be in the format of x.y.z
-export TARGET_BUILD_VERSION="2.0.0~beta2"
+export TARGET_BUILD_VERSION="2.0.0~beta3"
 
 #===========================
 # Installer customization
@@ -149,7 +149,7 @@ export TARGET_PACKAGE_REMOVE="
 export APT_CONFIG_PACKAGE="anduinos-apt-config"
 
 # APKG server URL for AnduinOS-branded overlay packages (dev: apkg-dev.aiursoft.com).
-export APKG_SERVER="https://packages.aiursoft.com/"
+export APKG_SERVER="https://packages.aiursoft.com"
 
 # GPG certificate name on the APKG server (used to download and verify the repo).
 # The cert is fetched from: $APKG_SERVER/artifacts/certs/$APKG_CERT_NAME
