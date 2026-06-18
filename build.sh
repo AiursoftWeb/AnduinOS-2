@@ -286,9 +286,14 @@ submenu "Advanced Options..." {
         initrd  /casper/initrd
     }
     menuentry "$TOGO_TEXT" {
-       set gfxpayload=keep
-       linux   /casper/vmlinuz boot=casper persistent quiet splash ---
-       initrd  /casper/initrd
+        set gfxpayload=keep
+        linux   /casper/vmlinuz boot=casper persistent quiet splash ---
+        initrd  /casper/initrd
+    }
+    menuentry "Check installation media for defects (Integrity Check)" {
+        set gfxpayload=keep
+        linux   /casper/vmlinuz boot=casper integrity-check quiet splash ---
+        initrd  /casper/initrd
     }
 }
 

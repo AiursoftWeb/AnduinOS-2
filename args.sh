@@ -123,7 +123,7 @@ export TARGET_NAME="anduinos"
 export TARGET_BUSINESS_NAME="AnduinOS"
 
 # Version number. Must be in the format of x.y.z
-export TARGET_BUILD_VERSION="2.0.0~beta3"
+export TARGET_BUILD_VERSION="2.0.0~rc1"
 
 #===========================
 # Installer customization
