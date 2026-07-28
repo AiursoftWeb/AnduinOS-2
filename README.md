@@ -38,6 +38,12 @@ That's it. The built file will be an ISO file in the `./dist` directory.
 
 Simply mount the built ISO file to an virtual machine, and you can start testing it.
 
+The ISO uses `anduinos-installer-beta`, AnduinOS's native declarative
+installer. Casper remains responsible for the live environment. The legacy
+Ubiquity stack is not included in the ISO; it remains available from the
+AnduinOS package repository as the manually installed
+`anduinos-installer-config` fallback.
+
 ## Document
 
 [Read the document](https://docs.anduinos.com/)
@@ -63,6 +69,5 @@ For bug reports and feature requests, please use the [Issues](https://github.com
 * Docker container support.
 * Layer based OS. Including: WSL\Server\Pro\Lite\Home\Workstation
 * LiberOS.
-* Customized installer instead of ubiquity.
 * Customized apt source with our own override.
 * Customized kernel with our own override. -->

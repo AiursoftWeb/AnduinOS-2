@@ -46,6 +46,6 @@ apt install $INTERACTIVE \
     --install-recommends
 judge "Install anduinos-desktop"
 
-print_ok "Installing AnduinOS installer (Ubiquity + wrapper + slides + bwrap compat)..."
-apt install $INTERACTIVE anduinos-installer-config --no-install-recommends
-judge "Install anduinos-installer-config"
+print_ok "Installing AnduinOS native installer..."
+apt install $INTERACTIVE anduinos-installer-beta --no-install-recommends
+judge "Install anduinos-installer-beta"

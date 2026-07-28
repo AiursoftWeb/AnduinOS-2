@@ -135,16 +135,15 @@ export TARGET_ARCH="$(dpkg --print-architecture)"
 # Installer customization
 #===========================
 
-# Packages will be uninstalled during the installation process
+# Live-only packages removed from filesystem.manifest-desktop and purged by
+# the native installer after copying the Casper filesystem.
 export TARGET_PACKAGE_REMOVE="
-    ubiquity \
     casper \
     discover \
     laptop-detect \
     os-prober \
     gparted \
-    anduinos-installer-config \
-    anduinos-bwrap-hack \
+    anduinos-installer-beta \
 "
 
 #============================
@@ -160,4 +159,3 @@ export APKG_SERVER="https://packages.anduinos.com"
 # GPG certificate name on the APKG server (used to download and verify the repo).
 # The cert is fetched from: $APKG_SERVER/artifacts/certs/$APKG_CERT_NAME
 export APKG_CERT_NAME="anduinos"
-

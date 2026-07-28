@@ -53,6 +53,15 @@ packages=(
     gnome-shell-extension-desktop-icons-ng
     gnome-shell-extension-gtk4-desktop-icons-ng
 
+    # ── Retired default installer stack (manual fallback only) ─
+    ubiquity
+    ubiquity-casper
+    ubiquity-frontend-gtk
+    ubiquity-ubuntu-artwork
+    ubiquity-slideshow-ubuntu
+    anduinos-installer-config
+    anduinos-bwrap-hack
+
     # ── Packages replaced by AnduinOS forks ───────────────────
     firefox
     software-properties-common
@@ -60,7 +69,6 @@ packages=(
     firmware-sof-signed
     alsa-ucm-conf
     plymouth-theme-spinner
-    ubiquity-slideshow-ubuntu
 
     # ── LibreOffice (monster package) ──────────────────────────
     libreoffice-*
