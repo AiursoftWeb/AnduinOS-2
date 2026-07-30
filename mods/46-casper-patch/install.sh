@@ -20,3 +20,9 @@ export BUILD_SYSTEM="Ubuntu"
 export FLAVOUR="$TARGET_BUSINESS_NAME"
 EOF
 judge "Update /etc/casper.conf"
+
+print_ok "Installing Casper timezone bridge..."
+sh -n 14timezone
+install -Dm0755 14timezone \
+    /usr/share/initramfs-tools/scripts/casper-bottom/14timezone
+judge "Install Casper timezone bridge"
