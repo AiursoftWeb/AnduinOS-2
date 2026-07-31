@@ -22,10 +22,10 @@ DEPS_amd64 := \
 DEPS_arm64 := \
   grub-efi-arm64
 
-TARGET_ARCH ?= $(shell grep -oP 'export TARGET_ARCH="\K[^"]+' args.sh 2>/dev/null || echo amd64)
+TARGET_ARCH ?= $(shell env -u TARGET_ARCH bash -c 'source ./args.sh; printf "%s\n" "$$TARGET_ARCH"')
 DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH))
 
-.PHONY: current clean bootstrap menuconfig buildtorrent help
+.PHONY: current clean bootstrap menuconfig buildtorrent test help
 
 help:
 	@echo "Usage:"
@@ -34,6 +34,7 @@ help:
 	@echo "  make clean                        Remove build artifacts"
 	@echo "  make bootstrap                    Validate environment and deps"
 	@echo "  make buildtorrent                 Generate torrents for dist/*.iso"
+	@echo "  make test                         Run repository regression tests"
 
 bootstrap:
 	@if [ "$$(id -u)" -eq 0 ]; then \
@@ -103,6 +104,11 @@ buildtorrent:
 	  mktorrent "$${announce_args[@]}" -o "$${base}.torrent" "$$iso"; \
 	done; \
 	echo "[MAKE] Torrent generation complete."
+
+test:
+	@bash tests/test-build-config.sh
+	@bash tests/test-menuconfig.sh
+	@sh tests/test-casper-timezone.sh
 
 clean:
 	@echo "[MAKE] Cleaning build artifacts..."

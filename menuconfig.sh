@@ -4,20 +4,40 @@ set -euo pipefail
 
 DIALOG=${DIALOG:-whiptail}
 ARGS_FILE="$(dirname "$(readlink -f "$0")")/args.sh"
+BACKUP_FILE=$(mktemp)
+SAVE_CHANGES=false
 
-# Back up current values
-source "$ARGS_FILE"
+cp -- "$ARGS_FILE" "$BACKUP_FILE"
+
+cleanup() {
+    if [ "$SAVE_CHANGES" != true ]; then
+        cp -- "$BACKUP_FILE" "$ARGS_FILE"
+    fi
+    rm -f -- "$BACKUP_FILE"
+}
+trap cleanup EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # ---------------------------------------------------------------------------
 # Helpers: get current value, set new value
 # ---------------------------------------------------------------------------
 get() {
-    echo "${!1}"
+    local key="$1"
+    (
+        # Evaluate computed defaults without leaking args.sh environment
+        # changes (HOME, locale, etc.) into the menuconfig process.
+        # shellcheck disable=SC1090
+        source "$ARGS_FILE"
+        printf '%s\n' "${!key}"
+    )
 }
 set_val() {
     local key="$1" val="$2"
     # Escape forward slashes for sed
-    local escaped=$(printf '%s\n' "$val" | sed 's/[\/&]/\\&/g')
+    local escaped
+    escaped=$(printf '%s\n' "$val" | sed 's/[\/&]/\\&/g')
     sed -i "s|^export ${key}=.*|export ${key}=\"${escaped}\"|" "$ARGS_FILE"
 }
 
@@ -94,7 +114,6 @@ edit_repos() {
                 inputbox "APKG Cert" "GPG certificate name:" "$(get APKG_CERT_NAME)" || continue
                 set_val APKG_CERT_NAME "$result" ;;
             aptcfg)
-                local cur="$(get APT_CONFIG_PACKAGE)"
                 local choice
                 choice=$($DIALOG --title "APT Config Package" --menu "Choose:" 0 0 2 \
                     "anduinos-apt-config"     "Production" \
@@ -114,16 +133,14 @@ edit_build() {
             "back"      "< Back"
         case "$result" in
             arch)
-                local cur="$(get TARGET_ARCH)"
                 local choice
                 choice=$($DIALOG --title "Target Architecture" --menu "Choose CPU architecture:" 0 0 2 \
                     "amd64" "Intel / AMD 64-bit (x86_64)" \
                     "arm64" "ARM 64-bit (Snapdragon, Apple Silicon, Raspberry Pi)" 3>&1 1>&2 2>&3) && set_val TARGET_ARCH "$choice"
                 ;;
             interactive)
-                local cur="$(get INTERACTIVE)"
-                local next="-y"
-                if [ "$cur" = "-y" ]; then next=""; fi
+                local cur
+                cur=$(get INTERACTIVE)
                 if $DIALOG --title "Apt Interactive" --yesno "Current: ${cur:-(none)}\n\nUse -y (non-interactive) for apt?" 0 0; then
                     set_val INTERACTIVE "-y"
                 else
@@ -151,6 +168,7 @@ while true; do
         repos)  edit_repos ;;
         build)  edit_build ;;
         save)
+            SAVE_CHANGES=true
             msg "Saved" "Configuration saved to args.sh.\nRun 'make' to build."
             exit 0 ;;
         exit|"")

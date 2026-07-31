@@ -19,11 +19,15 @@ casper_functions=${CASPER_FUNCTIONS:-/scripts/casper-functions}
 cmdline_file=${CASPER_CMDLINE_FILE:-/proc/cmdline}
 target_root=${CASPER_TARGET_ROOT:-/root}
 
+# shellcheck disable=SC1090
 . "$casper_functions"
 
 log_begin_msg "$DESCRIPTION"
 
 live_timezone=
+# Kernel command lines are deliberately split into whitespace-delimited
+# arguments; they are not a line-oriented file format.
+# shellcheck disable=SC2013
 for argument in $(cat "$cmdline_file"); do
     case "$argument" in
     timezone=*)

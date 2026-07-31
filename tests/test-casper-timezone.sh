@@ -2,7 +2,7 @@
 
 set -eu
 
-project_root=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+project_root=$(cd -- "$(dirname "$0")/.." && pwd)
 timezone_script="$project_root/mods/46-casper-patch/14timezone"
 test_root=$(mktemp -d)
 trap 'rm -rf "$test_root"' EXIT HUP INT TERM

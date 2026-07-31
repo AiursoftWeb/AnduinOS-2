@@ -36,7 +36,7 @@ To edit the build parameters, modify the `./args.sh` file.
 
 That's it. The built file will be an ISO file in the `./dist` directory.
 
-Simply mount the built ISO file to an virtual machine, and you can start testing it.
+Simply mount the built ISO file in a virtual machine, and you can start testing it.
 
 The ISO uses `anduinos-installer-beta`, AnduinOS's native declarative
 installer. Casper remains responsible for the live environment. The legacy
@@ -64,7 +64,6 @@ For bug reports and feature requests, please use the [Issues](https://github.com
 
 <!-- Planned future work:
 
-* ARM support.
 * WSL support.
 * Docker container support.
 * Layer based OS. Including: WSL\Server\Pro\Lite\Home\Workstation

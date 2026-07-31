@@ -45,9 +45,9 @@ function judge() {
 }
 
 function wait_network() {
-    local WGET_OPTS="--spider -q --timeout=5 --tries=1"
+    local wget_opts=(--spider -q --timeout=5 --tries=1)
 
-    until wget $WGET_OPTS https://github.com; do
+    until wget "${wget_opts[@]}" https://github.com; do
         echo "Waiting for network (https://github.com) ... ETA: 25s"
         sleep 1
     done

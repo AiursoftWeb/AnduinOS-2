@@ -1,11 +1,18 @@
+#!/bin/bash
+
 set -e                  # exit on error
 set -o pipefail         # exit on pipeline error
 set -u                  # treat unset variable as error
 
+apt_options=()
+if [ -n "${INTERACTIVE:-}" ]; then
+    apt_options+=("$INTERACTIVE")
+fi
+
 wait_network
 
-print_ok "Installing capser (live-boot)..."
-apt install $INTERACTIVE \
+print_ok "Installing Casper (live boot)..."
+apt install "${apt_options[@]}" \
     casper \
     discover \
     laptop-detect \
@@ -15,14 +22,14 @@ apt install $INTERACTIVE \
 judge "Install live-boot"
 
 print_ok "Installing kernel..."
-apt install $INTERACTIVE \
+apt install "${apt_options[@]}" \
     linux-image-generic-hwe-26.04 \
     linux-headers-generic-hwe-26.04 \
     --no-install-recommends
 judge "Install kernel"
 
 print_ok "Installing anduinos-desktop (full AnduinOS desktop metapackage)..."
-apt install $INTERACTIVE \
+apt install "${apt_options[@]}" \
     anduinos-desktop \
     anduinos-desktop-apps \
     anduinos-gnome-extensions \
@@ -47,12 +54,14 @@ apt install $INTERACTIVE \
 judge "Install anduinos-desktop"
 
 print_ok "Installing AnduinOS native installer..."
-apt install $INTERACTIVE anduinos-installer-beta --no-install-recommends
+apt install "${apt_options[@]}" anduinos-installer-beta \
+    --no-install-recommends
 judge "Install anduinos-installer-beta"
 
 # Carry the Btrfs recovery UI inside the ISO without making it a desktop
 # metapackage dependency. The native installer retains this package for Btrfs
 # targets and purges it from ext4 targets using the Casper manifests.
 print_ok "Installing conditional Timeback Machine payload..."
-apt install $INTERACTIVE anduinos-timeback-machine --no-install-recommends
+apt install "${apt_options[@]}" anduinos-timeback-machine \
+    --no-install-recommends
 judge "Install anduinos-timeback-machine payload"

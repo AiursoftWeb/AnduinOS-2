@@ -6,7 +6,11 @@
 set -e                  # exit on error
 set -o pipefail         # exit on pipeline error
 set -u                  # treat unset variable as error
+export HOME=/root
+# These files are copied into the chroot immediately before this script runs.
+# shellcheck disable=SC1091
 source /root/mods/shared.sh
+# shellcheck disable=SC1091
 source /root/mods/args.sh
 
 #==========================

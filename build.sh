@@ -6,16 +6,20 @@
 set -e                  # exit on error
 set -o pipefail         # exit on pipeline error
 set -u                  # treat unset variable as error
-export SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+export SCRIPT_DIR
 
-source $SCRIPT_DIR/shared.sh
-source $SCRIPT_DIR/args.sh
+source "$SCRIPT_DIR/shared.sh"
+source "$SCRIPT_DIR/args.sh"
 
 # Map Debian arch name to GRUB target name (amd64 -> x86_64, arm64 -> arm64)
 case "$TARGET_ARCH" in
     amd64) GRUB_EFI_TARGET="x86_64-efi" ;;
     arm64) GRUB_EFI_TARGET="arm64-efi" ;;
-    *)     GRUB_EFI_TARGET="${TARGET_ARCH}-efi" ;;
+    *)
+        print_error "Unsupported target architecture: $TARGET_ARCH"
+        exit 1
+        ;;
 esac
 
 function bind_signal() {
@@ -40,7 +44,9 @@ function download_base_system() {
     judge "Create build directory"
 
     print_ok "Calling debootstrap to download base system (arch: $TARGET_ARCH)..."
-    sudo debootstrap  --arch=$TARGET_ARCH --variant=minbase --include=ca-certificates,wget,dbus $TARGET_UBUNTU_VERSION new_building_os $APT_SOURCE
+    sudo debootstrap --arch="$TARGET_ARCH" --variant=minbase \
+        --include=ca-certificates,wget,dbus \
+        "$TARGET_UBUNTU_VERSION" new_building_os "$APT_SOURCE"
     judge "Download base system"
 }
 
@@ -61,9 +67,9 @@ function mount_folders() {
     judge "Mount /proc /sys /dev/pts"
 
     print_ok "Copying mods to chroot /root/mods..."
-    sudo cp -r $SCRIPT_DIR/mods new_building_os/root/mods
-    sudo cp $SCRIPT_DIR/args.sh   new_building_os/root/mods/args.sh
-    sudo cp $SCRIPT_DIR/shared.sh new_building_os/root/mods/shared.sh
+    sudo cp -r "$SCRIPT_DIR/mods" new_building_os/root/mods
+    sudo cp "$SCRIPT_DIR/args.sh" new_building_os/root/mods/args.sh
+    sudo cp "$SCRIPT_DIR/shared.sh" new_building_os/root/mods/shared.sh
 }
 
 function setup_apt() {
@@ -107,7 +113,10 @@ EOF
 
     print_ok "Downloading GPG keyring from $cert_url ..."
     sudo mkdir -p new_building_os/usr/share/keyrings
-    curl -sL "$cert_url" | sed '1s/^\xEF\xBB\xBF//' | gpg --dearmor | sudo tee "$keyring_path" > /dev/null
+    curl --fail --show-error --location "$cert_url" | \
+        sed '1s/^\xEF\xBB\xBF//' | \
+        gpg --dearmor | \
+        sudo tee "$keyring_path" > /dev/null
     judge "Download and dearmor keyring"
 
     print_ok "Generating anduinos.sources for $APKG_SERVER (suite: $TARGET_UBUNTU_VERSION-addon)..."
@@ -190,6 +199,10 @@ function build_iso() {
         print_error "No kernel found via vmlinuz symlink in new_building_os/"
         exit 1
     fi
+    if [ -z "$REAL_INITRD" ] || [ ! -f "$REAL_INITRD" ]; then
+        print_error "No initramfs found via initrd.img symlink in new_building_os/"
+        exit 1
+    fi
     sudo cp "$REAL_VMLINUZ" image/casper/vmlinuz
     # Keep both names for remix compatibility:
     # - Legacy BIOS core.img may embed "/casper/initrd"
@@ -200,11 +213,11 @@ function build_iso() {
     judge "Copy kernel files"
 
     print_ok "Generating grub.cfg..."
-    touch image/$TARGET_NAME
-    cp $SCRIPT_DIR/args.sh image/$TARGET_NAME
+    touch "image/$TARGET_NAME"
+    cp "$SCRIPT_DIR/args.sh" "image/$TARGET_NAME"
     judge "Copy build args to disk"
 
-    # Configurations are setup in new_building_os/usr/share/initramfs-tools/scripts/casper-bottom/25configure_init
+    # Configurations are set up in new_building_os/usr/share/initramfs-tools/scripts/casper-bottom/25configure_init
     TRY_TEXT="Try or Install $TARGET_BUSINESS_NAME"
     TOGO_TEXT="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
 
@@ -317,14 +330,18 @@ EOF
 
 
     # generate manifest
-    print_ok "Generating manifes for filesystem..."
+    print_ok "Generating manifest for filesystem..."
     sudo chroot new_building_os dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee image/casper/filesystem.manifest >/dev/null 2>&1
     judge "Generate manifest for filesystem"
 
     print_ok "Generating manifest for filesystem-desktop..."
     sudo cp -v image/casper/filesystem.manifest image/casper/filesystem.manifest-desktop
     for pkg in $TARGET_PACKAGE_REMOVE; do
-        sudo sed -i "/^$pkg /d" image/casper/filesystem.manifest-desktop
+        sudo awk -v package="$pkg" '$1 != package' \
+            image/casper/filesystem.manifest-desktop |
+            sudo tee image/casper/filesystem.manifest-desktop.tmp >/dev/null
+        sudo mv image/casper/filesystem.manifest-desktop.tmp \
+            image/casper/filesystem.manifest-desktop
     done
     judge "Generate manifest for filesystem-desktop"
 
@@ -348,7 +365,8 @@ EOF
     fi
     
     print_ok "Generating filesystem.size on /casper/filesystem.size..."
-    printf $(sudo du -sx --block-size=1 new_building_os | cut -f1) > image/casper/filesystem.size
+    filesystem_size=$(sudo du -sx --block-size=1 new_building_os | cut -f1)
+    printf '%s\n' "$filesystem_size" > image/casper/filesystem.size
     judge "Generate filesystem.size"
 
     print_ok "Generating README.diskdefines..."
@@ -365,7 +383,7 @@ EOF
 EOF
     judge "Generate README.diskdefines"
 
-    DATE=`TZ="UTC" date +"%y%m%d%H%M"`
+    DATE=$(TZ="UTC" date +"%y%m%d%H%M")
     cat << EOF > image/README.md
 # $TARGET_BUSINESS_NAME $TARGET_BUILD_VERSION
 
@@ -376,7 +394,7 @@ This image is built with the following configurations:
 - **Version**: $TARGET_BUILD_VERSION
 - **Date**: $DATE
 
-$TARGET_BUSINESS_NAME is distributed with GPLv3 license. You can find the license on [GPL-v3](https://github.com/aiursoftweb/anduinos-2/blob/master/LICENSE).
+$TARGET_BUSINESS_NAME is distributed under the GPLv3 license. You can find the license at [GPL-v3](https://github.com/aiursoftweb/anduinos-2/blob/master/LICENSE).
 
 ## Please verify the checksum!!!
 
@@ -396,7 +414,7 @@ Press F12 to enter the boot menu when you start your computer. Select the USB dr
 
 ## More information
 
-For detailed instructions, please visit [$TARGET_BUSINESS_NAME Document](https://docs.anduinos.com/Install/System-Requirements.html).
+For detailed instructions, please visit the [$TARGET_BUSINESS_NAME documentation](https://docs.anduinos.com/Install/System-Requirements.html).
 EOF
 
     pushd image
@@ -408,7 +426,7 @@ EOF
         mkdir efi && \
         sudo mount efiboot.img efi
 
-        if ! sudo grub-install --target=$GRUB_EFI_TARGET --efi-directory=efi --boot-directory=boot --uefi-secure-boot --removable --no-nvram; then
+        if ! sudo grub-install --target="$GRUB_EFI_TARGET" --efi-directory=efi --boot-directory=boot --uefi-secure-boot --removable --no-nvram; then
             sudo umount efi
             print_error "grub-install failed!"
             exit 1
@@ -514,16 +532,16 @@ EOF
 
 function umount_on_exit() {
     sleep 2
-    print_ok "Umount before exit..."
-    sudo umount $SCRIPT_DIR/new_building_os/sys || sudo umount -lf $SCRIPT_DIR/new_building_os/sys || true
-    sudo umount $SCRIPT_DIR/new_building_os/proc || sudo umount -lf $SCRIPT_DIR/new_building_os/proc || true
-    sudo umount $SCRIPT_DIR/new_building_os/dev || sudo umount -lf $SCRIPT_DIR/new_building_os/dev || true
-    sudo umount $SCRIPT_DIR/new_building_os/run || sudo umount -lf $SCRIPT_DIR/new_building_os/run || true
-    judge "Umount before exit"
+    print_ok "Unmounting filesystems before exit..."
+    sudo umount "$SCRIPT_DIR/new_building_os/sys" || sudo umount -lf "$SCRIPT_DIR/new_building_os/sys" || true
+    sudo umount "$SCRIPT_DIR/new_building_os/proc" || sudo umount -lf "$SCRIPT_DIR/new_building_os/proc" || true
+    sudo umount "$SCRIPT_DIR/new_building_os/dev" || sudo umount -lf "$SCRIPT_DIR/new_building_os/dev" || true
+    sudo umount "$SCRIPT_DIR/new_building_os/run" || sudo umount -lf "$SCRIPT_DIR/new_building_os/run" || true
+    judge "Unmount filesystems before exit"
 }
 
 # =============   main  ================
-cd $SCRIPT_DIR
+cd "$SCRIPT_DIR"
 bind_signal
 clean
 download_base_system
@@ -532,4 +550,4 @@ setup_apt
 run_chroot
 umount_folders
 build_iso
-echo "$0 - Initial build is done!"
+echo "$0 - Build completed."
