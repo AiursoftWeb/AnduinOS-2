@@ -1,0 +1,10 @@
+stages:
+  - test
+
+regression-tests:
+  stage: test
+  interruptible: true
+  script:
+    - make test
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push"'
