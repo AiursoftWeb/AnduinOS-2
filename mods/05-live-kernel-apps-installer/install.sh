@@ -49,3 +49,10 @@ judge "Install anduinos-desktop"
 print_ok "Installing AnduinOS native installer..."
 apt install $INTERACTIVE anduinos-installer-beta --no-install-recommends
 judge "Install anduinos-installer-beta"
+
+# Carry the Btrfs recovery UI inside the ISO without making it a desktop
+# metapackage dependency. The native installer retains this package for Btrfs
+# targets and purges it from ext4 targets using the Casper manifests.
+print_ok "Installing conditional Timeback Machine payload..."
+apt install $INTERACTIVE anduinos-timeback-machine --no-install-recommends
+judge "Install anduinos-timeback-machine payload"
