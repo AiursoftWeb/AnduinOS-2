@@ -128,24 +128,14 @@ edit_build() {
     while true; do
         result=""
         menubox "Build Options" "Select to edit:" \
-            "arch"       "Target architecture   [$(get TARGET_ARCH)]" \
-            "interactive" "Apt interactive       [$(get INTERACTIVE)]" \
-            "back"      "< Back"
+            "arch" "Target architecture   [$(get TARGET_ARCH)]" \
+            "back" "< Back"
         case "$result" in
             arch)
                 local choice
                 choice=$($DIALOG --title "Target Architecture" --menu "Choose CPU architecture:" 0 0 2 \
                     "amd64" "Intel / AMD 64-bit (x86_64)" \
                     "arm64" "ARM 64-bit (Snapdragon, Apple Silicon, Raspberry Pi)" 3>&1 1>&2 2>&3) && set_val TARGET_ARCH "$choice"
-                ;;
-            interactive)
-                local cur
-                cur=$(get INTERACTIVE)
-                if $DIALOG --title "Apt Interactive" --yesno "Current: ${cur:-(none)}\n\nUse -y (non-interactive) for apt?" 0 0; then
-                    set_val INTERACTIVE "-y"
-                else
-                    set_val INTERACTIVE ""
-                fi
                 ;;
             back|"") return ;;
         esac

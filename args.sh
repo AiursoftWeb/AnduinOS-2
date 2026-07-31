@@ -17,10 +17,6 @@ export DEBIAN_FRONTEND=noninteractive
 SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
 export SCRIPT_DIR
 
-# Set if build in an interactive way.
-# Can be: "-y" or ""
-export INTERACTIVE="-y"
-
 #==========================
 # Language Information
 #==========================

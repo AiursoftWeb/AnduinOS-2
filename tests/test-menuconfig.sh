@@ -25,11 +25,10 @@ case "$count" in
     printf '%s\n' build >&2
     ;;
 2)
-    printf '%s\n' interactive >&2
+    printf '%s\n' arch >&2
     ;;
 3)
-    # Answer "No" so INTERACTIVE becomes empty.
-    exit 1
+    printf '%s\n' arm64 >&2
     ;;
 4)
     printf '%s\n' back >&2
@@ -57,6 +56,6 @@ FAKE_DIALOG_STATE="$test_root/dialog-state" \
 FAKE_FINAL_ACTION=save \
 DIALOG="$test_root/fake-dialog" \
     "$test_root/menuconfig.sh"
-grep -Fxq 'export INTERACTIVE=""' "$test_root/args.sh"
+grep -Fxq 'export TARGET_ARCH="arm64"' "$test_root/args.sh"
 
 echo "Menuconfig transaction tests passed."

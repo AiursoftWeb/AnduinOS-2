@@ -20,11 +20,7 @@ done
 
 print_ok "Installing available language packs..."
 if [ "${#VALID_PACKAGES[@]}" -gt 0 ]; then
-    apt_options=()
-    if [ -n "${INTERACTIVE:-}" ]; then
-        apt_options+=("$INTERACTIVE")
-    fi
-    apt install "${apt_options[@]}" "${VALID_PACKAGES[@]}" \
+    apt install -y "${VALID_PACKAGES[@]}" \
         --no-install-recommends
     judge "Install language packs"
 else
