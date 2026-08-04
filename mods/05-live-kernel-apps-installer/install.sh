@@ -24,6 +24,8 @@ apt install -y \
 judge "Install kernel"
 
 print_ok "Installing anduinos-desktop (full AnduinOS desktop metapackage)..."
+# DKMS legitimately needs gcc/make/dpkg-dev, but dpkg-dev only recommends the
+# unrelated build-essential C++ stack. Keep that soft dependency out of the ISO.
 apt install -y \
     anduinos-desktop \
     anduinos-desktop-apps \
@@ -45,6 +47,7 @@ apt install -y \
     alsa-ucm-conf-anduinos \
     firmware-sof-anduinos \
     initramfs-tools \
+    build-essential- \
     --install-recommends
 judge "Install anduinos-desktop"
 
