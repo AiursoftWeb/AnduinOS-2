@@ -37,7 +37,6 @@ apt install -y \
     anduinos-no-snapd \
     anduinos-session \
     anduinos-software-properties-common \
-    anduinos-software-properties-gtk \
     anduinos-system-tweaks \
     firefox-anduinos \
     gnome-shell-extension-appindicator-anduinos \
