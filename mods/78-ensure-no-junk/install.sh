@@ -55,7 +55,7 @@ packages=(
     gnome-shell-extension-desktop-icons-ng
     gnome-shell-extension-gtk4-desktop-icons-ng
 
-    # ── Retired default installer stack (manual fallback only) ─
+    # ── Retired installer stack ───────────────────────
     ubiquity
     ubiquity-casper
     ubiquity-frontend-gtk

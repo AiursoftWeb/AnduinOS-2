@@ -40,9 +40,8 @@ Simply mount the built ISO file in a virtual machine, and you can start testing 
 
 The ISO uses `anduinos-installer-beta`, AnduinOS's native declarative
 installer. Casper remains responsible for the live environment. The legacy
-Ubiquity stack is not included in the ISO; it remains available from the
-AnduinOS package repository as the manually installed
-`anduinos-installer-config` fallback.
+Ubiquity integration stack is retired and is not included, built, or
+maintained by AnduinOS.
 
 ## Document
 
