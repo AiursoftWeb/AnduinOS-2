@@ -140,7 +140,7 @@ export TARGET_PACKAGE_REMOVE="
     os-prober \
     gparted \
     anduinos-installer-beta \
-    anduinos-timeback-machine \
+    anduinos-waypoint-gtk \
 "
 
 #============================

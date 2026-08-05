@@ -58,7 +58,7 @@ judge "Install anduinos-installer-beta"
 # Carry the Btrfs recovery UI inside the ISO without making it a desktop
 # metapackage dependency. The native installer retains this package for Btrfs
 # targets and purges it from ext4 targets using the Casper manifests.
-print_ok "Installing conditional Timeback Machine payload..."
-apt install -y anduinos-timeback-machine \
+print_ok "Installing conditional AnduinOS Waypoint payload..."
+apt install -y anduinos-waypoint-gtk \
     --no-install-recommends
-judge "Install anduinos-timeback-machine payload"
+judge "Install anduinos-waypoint-gtk payload"

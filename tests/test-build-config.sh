@@ -49,4 +49,21 @@ fi
 grep -Eq '^[[:space:]]*anduinos-software-properties-common([[:space:]\\]|$)' \
     "$desktop_installer"
 
+package_remove=$(
+    # shellcheck disable=SC1091
+    source "$project_root/args.sh"
+    printf '%s\n' "$TARGET_PACKAGE_REMOVE"
+)
+printf '%s\n' "$package_remove" | grep -Eq '(^|[[:space:]])anduinos-waypoint-gtk($|[[:space:]])'
+if printf '%s\n' "$package_remove" | grep -Eq 'anduinos-timeback-machine'; then
+    echo "The ext4 cleanup manifest must remove Waypoint, not obsolete Timeback." >&2
+    exit 1
+fi
+grep -Eq '^[[:space:]]*apt install -y anduinos-waypoint-gtk([[:space:]\\]|$)' \
+    "$desktop_installer"
+if grep -Eq 'anduinos-timeback-machine' "$desktop_installer"; then
+    echo "The live image must install Waypoint, not obsolete Timeback." >&2
+    exit 1
+fi
+
 echo "Build configuration tests passed."
