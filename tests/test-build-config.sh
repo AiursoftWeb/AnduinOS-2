@@ -55,6 +55,7 @@ package_remove=$(
     printf '%s\n' "$TARGET_PACKAGE_REMOVE"
 )
 printf '%s\n' "$package_remove" | grep -Eq '(^|[[:space:]])anduinos-waypoint-gtk($|[[:space:]])'
+printf '%s\n' "$package_remove" | grep -Eq '(^|[[:space:]])anduinos-live-settings($|[[:space:]])'
 if printf '%s\n' "$package_remove" | grep -Eq 'anduinos-timeback-machine'; then
     echo "The ext4 cleanup manifest must remove Waypoint, not obsolete Timeback." >&2
     exit 1

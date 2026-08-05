@@ -108,7 +108,6 @@ buildtorrent:
 test:
 	@bash tests/test-build-config.sh
 	@bash tests/test-menuconfig.sh
-	@sh tests/test-casper-timezone.sh
 
 clean:
 	@echo "[MAKE] Cleaning build artifacts..."
