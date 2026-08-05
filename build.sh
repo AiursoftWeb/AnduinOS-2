@@ -333,16 +333,6 @@ EOF
     print_ok "Generating manifest for filesystem..."
     sudo chroot new_building_os dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee image/casper/filesystem.manifest >/dev/null 2>&1
     judge "Generate manifest for filesystem"
-
-    print_ok "Generating manifest for filesystem-desktop..."
-    sudo cp -v image/casper/filesystem.manifest image/casper/filesystem.manifest-desktop
-    for pkg in $TARGET_PACKAGE_REMOVE; do
-        sudo awk -v package="$pkg" '$1 != package' \
-            image/casper/filesystem.manifest-desktop |
-            sudo tee image/casper/filesystem.manifest-desktop.tmp >/dev/null
-        sudo mv image/casper/filesystem.manifest-desktop.tmp \
-            image/casper/filesystem.manifest-desktop
-    done
     judge "Generate manifest for filesystem-desktop"
 
     print_ok "Compressing rootfs as squashfs on /casper/filesystem.squashfs..."

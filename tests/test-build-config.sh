@@ -49,17 +49,20 @@ fi
 grep -Eq '^[[:space:]]*anduinos-software-properties-common([[:space:]\\]|$)' \
     "$desktop_installer"
 
-package_remove=$(
+if (
     # shellcheck disable=SC1091
     source "$project_root/args.sh"
-    printf '%s\n' "$TARGET_PACKAGE_REMOVE"
-)
-printf '%s\n' "$package_remove" | grep -Eq '(^|[[:space:]])anduinos-waypoint-gtk($|[[:space:]])'
-printf '%s\n' "$package_remove" | grep -Eq '(^|[[:space:]])anduinos-live-settings($|[[:space:]])'
-if printf '%s\n' "$package_remove" | grep -Eq 'anduinos-timeback-machine'; then
-    echo "The ext4 cleanup manifest must remove Waypoint, not obsolete Timeback." >&2
+    declare -p TARGET_PACKAGE_REMOVE >/dev/null 2>&1
+); then
+    echo "The ISO builder must not own the native installer's cleanup policy." >&2
     exit 1
 fi
+if grep -Eq 'filesystem\.manifest-desktop|TARGET_PACKAGE_REMOVE' \
+    "$project_root/build.sh"; then
+    echo "The ISO must publish only filesystem.manifest." >&2
+    exit 1
+fi
+grep -q 'image/casper/filesystem.manifest' "$project_root/build.sh"
 grep -Eq '^[[:space:]]*apt install -y anduinos-waypoint-gtk([[:space:]\\]|$)' \
     "$desktop_installer"
 if grep -Eq 'anduinos-timeback-machine' "$desktop_installer"; then

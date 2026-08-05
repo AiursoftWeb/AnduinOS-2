@@ -127,22 +127,6 @@ export TARGET_BUILD_VERSION="2.0.1"
 # Override on the command line:  TARGET_ARCH=arm64 ./build.sh
 export TARGET_ARCH="${TARGET_ARCH:-$(dpkg --print-architecture)}"
 
-#===========================
-# Installer customization
-#===========================
-
-# Live-only packages removed from filesystem.manifest-desktop and purged by
-# the native installer after copying the Casper filesystem.
-export TARGET_PACKAGE_REMOVE="
-    casper \
-    discover \
-    laptop-detect \
-    os-prober \
-    gparted \
-    anduinos-installer-beta \
-    anduinos-waypoint-gtk \
-"
-
 #============================
 # AnduinOS APKG server configuration
 #============================
