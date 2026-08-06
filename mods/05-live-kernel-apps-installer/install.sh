@@ -58,7 +58,7 @@ judge "Install anduinos-installer-beta"
 # Carry the Btrfs recovery UI inside the ISO without making it a desktop
 # metapackage dependency. The native installer retains this package for Btrfs
 # targets and purges it from ext4 targets using the Casper manifests.
-print_ok "Installing conditional AnduinOS Waypoint payload..."
-apt install -y anduinos-waypoint-gtk \
+print_ok "Installing conditional Disk Snapshots Manager payload..."
+apt install -y anduinos-btrfs-snapshots-manager \
     --no-install-recommends
-judge "Install anduinos-waypoint-gtk payload"
+judge "Install anduinos-btrfs-snapshots-manager payload"

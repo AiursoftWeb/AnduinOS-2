@@ -63,10 +63,10 @@ if grep -Eq 'filesystem\.manifest-desktop|TARGET_PACKAGE_REMOVE' \
     exit 1
 fi
 grep -q 'image/casper/filesystem.manifest' "$project_root/build.sh"
-grep -Eq '^[[:space:]]*apt install -y anduinos-waypoint-gtk([[:space:]\\]|$)' \
+grep -Eq '^[[:space:]]*apt install -y anduinos-btrfs-snapshots-manager([[:space:]\\]|$)' \
     "$desktop_installer"
 if grep -Eq 'anduinos-timeback-machine' "$desktop_installer"; then
-    echo "The live image must install Waypoint, not obsolete Timeback." >&2
+    echo "The live image must install Disk Snapshots Manager, not obsolete Timeback." >&2
     exit 1
 fi
 
