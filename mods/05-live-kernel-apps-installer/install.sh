@@ -16,13 +16,6 @@ apt install -y \
     --no-install-recommends
 judge "Install live-boot"
 
-print_ok "Installing kernel..."
-apt install -y \
-    linux-image-generic-hwe-26.04 \
-    linux-headers-generic-hwe-26.04 \
-    --no-install-recommends
-judge "Install kernel"
-
 print_ok "Installing anduinos-desktop (full AnduinOS desktop metapackage)..."
 # DKMS legitimately needs gcc/make/dpkg-dev, but dpkg-dev only recommends the
 # unrelated build-essential C++ stack. Keep that soft dependency out of the ISO.

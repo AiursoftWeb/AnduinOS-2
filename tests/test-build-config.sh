@@ -41,6 +41,11 @@ printf '%s\n' "$make_database" |
     grep -Eq "^DEPS := .*${expected_dependency}"
 
 desktop_installer="$project_root/mods/05-live-kernel-apps-installer/install.sh"
+if grep -Eq 'linux-(generic|image-generic|headers-generic)-hwe-26\.04' \
+    "$desktop_installer"; then
+    echo "The ISO builder must obtain its HWE kernel through anduinos-core-system." >&2
+    exit 1
+fi
 if grep -Eq '^[[:space:]]*anduinos-software-properties-gtk([[:space:]\\]|$)' \
     "$desktop_installer"; then
     echo "Deprecated anduinos-software-properties-gtk must not enter the live image." >&2
