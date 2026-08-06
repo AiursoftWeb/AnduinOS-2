@@ -50,7 +50,7 @@ judge "Install anduinos-installer-beta"
 
 # Carry the Btrfs recovery UI inside the ISO without making it a desktop
 # metapackage dependency. The native installer retains this package for Btrfs
-# targets and purges it from ext4 targets using the Casper manifests.
+# targets and purges it from ext4 targets through its explicit cleanup policy.
 print_ok "Installing conditional Disk Snapshots Manager payload..."
 apt install -y anduinos-btrfs-snapshots-manager \
     --no-install-recommends
