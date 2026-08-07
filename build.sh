@@ -27,7 +27,9 @@ esac
 # for firmware that exposes them, so the boot menu remains readable on both
 # high-density laptop panels and conventional displays.
 GRUB_FONT_SOURCE="/usr/share/fonts/opentype/unifont/unifont.otf"
+GRUB_FONT_SIZE="28"
 GRUB_FONT_FILE="anduinos-unicode-28.pf2"
+GRUB_MENU_GFXMODE="1440x900,1280x800,1280x720,1024x768,auto"
 
 function bind_signal() {
     print_ok "Bind signal..."
@@ -200,12 +202,12 @@ function prepare_live_grub_font() {
         exit 1
     fi
 
-    print_ok "Generating 28px Unicode font for the Live ISO..."
+    print_ok "Generating ${GRUB_FONT_SIZE}px Unicode font for the Live ISO..."
     mkdir -p \
         image/isolinux \
         image/boot/grub/fonts
     grub-mkfont \
-        --size="28" \
+        --size="$GRUB_FONT_SIZE" \
         --output="image/isolinux/$GRUB_FONT_FILE" \
         "$GRUB_FONT_SOURCE"
     cp "image/isolinux/$GRUB_FONT_FILE" \
@@ -293,7 +295,7 @@ function build_iso() {
 
         _TRY_LOCALE_ENTRIES="$_TRY_LOCALE_ENTRIES
     menuentry \"$_label\" {
-        set gfxpayload=keep
+        set gfxpayload=auto
         linux   /casper/vmlinuz boot=casper locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} nopersistent quiet splash ---
         initrd  /casper/initrd
     }"
@@ -303,7 +305,7 @@ function build_iso() {
 
 search --set=root --file /$TARGET_NAME
 
-set gfxmode=1440x900,1280x800,1280x720,1024x768,auto
+set gfxmode=$GRUB_MENU_GFXMODE
 insmod all_video
 insmod gfxterm
 insmod font
@@ -322,17 +324,17 @@ $_TRY_LOCALE_ENTRIES
 
 submenu "Advanced Options..." {
     menuentry "$TRY_TEXT (Safe Graphics)" {
-        set gfxpayload=keep
+        set gfxpayload=auto
         linux   /casper/vmlinuz boot=casper nopersistent nomodeset ---
         initrd  /casper/initrd
     }
     menuentry "$TOGO_TEXT" {
-        set gfxpayload=keep
+        set gfxpayload=auto
         linux   /casper/vmlinuz boot=casper persistent quiet splash ---
         initrd  /casper/initrd
     }
     menuentry "Check installation media for defects (Integrity Check)" {
-        set gfxpayload=keep
+        set gfxpayload=auto
         linux   /casper/vmlinuz boot=casper integrity-check quiet splash ---
         initrd  /casper/initrd
     }

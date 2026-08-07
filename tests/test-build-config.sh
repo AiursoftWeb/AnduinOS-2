@@ -45,6 +45,11 @@ printf '%s\n' "$make_database" |
 grep -Fq 'GRUB_FONT_SIZE="28"' "$project_root/build.sh"
 grep -Fq 'GRUB_FONT_FILE="anduinos-unicode-28.pf2"' "$project_root/build.sh"
 grep -Fq 'set gfxmode=$GRUB_MENU_GFXMODE' "$project_root/build.sh"
+grep -Fq 'set gfxpayload=auto' "$project_root/build.sh"
+if grep -Fq 'set gfxpayload=keep' "$project_root/build.sh"; then
+    echo "The live kernel must not inherit the GRUB menu's lower resolution." >&2
+    exit 1
+fi
 grep -Fq -- '--output="image/isolinux/$GRUB_FONT_FILE"' \
     "$project_root/build.sh"
 if grep -Eq 'new_building_os/(boot/grub/fonts|etc/default/grub[.]d)' \
@@ -59,7 +64,7 @@ fi
 grep -Fq '| **GNU Unifont** |' "$project_root/OSS.md"
 
 if [ -e "$project_root/mods/79-grub-font-mod" ]; then
-    echo "Installed-system GRUB policy must come from anduinos-grub-fonts." >&2
+    echo "Installed-system GRUB policy must come from anduinos-grub-style." >&2
     exit 1
 fi
 
