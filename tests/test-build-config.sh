@@ -42,16 +42,16 @@ printf '%s\n' "$make_database" |
 printf '%s\n' "$make_database" |
     grep -Eq '^DEPS_COMMON := .*fonts-unifont'
 
-grep -Fq 'GRUB_FONT_SIZE="28"' "$project_root/build.sh"
-grep -Fq 'GRUB_FONT_FILE="anduinos-unicode-28.pf2"' "$project_root/build.sh"
-grep -Fq 'set gfxmode=$GRUB_MENU_GFXMODE' "$project_root/build.sh"
+grep -Fq -- '--size="28"' "$project_root/build.sh"
+grep -Fq -- '--output="image/isolinux/anduinos-unicode-28.pf2"' \
+    "$project_root/build.sh"
+grep -Fq 'set gfxmode=1440x900,1280x800,1280x720,1024x768,auto' \
+    "$project_root/build.sh"
 grep -Fq 'set gfxpayload=auto' "$project_root/build.sh"
 if grep -Fq 'set gfxpayload=keep' "$project_root/build.sh"; then
     echo "The live kernel must not inherit the GRUB menu's lower resolution." >&2
     exit 1
 fi
-grep -Fq -- '--output="image/isolinux/$GRUB_FONT_FILE"' \
-    "$project_root/build.sh"
 if grep -Eq 'new_building_os/(boot/grub/fonts|etc/default/grub[.]d)' \
     "$project_root/build.sh"; then
     echo "The outer ISO builder must not deploy files owned by the installed system." >&2

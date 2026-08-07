@@ -22,15 +22,6 @@ case "$TARGET_ARCH" in
         ;;
 esac
 
-# GRUB renders PF2 fonts at a fixed pixel size and does not apply desktop
-# HiDPI scaling.  Use a larger Unicode font, plus lower-resolution fallbacks
-# for firmware that exposes them, so the boot menu remains readable on both
-# high-density laptop panels and conventional displays.
-GRUB_FONT_SOURCE="/usr/share/fonts/opentype/unifont/unifont.otf"
-GRUB_FONT_SIZE="28"
-GRUB_FONT_FILE="anduinos-unicode-28.pf2"
-GRUB_MENU_GFXMODE="1440x900,1280x800,1280x720,1024x768,auto"
-
 function bind_signal() {
     print_ok "Bind signal..."
     trap umount_on_exit EXIT
@@ -196,22 +187,22 @@ function prepare_iso_directory() {
 }
 
 function prepare_live_grub_font() {
-    if [ ! -f "$GRUB_FONT_SOURCE" ]; then
-        print_error "GRUB font source not found: $GRUB_FONT_SOURCE"
+    if [ ! -f "/usr/share/fonts/opentype/unifont/unifont.otf" ]; then
+        print_error "GRUB font source not found: /usr/share/fonts/opentype/unifont/unifont.otf"
         print_error "Install the fonts-unifont build dependency and try again."
         exit 1
     fi
 
-    print_ok "Generating ${GRUB_FONT_SIZE}px Unicode font for the Live ISO..."
+    print_ok "Generating 28px Unicode font for the Live ISO..."
     mkdir -p \
         image/isolinux \
         image/boot/grub/fonts
     grub-mkfont \
-        --size="$GRUB_FONT_SIZE" \
-        --output="image/isolinux/$GRUB_FONT_FILE" \
-        "$GRUB_FONT_SOURCE"
-    cp "image/isolinux/$GRUB_FONT_FILE" \
-        "image/boot/grub/fonts/$GRUB_FONT_FILE"
+        --size="28" \
+        --output="image/isolinux/anduinos-unicode-28.pf2" \
+        "/usr/share/fonts/opentype/unifont/unifont.otf"
+    cp "image/isolinux/anduinos-unicode-28.pf2" \
+        "image/boot/grub/fonts/anduinos-unicode-28.pf2"
     judge "Prepare readable Live GRUB font"
 }
 
@@ -305,13 +296,13 @@ function build_iso() {
 
 search --set=root --file /$TARGET_NAME
 
-set gfxmode=$GRUB_MENU_GFXMODE
+set gfxmode=1440x900,1280x800,1280x720,1024x768,auto
 insmod all_video
 insmod gfxterm
 insmod font
-if loadfont /boot/grub/fonts/$GRUB_FONT_FILE ; then
+if loadfont /boot/grub/fonts/anduinos-unicode-28.pf2 ; then
     terminal_output gfxterm
-elif loadfont /isolinux/$GRUB_FONT_FILE ; then
+elif loadfont /isolinux/anduinos-unicode-28.pf2 ; then
     terminal_output gfxterm
 fi
 
