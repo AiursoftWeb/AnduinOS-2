@@ -39,6 +39,40 @@ esac
 make_database=$(make --directory="$project_root" -pn help)
 printf '%s\n' "$make_database" |
     grep -Eq "^DEPS := .*${expected_dependency}"
+printf '%s\n' "$make_database" |
+    grep -Eq '^DEPS_COMMON := .*fonts-unifont'
+
+grep -Fq 'GRUB_FONT_SIZE="28"' "$project_root/build.sh"
+grep -Fq 'GRUB_FONT_FILE="anduinos-unicode-28.pf2"' "$project_root/build.sh"
+grep -Fq 'set gfxmode=$GRUB_MENU_GFXMODE' "$project_root/build.sh"
+grep -Fq -- '--output="image/isolinux/$GRUB_FONT_FILE"' \
+    "$project_root/build.sh"
+if grep -Eq 'new_building_os/(boot/grub/fonts|etc/default/grub[.]d)' \
+    "$project_root/build.sh"; then
+    echo "The outer ISO builder must not deploy files owned by the installed system." >&2
+    exit 1
+fi
+if grep -Fq 'cp /usr/share/grub/unicode.pf2' "$project_root/build.sh"; then
+    echo "The ISO must use the readable AnduinOS GRUB font, not 16 px unicode.pf2." >&2
+    exit 1
+fi
+grep -Fq '| **GNU Unifont** |' "$project_root/OSS.md"
+
+if [ -e "$project_root/mods/79-grub-font-mod" ]; then
+    echo "Installed-system GRUB policy must come from anduinos-grub-fonts." >&2
+    exit 1
+fi
+
+main_flow=$(sed -n '/# =============   main  ================/,$p' \
+    "$project_root/build.sh")
+prepare_directory_line=$(printf '%s\n' "$main_flow" |
+    grep -n '^prepare_iso_directory$' | cut -d: -f1)
+prepare_font_line=$(printf '%s\n' "$main_flow" |
+    grep -n '^prepare_live_grub_font$' | cut -d: -f1)
+build_iso_line=$(printf '%s\n' "$main_flow" |
+    grep -n '^build_iso$' | cut -d: -f1)
+test "$prepare_directory_line" -lt "$prepare_font_line"
+test "$prepare_font_line" -lt "$build_iso_line"
 
 desktop_installer="$project_root/mods/05-live-kernel-apps-installer/install.sh"
 if grep -Eq 'linux-(generic|image-generic|headers-generic)-hwe-26\.04' \

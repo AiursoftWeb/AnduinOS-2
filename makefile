@@ -6,6 +6,7 @@ DEPS_COMMON := \
   binutils \
   curl \
   debootstrap \
+  fonts-unifont \
   gnupg \
   squashfs-tools \
   xorriso \

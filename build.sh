@@ -22,6 +22,13 @@ case "$TARGET_ARCH" in
         ;;
 esac
 
+# GRUB renders PF2 fonts at a fixed pixel size and does not apply desktop
+# HiDPI scaling.  Use a larger Unicode font, plus lower-resolution fallbacks
+# for firmware that exposes them, so the boot menu remains readable on both
+# high-density laptop panels and conventional displays.
+GRUB_FONT_SOURCE="/usr/share/fonts/opentype/unifont/unifont.otf"
+GRUB_FONT_FILE="anduinos-unicode-28.pf2"
+
 function bind_signal() {
     print_ok "Bind signal..."
     trap umount_on_exit EXIT
@@ -179,13 +186,35 @@ function umount_folders() {
     judge "Unmount /dev /run"
 }
 
-function build_iso() {
-    print_ok "Building ISO image..."
-
+function prepare_iso_directory() {
     print_ok "Creating image directory..."
     sudo rm -rf image
     mkdir -p image/{casper,isolinux,.disk}
     judge "Create image directory"
+}
+
+function prepare_live_grub_font() {
+    if [ ! -f "$GRUB_FONT_SOURCE" ]; then
+        print_error "GRUB font source not found: $GRUB_FONT_SOURCE"
+        print_error "Install the fonts-unifont build dependency and try again."
+        exit 1
+    fi
+
+    print_ok "Generating 28px Unicode font for the Live ISO..."
+    mkdir -p \
+        image/isolinux \
+        image/boot/grub/fonts
+    grub-mkfont \
+        --size="28" \
+        --output="image/isolinux/$GRUB_FONT_FILE" \
+        "$GRUB_FONT_SOURCE"
+    cp "image/isolinux/$GRUB_FONT_FILE" \
+        "image/boot/grub/fonts/$GRUB_FONT_FILE"
+    judge "Prepare readable Live GRUB font"
+}
+
+function build_iso() {
+    print_ok "Building ISO image..."
 
     # copy kernel files
     print_ok "Copying kernel files as /casper/vmlinuz, /casper/initrd and /casper/initrd.gz..."
@@ -270,25 +299,17 @@ function build_iso() {
     }"
     done <<< "$SUPPORTED_LOCALES"
 
-    # Copy system unicode.pf2 so GRUB can render CJK/Arabic/Thai labels.
-    # Without loadfont, GRUB defaults to an ASCII-only built-in font.
-    # Placed in both paths: isolinux (BIOS) and boot/grub/fonts (UEFI standard).
-    print_ok "Preparing GRUB unicode font (for CJK)..."
-    mkdir -p image/isolinux image/boot/grub/fonts
-    cp /usr/share/grub/unicode.pf2 image/isolinux/unicode.pf2
-    cp /usr/share/grub/unicode.pf2 image/boot/grub/fonts/unicode.pf2
-    judge "Prepare GRUB unicode font"
-
     cat << EOF > image/isolinux/grub.cfg
 
 search --set=root --file /$TARGET_NAME
 
+set gfxmode=1440x900,1280x800,1280x720,1024x768,auto
 insmod all_video
 insmod gfxterm
 insmod font
-if loadfont /boot/grub/fonts/unicode.pf2 ; then
+if loadfont /boot/grub/fonts/$GRUB_FONT_FILE ; then
     terminal_output gfxterm
-elif loadfont /isolinux/unicode.pf2 ; then
+elif loadfont /isolinux/$GRUB_FONT_FILE ; then
     terminal_output gfxterm
 fi
 
@@ -539,5 +560,7 @@ mount_folders
 setup_apt
 run_chroot
 umount_folders
+prepare_iso_directory
+prepare_live_grub_font
 build_iso
 echo "$0 - Build completed."

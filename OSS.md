@@ -21,6 +21,7 @@ This document lists the open source projects that AnduinOS incorporates, derives
 | Project | Homepage / Repository | License |
 |---------|----------------------|---------|
 | **GNU GRUB** | [gnu.org/software/grub](https://www.gnu.org/software/grub/) | GPL-3.0-or-later |
+| **GNU Unifont** | [unifoundry.com/unifont](https://unifoundry.com/unifont/) | GPL-2.0-or-later |
 | **systemd** | [github.com/systemd/systemd](https://github.com/systemd/systemd) | LGPL-2.1-or-later |
 | **dracut** | [github.com/dracutdevs/dracut](https://github.com/dracutdevs/dracut) | GPL-2.0-or-later |
 | **BusyBox** | [busybox.net](https://busybox.net/) | GPL-2.0-only |
