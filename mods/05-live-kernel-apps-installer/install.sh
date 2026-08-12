@@ -55,3 +55,13 @@ print_ok "Installing conditional Disk Snapshots Manager payload..."
 apt install -y anduinos-btrfs-snapshots-manager \
     --no-install-recommends
 judge "Install anduinos-btrfs-snapshots-manager payload"
+
+# Carry VMware desktop integration in the amd64 Live image so VMware guests
+# can resize dynamically before and after installation. The native installer
+# retains it for VMware targets and purges it everywhere else.
+if [ "$TARGET_ARCH" = "amd64" ]; then
+    print_ok "Installing conditional VMware guest integration payload..."
+    apt install -y open-vm-tools-desktop \
+        --install-recommends
+    judge "Install VMware guest integration payload"
+fi

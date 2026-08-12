@@ -113,5 +113,10 @@ if grep -Eq 'anduinos-timeback-machine' "$desktop_installer"; then
     echo "The live image must install Disk Snapshots Manager, not obsolete Timeback." >&2
     exit 1
 fi
+grep -Fq 'if [ "$TARGET_ARCH" = "amd64" ]; then' "$desktop_installer"
+grep -Eq '^[[:space:]]*apt install -y open-vm-tools-desktop([[:space:]\\]|$)' \
+    "$desktop_installer"
+grep -A1 -E '^[[:space:]]*apt install -y open-vm-tools-desktop([[:space:]\\]|$)' \
+    "$desktop_installer" | grep -Fq -- '--install-recommends'
 
 echo "Build configuration tests passed."
