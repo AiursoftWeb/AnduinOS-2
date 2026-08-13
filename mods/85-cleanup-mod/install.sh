@@ -34,15 +34,42 @@ truncate -s 0 /etc/machine-id || true
 truncate -s 0 /var/lib/dbus/machine-id || true
 judge "Truncate machine id"
 
-# The desktop metapackage owns this capability declaratively. Verify the final
-# package composition without installing it a second time in the ISO builder.
+# The Live-settings package owns this capability declaratively. Verify the
+# final composition without installing it a second time in the ISO builder.
 print_ok "Verifying declarative Secure Shell package composition..."
 if ! dpkg-query -W -f='${Status}\n' openssh-server 2>/dev/null |
     grep -Fxq 'install ok installed'; then
-    print_error "Desktop package composition did not include openssh-server"
+    print_error "Live package composition did not include openssh-server"
     exit 1
 fi
 judge "Verify declarative Secure Shell package composition"
+
+# Removing template host keys is safe only when the installed native installer
+# owns the matching target-provisioning step that regenerates them. Fail closed
+# while package publication is temporarily split across CI jobs.
+installer_version=$(dpkg-query -W -f='${Version}' anduinos-installer-beta 2>/dev/null || true)
+if [[ -z "$installer_version" ]] ||
+    ! dpkg --compare-versions "$installer_version" ge '2.0.1-66'; then
+    print_error "Native installer cannot provision target-owned SSH host keys: ${installer_version:-missing}"
+    exit 1
+fi
+judge "Verify Secure Shell installer capability"
+
+# Ubuntu enables ssh.socket when openssh-server is first installed. The Live
+# image must not expose a listener merely because it carries the payload. This
+# is deliberately an image-finalization action, not a global systemd preset:
+# installed machines retain administrator-selected SSH state across upgrades
+# and preset-all operations.
+print_ok "Disabling Secure Shell listeners in the Live image..."
+systemctl disable ssh.service ssh.socket
+for unit in ssh.service ssh.socket; do
+    state=$(systemctl is-enabled "$unit" 2>/dev/null || true)
+    if [[ "$state" != "disabled" ]]; then
+        print_error "Live image Secure Shell state is unsafe: $unit=${state:-unknown}"
+        exit 1
+    fi
+done
+judge "Disable Live Secure Shell listeners"
 
 # SSH host keys identify one machine and must never be cloned through the
 # SquashFS template. The native installer creates target-owned keys after the

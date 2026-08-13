@@ -82,7 +82,7 @@ test "$prepare_font_line" -lt "$build_iso_line"
 desktop_installer="$project_root/mods/05-live-kernel-apps-installer/install.sh"
 if grep -R -Eq '^[[:space:]]*(apt[^#]*install[^#]*openssh-server|openssh-server([[:space:]\\]|$))' \
     "$project_root/mods"; then
-    echo "OpenSSH Server must enter the ISO through desktop metapackage recommendations." >&2
+    echo "OpenSSH Server must enter the ISO through the Live-settings dependency." >&2
     exit 1
 fi
 grep -A25 -F 'Installing anduinos-desktop (full AnduinOS desktop metapackage)' \
@@ -115,13 +115,20 @@ if grep -Eq 'filesystem\.manifest-desktop|TARGET_PACKAGE_REMOVE' \
 fi
 grep -q 'image/casper/filesystem.manifest' "$project_root/build.sh"
 cleanup_mod="$project_root/mods/85-cleanup-mod/install.sh"
-if grep -Fq 'Desktop package composition did not include openssh-server' \
+if grep -Fq 'Live package composition did not include openssh-server' \
     "$project_root/build.sh"; then
     echo "Secure Shell package validation belongs in the final chroot mod." >&2
     exit 1
 fi
 grep -Fq "dpkg-query -W -f='\${Status}\\n' openssh-server" "$cleanup_mod"
 grep -Fq 'install ok installed' "$cleanup_mod"
+grep -Fq "dpkg-query -W -f='\${Version}' anduinos-installer-beta" "$cleanup_mod"
+grep -Fq "dpkg --compare-versions \"\$installer_version\" ge '2.0.1-66'" \
+    "$cleanup_mod"
+grep -Fq 'Native installer cannot provision target-owned SSH host keys' \
+    "$cleanup_mod"
+grep -Fq 'systemctl disable ssh.service ssh.socket' "$cleanup_mod"
+grep -Fq 'Live image Secure Shell state is unsafe' "$cleanup_mod"
 grep -Fq "ssh_host_*_key" "$cleanup_mod"
 grep -Fq "SSH host identity remains after cleanup" "$cleanup_mod"
 grep -Eq '^[[:space:]]*apt install -y anduinos-btrfs-snapshots-manager([[:space:]\\]|$)' \
