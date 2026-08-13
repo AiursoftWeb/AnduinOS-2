@@ -80,6 +80,13 @@ test "$prepare_directory_line" -lt "$prepare_font_line"
 test "$prepare_font_line" -lt "$build_iso_line"
 
 desktop_installer="$project_root/mods/05-live-kernel-apps-installer/install.sh"
+if grep -R -Eq '^[[:space:]]*(apt[^#]*install[^#]*openssh-server|openssh-server([[:space:]\\]|$))' \
+    "$project_root/mods"; then
+    echo "OpenSSH Server must enter the ISO through desktop metapackage recommendations." >&2
+    exit 1
+fi
+grep -A25 -F 'Installing anduinos-desktop (full AnduinOS desktop metapackage)' \
+    "$desktop_installer" | grep -Fq -- '--install-recommends'
 if grep -Eq 'linux-(generic|image-generic|headers-generic)-hwe-26\.04' \
     "$desktop_installer"; then
     echo "The ISO builder must obtain its HWE kernel through anduinos-core-system." >&2
@@ -107,6 +114,16 @@ if grep -Eq 'filesystem\.manifest-desktop|TARGET_PACKAGE_REMOVE' \
     exit 1
 fi
 grep -q 'image/casper/filesystem.manifest' "$project_root/build.sh"
+cleanup_mod="$project_root/mods/85-cleanup-mod/install.sh"
+if grep -Fq 'Desktop package composition did not include openssh-server' \
+    "$project_root/build.sh"; then
+    echo "Secure Shell package validation belongs in the final chroot mod." >&2
+    exit 1
+fi
+grep -Fq "dpkg-query -W -f='\${Status}\\n' openssh-server" "$cleanup_mod"
+grep -Fq 'install ok installed' "$cleanup_mod"
+grep -Fq "ssh_host_*_key" "$cleanup_mod"
+grep -Fq "SSH host identity remains after cleanup" "$cleanup_mod"
 grep -Eq '^[[:space:]]*apt install -y anduinos-btrfs-snapshots-manager([[:space:]\\]|$)' \
     "$desktop_installer"
 if grep -Eq 'anduinos-timeback-machine' "$desktop_installer"; then

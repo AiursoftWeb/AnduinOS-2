@@ -34,6 +34,33 @@ truncate -s 0 /etc/machine-id || true
 truncate -s 0 /var/lib/dbus/machine-id || true
 judge "Truncate machine id"
 
+# The desktop metapackage owns this capability declaratively. Verify the final
+# package composition without installing it a second time in the ISO builder.
+print_ok "Verifying declarative Secure Shell package composition..."
+if ! dpkg-query -W -f='${Status}\n' openssh-server 2>/dev/null |
+    grep -Fxq 'install ok installed'; then
+    print_error "Desktop package composition did not include openssh-server"
+    exit 1
+fi
+judge "Verify declarative Secure Shell package composition"
+
+# SSH host keys identify one machine and must never be cloned through the
+# SquashFS template. The native installer creates target-owned keys after the
+# Live system has been copied.
+print_ok "Removing build-time SSH host identity..."
+if [[ -d /etc/ssh ]]; then
+    find /etc/ssh -maxdepth 1 \
+        \( -name 'ssh_host_*_key' -o -name 'ssh_host_*_key.pub' \) \
+        -delete
+    if find /etc/ssh -maxdepth 1 \
+        \( -name 'ssh_host_*_key' -o -name 'ssh_host_*_key.pub' \) \
+        -print -quit | grep -q .; then
+        print_error "SSH host identity remains after cleanup"
+        exit 1
+    fi
+fi
+judge "Remove build-time SSH host identity"
+
 # Remove timezone files (systemd.timezone= on kernel cmdline sets them at boot)
 print_ok "Removing timezone files..."
 rm -f /etc/localtime /etc/timezone || true
