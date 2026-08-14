@@ -14,14 +14,20 @@ DEPS_COMMON := \
   mtools \
   dosfstools
 
-# Pick arch-specific GRUB packages at run time so the same Makefile
-# works on both amd64 and arm64 build hosts.
+# Pick arch-specific GRUB packages at run time so the same Makefile works on
+# both amd64 and arm64 build hosts. amd64 uses grub-pc-bin for its El Torito
+# image; both architectures declare the signed GRUB and shim payloads directly
+# because build.sh creates a Secure Boot capable removable EFI image.
 DEPS_amd64 := \
   grub-pc-bin \
-  grub-efi-amd64
+  grub-efi-amd64 \
+  grub-efi-amd64-signed \
+  shim-signed
 
 DEPS_arm64 := \
-  grub-efi-arm64
+  grub-efi-arm64 \
+  grub-efi-arm64-signed \
+  shim-signed
 
 TARGET_ARCH ?= $(shell env -u TARGET_ARCH bash -c 'source ./args.sh; printf "%s\n" "$$TARGET_ARCH"')
 DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH))

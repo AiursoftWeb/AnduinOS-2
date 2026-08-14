@@ -25,10 +25,10 @@ test "$actual_override" = "arm64"
 host_arch=$(dpkg --print-architecture)
 case "$host_arch" in
 amd64)
-    expected_dependency=grub-efi-amd64
+    expected_dependencies="grub-pc-bin grub-efi-amd64 grub-efi-amd64-signed shim-signed"
     ;;
 arm64)
-    expected_dependency=grub-efi-arm64
+    expected_dependencies="grub-efi-arm64 grub-efi-arm64-signed shim-signed"
     ;;
 *)
     echo "Unsupported test host architecture: $host_arch" >&2
@@ -37,10 +37,12 @@ arm64)
 esac
 
 make_database=$(make --directory="$project_root" -pn help)
+for dependency in $expected_dependencies; do
+    printf '%s\n' "$make_database" |
+        grep -Eq "^DEPS := .*${dependency}"
+done
 printf '%s\n' "$make_database" |
-    grep -Eq "^DEPS := .*${expected_dependency}"
-printf '%s\n' "$make_database" |
-    grep -Eq '^DEPS_COMMON := .*fonts-unifont'
+    grep -Eq '^DEPS_COMMON := .*grub2-common'
 
 grep -Fq -- '--size="28"' "$project_root/build.sh"
 grep -Fq -- '--output="image/isolinux/anduinos-unicode-28.pf2"' \
