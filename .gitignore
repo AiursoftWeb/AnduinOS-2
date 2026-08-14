@@ -1,4 +1,7 @@
 new_building_os
 image
 dist
+test-results
+__pycache__/
+*.py[cod]
 *.iso

@@ -32,7 +32,7 @@ DEPS_arm64 := \
 TARGET_ARCH ?= $(shell env -u TARGET_ARCH bash -c 'source ./args.sh; printf "%s\n" "$$TARGET_ARCH"')
 DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH))
 
-.PHONY: current clean bootstrap menuconfig buildtorrent test help
+.PHONY: current clean bootstrap menuconfig buildtorrent test test-unit help
 
 help:
 	@echo "Usage:"
@@ -41,7 +41,9 @@ help:
 	@echo "  make clean                        Remove build artifacts"
 	@echo "  make bootstrap                    Validate environment and deps"
 	@echo "  make buildtorrent                 Generate torrents for dist/*.iso"
-	@echo "  make test                         Run repository regression tests"
+	@echo "  make test                         Test the newest ISO in dist/"
+	@echo "  make test ISO=... ARCH=...        Test an explicit ISO"
+	@echo "  make test-unit                    Test the acceptance framework itself"
 
 bootstrap:
 	@if [ "$$(id -u)" -eq 0 ]; then \
@@ -113,8 +115,27 @@ buildtorrent:
 	echo "[MAKE] Torrent generation complete."
 
 test:
-	@bash tests/test-build-config.sh
-	@bash tests/test-menuconfig.sh
+	@iso='$(ISO)'; arch='$(ARCH)'; \
+	if [ -z "$$iso" ]; then \
+		iso=$$(find dist -maxdepth 1 -type f -name '*.iso' -printf '%T@ %p\n' 2>/dev/null | sort -nr | sed -n '1s/^[^ ]* //p'); \
+		if [ -z "$$iso" ]; then \
+			echo "[ERROR] No ISO found in dist/. Build one or pass ISO=/path/to/image.iso"; \
+			exit 2; \
+		fi; \
+		echo "[TEST] Auto-selected newest ISO: $$iso"; \
+	fi; \
+	if [ -z "$$arch" ]; then \
+		case "$$(basename "$$iso")" in \
+			*amd64*.iso) arch=amd64 ;; \
+			*arm64*.iso|*aarch64*.iso) arch=arm64 ;; \
+			*) echo "[ERROR] Cannot infer architecture from $$iso; pass ARCH=amd64|arm64"; exit 2 ;; \
+		esac; \
+	fi; \
+	python3 tests/run.py --iso "$$iso" --arch "$$arch" \
+		$(foreach case,$(CASES),--case $(case)) $(TEST_ARGS)
+
+test-unit:
+	@PYTHONPATH=tests python3 -m unittest discover -s tests -p 'test_*.py' -v
 
 clean:
 	@echo "[MAKE] Cleaning build artifacts..."
