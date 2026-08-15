@@ -39,6 +39,7 @@ from iso_test.qemu import QemuConfig, QemuVm, _file_size_limiter
 from iso_test.runner import (
     _GRAPHICAL_USER_SCRIPT,
     ScenarioRunner,
+    scenario_check_ids,
     _assert_guest_ssh_stopped,
     _desktop_command,
     _parse_qmp_key_request,
@@ -123,11 +124,24 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
+                checks={"first-case": ("live-boot", "journal-health")},
                 stream=stream,
                 live=False,
             )
             dashboard.start()
             dashboard.begin("first-case")
+            dashboard.check(
+                "first-case", "live-boot", "running", "Booting original ISO"
+            )
+            dashboard.check(
+                "first-case", "live-boot", "passed", "Live GNOME is ready"
+            )
+            dashboard.check(
+                "first-case",
+                "journal-health",
+                "passed",
+                "0 blockers; 3 known diagnostics",
+            )
             dashboard.phase("first-case", "Booting original ISO")
             dashboard.complete("first-case", "passed", 65.0)
             dashboard.close()
@@ -137,6 +151,9 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("PASSED", output)
         self.assertIn("first-case", output)
         self.assertIn("second-case", output)
+        self.assertIn("first-case / live-boot", output)
+        self.assertIn("first-case / journal-health", output)
+        self.assertIn("3 known diagnostics", output)
         self.assertIn("Acceptance summary: 1/2 passed", output)
 
     def test_live_dashboard_renders_a_fixed_status_table(self):
@@ -147,12 +164,20 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
+                checks={"one": ("live-boot", "desktop-file-dispatch")},
                 stream=stream,
                 live=True,
                 refresh_seconds=60,
             )
             dashboard.start()
             dashboard.begin("one")
+            dashboard.check("one", "live-boot", "passed", "Live GNOME is ready")
+            dashboard.check(
+                "one",
+                "desktop-file-dispatch",
+                "failed",
+                "CPU-Z handler missing",
+            )
             dashboard.complete("one", "failed", 2.0, "example failure")
             dashboard.close()
         output = stream.getvalue()
@@ -161,6 +186,87 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("RUNNING", output)
         self.assertIn("FAILED", output)
         self.assertIn("example failure", output)
+        self.assertIn("Checks — one", output)
+        self.assertIn("desktop-file-dispatch", output)
+        self.assertIn("CPU-Z handler missing", output)
+
+    def test_dashboard_rejects_an_undeclared_child_event(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dashboard = AcceptanceDashboard(
+                ("one",),
+                iso=Path(directory) / "test-amd64.iso",
+                architecture="amd64",
+                artifacts=Path(directory) / "artifacts",
+                checks={"one": ("live-boot",)},
+                stream=io.StringIO(),
+                live=False,
+            )
+            with self.assertRaisesRegex(ValueError, "undeclared check"):
+                dashboard.check("one", "invented-check", "running")
+
+
+class ScenarioCheckPlanTests(unittest.TestCase):
+    def test_release_gate_declares_every_runtime_child_check(self):
+        matrix = TestMatrix.load(ROOT / "matrix.json")
+        scenario = next(item for item in matrix.scenarios if item.desktop_release_gate)
+        checks = scenario_check_ids(scenario)
+        self.assertEqual(len(checks), len(set(checks)))
+        for identifier in (
+            "live-boot",
+            "installer-ui",
+            "target-boot-files",
+            "installed-boot",
+            "installed-contracts",
+            "automatic-login-policy",
+            "cursor-theme",
+            "font-rendering",
+            "desktop-file-dispatch",
+            "gnome-extensions",
+            "spice-resolution",
+            "snapshots-manager",
+            "host-ssh",
+            "journal-health",
+            "plymouth-passive-boot",
+        ):
+            self.assertIn(identifier, checks)
+
+    def test_smoke_plan_only_declares_the_check_it_executes(self):
+        matrix = TestMatrix.load(ROOT / "matrix.json")
+        self.assertEqual(
+            ("live-boot",),
+            scenario_check_ids(matrix.scenarios[0], smoke_only=True),
+        )
+
+    def test_real_check_boundary_emits_running_and_passed(self):
+        scenario = SimpleNamespace(id="child-events")
+        events = []
+        runner = object.__new__(ScenarioRunner)
+        runner._check_details = {}
+        runner._check_states = {scenario.id: {"journal-health": "pending"}}
+        runner.check_status = lambda *event: events.append(event)
+
+        with runner._check(scenario, "journal-health"):
+            runner._check_note(
+                scenario,
+                "journal-health",
+                "0 blockers; 3 known diagnostics",
+            )
+
+        self.assertEqual("passed", runner._check_states[scenario.id]["journal-health"])
+        self.assertEqual(
+            ["running", "running", "passed"],
+            [event[2] for event in events],
+        )
+        self.assertEqual("0 blockers; 3 known diagnostics", events[-1][3])
+
+    def test_scenario_cannot_pass_with_a_phantom_pending_check(self):
+        scenario = SimpleNamespace(id="incomplete")
+        runner = object.__new__(ScenarioRunner)
+        runner._check_states = {
+            scenario.id: {"live-boot": "passed", "installer-ui": "pending"}
+        }
+        with self.assertRaisesRegex(TestFailure, "installer-ui=pending"):
+            runner._assert_check_completion(scenario)
 
 
 class BootContractTests(unittest.TestCase):
@@ -645,8 +751,15 @@ test \"$value\" = 'nested quotes'
                 raise KeyboardInterrupt
 
             runner._run_live_phase = interrupt
+            interrupted_scenario = SimpleNamespace(
+                id="interrupt",
+                mok_enrollment=False,
+                desktop_release_gate=False,
+                snapshots_manager=False,
+                ssh=SshPolicy.DISABLED,
+            )
             with self.assertRaises(KeyboardInterrupt):
-                runner.run(SimpleNamespace(id="interrupt"))
+                runner.run(interrupted_scenario)
             self.assertTrue(vm.stopped)
             self.assertFalse(disk.exists())
             self.assertIn(

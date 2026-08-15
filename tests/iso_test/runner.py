@@ -14,6 +14,7 @@ import subprocess
 import tarfile
 import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from collections.abc import Callable
@@ -29,6 +30,13 @@ from .grub import (
     boot_iso_with_debug_shell,
 )
 from .iso import IsoInspection
+from .journal import (
+    JournalPolicy,
+    parse_journal_jsonl,
+    parse_package_versions,
+    render_guest_collection_script,
+    render_verdict,
+)
 from .model import Architecture, Firmware, MatrixDefaults, Scenario, SshPolicy
 from .qemu import QemuConfig, QemuVm, allocate_tcp_port, resolve_qemu
 from .storage import DiskStorage, assert_disk_storage_ready
@@ -62,6 +70,46 @@ class ScenarioResult:
     error: str = ""
 
 
+def scenario_check_ids(
+    scenario: Scenario,
+    *,
+    smoke_only: bool = False,
+) -> tuple[str, ...]:
+    """Declare exactly the assertion boundaries emitted for one scenario."""
+
+    checks = ["live-boot"]
+    if smoke_only:
+        return tuple(checks)
+    checks.extend(("installer-ui", "target-boot-files"))
+    if scenario.mok_enrollment:
+        checks.append("mok-enrollment")
+    checks.extend(
+        (
+            "installed-boot",
+            "installed-contracts",
+            "automatic-login-policy",
+            "cursor-theme",
+        )
+    )
+    if scenario.desktop_release_gate:
+        checks.extend(
+            (
+                "font-rendering",
+                "desktop-file-dispatch",
+                "gnome-extensions",
+                "spice-resolution",
+            )
+        )
+    if scenario.snapshots_manager:
+        checks.append("snapshots-manager")
+    checks.append("host-ssh")
+    if scenario.ssh is SshPolicy.TOGGLE:
+        checks.append("gnome-ssh-toggle")
+    if scenario.desktop_release_gate:
+        checks.extend(("journal-health", "plymouth-passive-boot"))
+    return tuple(checks)
+
+
 class ScenarioRunner:
     def __init__(
         self,
@@ -70,16 +118,85 @@ class ScenarioRunner:
         defaults: MatrixDefaults,
         options: RunnerOptions,
         status_callback: Callable[[str, str], None] | None = None,
+        check_callback: Callable[[str, str, str, str], None] | None = None,
     ):
         self.inspection = inspection
         self.architecture = architecture
         self.defaults = defaults
         self.options = options
         self.driver = Path(__file__).parents[1] / "guest" / "atspi_driver.py"
+        self.journal_policy = JournalPolicy.load(
+            Path(__file__).parents[1] / "journal-policy.json"
+        )
         self.status = status_callback or _status
+        self.check_status = check_callback
+        self._check_details: dict[tuple[str, str], str] = {}
+        self._check_states: dict[str, dict[str, str]] = {}
+
+    @contextmanager
+    def _check(self, scenario: Scenario, identifier: str):
+        """Emit a child verdict around the exact code that owns the assertion."""
+
+        key = (scenario.id, identifier)
+        self._emit_check(scenario.id, identifier, "running", "Running assertions")
+        try:
+            yield
+        except BaseException as error:
+            self._emit_check(
+                scenario.id,
+                identifier,
+                "failed",
+                f"{type(error).__name__}: {error}",
+            )
+            self._check_details.pop(key, None)
+            raise
+        else:
+            detail = self._check_details.pop(key, "All assertions passed")
+            self._emit_check(scenario.id, identifier, "passed", detail)
+
+    def _check_note(
+        self,
+        scenario: Scenario,
+        identifier: str,
+        detail: str,
+    ) -> None:
+        details = getattr(self, "_check_details", None)
+        if details is None:
+            details = {}
+            self._check_details = details
+        details[(scenario.id, identifier)] = detail
+        self._emit_check(scenario.id, identifier, "running", detail)
+
+    def _emit_check(
+        self,
+        scenario_id: str,
+        identifier: str,
+        state: str,
+        detail: str,
+    ) -> None:
+        plans = getattr(self, "_check_states", {})
+        if scenario_id in plans:
+            try:
+                plans[scenario_id][identifier] = state
+            except KeyError as error:
+                raise TestFailure(
+                    f"{scenario_id}: emitted undeclared child check {identifier!r}"
+                ) from error
+        callback = getattr(self, "check_status", None)
+        if callback is not None:
+            callback(scenario_id, identifier, state, detail)
 
     def run(self, scenario: Scenario) -> ScenarioResult:
         started = time.monotonic()
+        if not hasattr(self, "_check_states"):
+            self._check_states = {}
+        self._check_states[scenario.id] = {
+            identifier: "pending"
+            for identifier in scenario_check_ids(
+                scenario,
+                smoke_only=self.options.smoke_only,
+            )
+        }
         artifacts = self.options.artifacts_root / scenario.id
         if artifacts.exists():
             raise TestFailure(f"Refusing to reuse artifact directory: {artifacts}")
@@ -102,6 +219,7 @@ class ScenarioRunner:
             self._write_manifest(scenario, vm.config, artifacts)
             boot_files = self._run_live_phase(vm, scenario, artifacts)
             if self.options.smoke_only:
+                self._assert_check_completion(scenario)
                 passed = True
                 return ScenarioResult(
                     scenario.id,
@@ -112,6 +230,7 @@ class ScenarioRunner:
             if boot_files is None:
                 raise TestFailure("Installer run did not discover target boot files")
             self._run_target_phase(vm, scenario, boot_files, artifacts)
+            self._assert_check_completion(scenario)
             passed = True
             return ScenarioResult(
                 scenario.id,
@@ -144,6 +263,18 @@ class ScenarioRunner:
                     # that it is still running. `_finalize_disk` refuses the
                     # latter instead of unlinking a live block device.
                     self._finalize_disk(vm, artifacts, passed=passed)
+
+    def _assert_check_completion(self, scenario: Scenario) -> None:
+        incomplete = [
+            f"{identifier}={state}"
+            for identifier, state in self._check_states[scenario.id].items()
+            if state != "passed"
+        ]
+        if incomplete:
+            raise TestFailure(
+                "Scenario reached the end without passing every declared child "
+                "check: " + ", ".join(incomplete)
+            )
 
     def _finalize_disk(
         self,
@@ -255,35 +386,38 @@ class ScenarioRunner:
         scenario: Scenario,
         artifacts: Path,
     ) -> InstalledBootFiles | None:
-        self.status(scenario.id, "Booting original ISO")
-        vm.start(attach_iso=True)
-        assert vm.qmp is not None and vm.serial is not None
-        boot_iso_with_debug_shell(
-            vm.qmp,
-            vm.serial,
-            self.architecture,
-            firmware_delay=self.options.firmware_delay_seconds,
-            synchronize_prompt=scenario.firmware.secure_boot,
-            kernel_arguments=self._live_grub_entry().kernel_arguments,
-        )
-        vm.serial.timeout = self.options.command_timeout_seconds
-        vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
-        self.status(scenario.id, "Live GNOME and serial control are ready")
-        assert_live_environment(
-            vm.serial,
-            scenario,
-            artifacts,
-            self.defaults.live_locale,
-            self.defaults.live_timezone,
-        )
-        vm.screenshot("live-desktop")
+        with self._check(scenario, "live-boot"):
+            self.status(scenario.id, "Booting original ISO")
+            vm.start(attach_iso=True)
+            assert vm.qmp is not None and vm.serial is not None
+            boot_iso_with_debug_shell(
+                vm.qmp,
+                vm.serial,
+                self.architecture,
+                firmware_delay=self.options.firmware_delay_seconds,
+                synchronize_prompt=scenario.firmware.secure_boot,
+                kernel_arguments=self._live_grub_entry().kernel_arguments,
+            )
+            vm.serial.timeout = self.options.command_timeout_seconds
+            vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+            self.status(scenario.id, "Live GNOME and serial control are ready")
+            assert_live_environment(
+                vm.serial,
+                scenario,
+                artifacts,
+                self.defaults.live_locale,
+                self.defaults.live_timezone,
+            )
+            vm.screenshot("live-desktop")
         if self.options.smoke_only:
             _power_off(vm)
             return None
-        self._run_installer_driver(vm, scenario, artifacts)
-        boot_files = self._show_target_grub_once(vm, scenario, artifacts)
-        self._assert_live_cleanup(vm, artifacts)
-        vm.screenshot("installer-complete")
+        with self._check(scenario, "installer-ui"):
+            self._run_installer_driver(vm, scenario, artifacts)
+        with self._check(scenario, "target-boot-files"):
+            boot_files = self._show_target_grub_once(vm, scenario, artifacts)
+            self._assert_live_cleanup(vm, artifacts)
+            vm.screenshot("installer-complete")
         _power_off(vm)
         self.status(scenario.id, "Installation complete; ISO detached")
         return boot_files
@@ -377,56 +511,61 @@ fi
         artifacts: Path,
     ) -> None:
         if scenario.mok_enrollment:
-            self._enroll_mok(vm, scenario, artifacts)
-        self.status(scenario.id, "Booting installed target without ISO")
-        vm.start(attach_iso=False)
-        assert vm.qmp is not None and vm.serial is not None
-        boot_installed_with_debug_shell(
-            vm.qmp,
-            vm.serial,
-            self.architecture,
-            scenario.filesystem,
-            boot_files,
-            firmware_delay=self.options.firmware_delay_seconds,
-        )
-        vm.serial.timeout = self.options.command_timeout_seconds
-        vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
-        # Every scenario deliberately sets GRUB's standard recordfail flag so
-        # its otherwise timing-dependent hidden menu is available for this
-        # controlled serial-debug boot.  Clear it immediately; the installed
-        # system must keep its normal boot policy after the acceptance test.
-        vm.serial.run(
-            "grub-editenv /boot/grub/grubenv unset recordfail menu_show_once",
-            timeout=30,
-        )
-        assert_installed_environment(
-            vm.serial,
-            scenario,
-            self.architecture,
-            self.defaults.username,
-            self.defaults.hostname.casefold(),
-            artifacts,
-        )
-        self._assert_automatic_login_behavior(vm, scenario, artifacts)
-        if not scenario.automatic_login:
-            vm.screenshot("installed-gdm")
-            self.status(scenario.id, "Logging into the installed GNOME desktop")
-            _login_gdm(
-                vm,
+            with self._check(scenario, "mok-enrollment"):
+                self._enroll_mok(vm, scenario, artifacts)
+        with self._check(scenario, "installed-boot"):
+            self.status(scenario.id, "Booting installed target without ISO")
+            vm.start(attach_iso=False)
+            assert vm.qmp is not None and vm.serial is not None
+            boot_installed_with_debug_shell(
+                vm.qmp,
+                vm.serial,
+                self.architecture,
+                scenario.filesystem,
+                boot_files,
+                firmware_delay=self.options.firmware_delay_seconds,
+            )
+            vm.serial.timeout = self.options.command_timeout_seconds
+            vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+            # Every scenario deliberately sets GRUB's standard recordfail flag so
+            # its otherwise timing-dependent hidden menu is available for this
+            # controlled serial-debug boot. Clear it immediately; the installed
+            # system must keep its normal boot policy after the acceptance test.
+            vm.serial.run(
+                "grub-editenv /boot/grub/grubenv unset recordfail menu_show_once",
+                timeout=30,
+            )
+        with self._check(scenario, "installed-contracts"):
+            assert_installed_environment(
+                vm.serial,
+                scenario,
+                self.architecture,
                 self.defaults.username,
-                self.defaults.password,
-                timeout=120,
+                self.defaults.hostname.casefold(),
+                artifacts,
             )
-        else:
-            vm.screenshot("installed-automatic-login")
-        graphical_user = _graphical_user(vm.serial)
-        if graphical_user != self.defaults.username:
-            raise TestFailure(
-                "Installed GNOME session belongs to unexpected user: "
-                f"{graphical_user}"
-            )
-        vm.screenshot("installed-desktop")
-        self._assert_desktop_session(vm, scenario, artifacts)
+        with self._check(scenario, "automatic-login-policy"):
+            self._assert_automatic_login_behavior(vm, scenario, artifacts)
+            if not scenario.automatic_login:
+                vm.screenshot("installed-gdm")
+                self.status(scenario.id, "Logging into the installed GNOME desktop")
+                _login_gdm(
+                    vm,
+                    self.defaults.username,
+                    self.defaults.password,
+                    timeout=120,
+                )
+            else:
+                vm.screenshot("installed-automatic-login")
+            graphical_user = _graphical_user(vm.serial)
+            if graphical_user != self.defaults.username:
+                raise TestFailure(
+                    "Installed GNOME session belongs to unexpected user: "
+                    f"{graphical_user}"
+                )
+        with self._check(scenario, "cursor-theme"):
+            vm.screenshot("installed-desktop")
+            self._assert_desktop_session(vm, scenario, artifacts)
         desktop_failures: list[str] = []
         if scenario.desktop_release_gate:
             for label, check in (
@@ -452,23 +591,28 @@ fi
                 ),
             ):
                 self._collect_desktop_gate_failure(
-                    label, check, desktop_failures, artifacts
+                    scenario, label, check, desktop_failures, artifacts
                 )
         if scenario.snapshots_manager:
-            self._exercise_snapshots_manager(vm, scenario, artifacts)
+            with self._check(scenario, "snapshots-manager"):
+                self._exercise_snapshots_manager(vm, scenario, artifacts)
         if scenario.desktop_release_gate:
             self._collect_desktop_gate_failure(
+                scenario,
                 "host-ssh",
                 lambda: self._assert_host_ssh(vm, scenario, artifacts),
                 desktop_failures,
                 artifacts,
             )
         else:
-            self._assert_host_ssh(vm, scenario, artifacts)
+            with self._check(scenario, "host-ssh"):
+                self._assert_host_ssh(vm, scenario, artifacts)
         if scenario.ssh is SshPolicy.TOGGLE:
-            self._exercise_gnome_ssh_switch(vm, scenario, artifacts)
+            with self._check(scenario, "gnome-ssh-toggle"):
+                self._exercise_gnome_ssh_switch(vm, scenario, artifacts)
         if scenario.desktop_release_gate:
             self._collect_desktop_gate_failure(
+                scenario,
                 "journal-health",
                 lambda: self._assert_journal_health(vm, scenario, artifacts),
                 desktop_failures,
@@ -483,6 +627,7 @@ fi
         _power_off(vm)
         if scenario.desktop_release_gate:
             self._collect_desktop_gate_failure(
+                scenario,
                 "plymouth-passive-boot",
                 lambda: self._assert_passive_plymouth_boot(
                     vm, scenario, artifacts
@@ -498,20 +643,30 @@ fi
 
     def _collect_desktop_gate_failure(
         self,
+        scenario: Scenario,
         label: str,
         check: Callable[[], None],
         failures: list[str],
         artifacts: Path,
     ) -> None:
+        self._emit_check(scenario.id, label, "running", "Running assertions")
         try:
             check()
         except Exception as error:
             message = f"{label}: {type(error).__name__}: {error}"
+            self._emit_check(scenario.id, label, "failed", message)
+            getattr(self, "_check_details", {}).pop((scenario.id, label), None)
             failures.append(message)
             with (artifacts / "desktop-gate-failures.txt").open(
                 "a", encoding="utf-8"
             ) as stream:
                 stream.write(message + "\n")
+        else:
+            detail = getattr(self, "_check_details", {}).pop(
+                (scenario.id, label),
+                "All assertions passed",
+            )
+            self._emit_check(scenario.id, label, "passed", detail)
 
     def _live_grub_entry(self):
         entry = self.inspection.live_entry(self.defaults.live_grub_entry)
@@ -887,54 +1042,160 @@ done
         artifacts: Path,
     ) -> None:
         assert vm.serial is not None
-        self.status(scenario.id, "Applying strict system and GNOME journal gates")
-        system = vm.serial.run(
-            r"""
-set -uo pipefail
-failed=$(systemctl --failed --no-legend --plain 2>&1)
-priority=$(journalctl -b -p 0..3 --no-pager -o short-iso 2>&1)
-patterns=$(journalctl -b --no-pager -o short-iso 2>&1 | grep -Ei 'segfault|core dumped|JS ERROR|extension.*(error|exception)|assertion.*failed|(^|[[:space:]])fatal(:|[[:space:]]+(error|failure))' || true)
-printf '%s\n' '=== systemctl --failed ===' "$failed"
-printf '%s\n' '=== journal priority 0..3 ===' "$priority"
-printf '%s\n' '=== fatal-pattern scan ===' "$patterns"
-test -z "$failed"
-test -z "$patterns"
-test -z "$priority" -o "$priority" = '-- No entries --'
-""",
+        self.status(
+            scenario.id,
+            "Classifying journal blockers and versioned known diagnostics",
+        )
+        policy = self.journal_policy
+        shutil.copy2(
+            Path(__file__).parents[1] / "journal-policy.json",
+            artifacts / "journal-policy.json",
+        )
+        system_journal = vm.serial.run(
+            render_guest_collection_script(policy),
             timeout=180,
             check=False,
         )
-        user_script = r"""
-set -uo pipefail
-failed=$(systemctl --user --failed --no-legend --plain 2>&1)
-priority=$(journalctl --user -b -p 0..3 --no-pager -o short-iso 2>&1)
-patterns=$(journalctl --user -b --no-pager -o short-iso 2>&1 | grep -Ei 'segfault|core dumped|JS ERROR|extension.*(error|exception)|assertion.*failed|(^|[[:space:]])fatal(:|[[:space:]]+(error|failure))' || true)
-printf '%s\n' '=== systemctl --user --failed ===' "$failed"
-printf '%s\n' '=== user journal priority 0..3 ===' "$priority"
-printf '%s\n' '=== user fatal-pattern scan ===' "$patterns"
-test -z "$failed"
-test -z "$patterns"
-test -z "$priority" -o "$priority" = '-- No entries --'
-"""
-        user = vm.serial.run(
+        user_journal = vm.serial.run(
             _desktop_command(
                 self.defaults.username,
-                ("bash", "-lc", user_script),
+                (
+                    "bash",
+                    "-lc",
+                    render_guest_collection_script(policy, user=True),
+                ),
             ),
             timeout=180,
             check=False,
         )
+        (artifacts / "installed-system-journal.jsonl").write_text(
+            system_journal.stdout + "\n", encoding="utf-8"
+        )
+        (artifacts / "installed-user-journal.jsonl").write_text(
+            user_journal.stdout + "\n", encoding="utf-8"
+        )
+        if system_journal.returncode != 0 or user_journal.returncode != 0:
+            raise TestFailure(
+                "Could not collect structured system and user journal evidence"
+            )
+
+        system_units = vm.serial.run(
+            "systemctl --failed --no-legend --plain",
+            timeout=60,
+            check=False,
+        )
+        user_units = vm.serial.run(
+            _desktop_command(
+                self.defaults.username,
+                (
+                    "bash",
+                    "-lc",
+                    "systemctl --user --failed --no-legend --plain",
+                ),
+            ),
+            timeout=60,
+            check=False,
+        )
+        if system_units.returncode != 0 or user_units.returncode != 0:
+            raise TestFailure("Could not query failed systemd units")
+
+        packages = " ".join(shlex.quote(item) for item in policy.packages)
+        package_result = vm.serial.run(
+            "set -uo pipefail\n"
+            f"for package in {packages}; do\n"
+            "  dpkg-query -W -f='${Package}\\t${Version}\\n' "
+            '"$package" 2>/dev/null || true\n'
+            "done",
+            timeout=60,
+        )
+        package_versions = parse_package_versions(package_result.stdout)
+        (artifacts / "installed-journal-package-versions.txt").write_text(
+            package_result.stdout + "\n", encoding="utf-8"
+        )
+
+        functional_script = r"""
+set -euo pipefail
+shell_pid=$(pgrep -n -x gnome-shell)
+keyboard_pid=$(pgrep -n -x gsd-keyboard)
+keyring_pid=$(pgrep -n -x gnome-keyring-d)
+test -n "$shell_pid"
+test -n "$keyboard_pid"
+test -n "$keyring_pid"
+sources=$(gsettings get org.gnome.desktop.input-sources sources)
+printf 'gnome-shell-pid=%s\n' "$shell_pid"
+printf 'gsd-keyboard-pid=%s\n' "$keyboard_pid"
+printf 'gnome-keyring-pid=%s\n' "$keyring_pid"
+printf 'input-sources=%s\n' "$sources"
+"""
+        if scenario.rime:
+            functional_script += "printf '%s' \"$sources\" | grep -q \"'ibus', 'rime'\"\n"
+        functional = vm.serial.run(
+            _desktop_command(
+                self.defaults.username,
+                ("bash", "-lc", functional_script),
+            ),
+            timeout=60,
+            check=False,
+        )
+        (artifacts / "installed-journal-functional-health.txt").write_text(
+            functional.stdout + "\n", encoding="utf-8"
+        )
+
+        entries = parse_journal_jsonl(system_journal.stdout, "system") + (
+            parse_journal_jsonl(user_journal.stdout, "user")
+        )
+        verdict = policy.classify(
+            entries,
+            scenario,
+            package_versions,
+            failed_system_units=system_units.stdout.splitlines(),
+            failed_user_units=user_units.stdout.splitlines(),
+        )
+        report = render_verdict(verdict)
+        (artifacts / "installed-journal-verdict.json").write_text(
+            json.dumps(verdict.to_dict(), indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
         (artifacts / "installed-system-journal-gate.txt").write_text(
-            system.stdout + "\n", encoding="utf-8"
+            "=== systemctl --failed ===\n"
+            + (system_units.stdout or "none")
+            + "\n\n"
+            + report,
+            encoding="utf-8",
         )
         (artifacts / "installed-user-journal-gate.txt").write_text(
-            user.stdout + "\n", encoding="utf-8"
+            "=== systemctl --user --failed ===\n"
+            + (user_units.stdout or "none")
+            + "\n\n"
+            + report,
+            encoding="utf-8",
         )
-        if system.returncode != 0 or user.returncode != 0:
+        self.status(
+            scenario.id,
+            f"Journal: {len(verdict.blockers)} blockers, "
+            f"{len(verdict.known_diagnostics)} known diagnostics",
+        )
+        self._check_note(
+            scenario,
+            "journal-health",
+            f"{len(verdict.blockers)} blockers; "
+            f"{len(verdict.known_diagnostics)} known diagnostics",
+        )
+        failures = []
+        if functional.returncode != 0:
+            failures.append(
+                "GNOME Shell, keyboard, keyring, or input-source functional "
+                "health check failed"
+            )
+        if not verdict.passed:
+            failures.append(
+                f"{len(verdict.blockers)} unexpected journal/systemd blocker(s)"
+            )
+        if failures:
             raise TestFailure(
-                "journal/systemd error gate failed; inspect "
-                "installed-system-journal-gate.txt and "
-                "installed-user-journal-gate.txt"
+                "; ".join(failures)
+                + "; inspect installed-journal-verdict.json and "
+                "installed-journal-functional-health.txt"
             )
 
     def _assert_passive_plymouth_boot(

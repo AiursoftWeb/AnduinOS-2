@@ -213,13 +213,19 @@ contract, not a grep of the entire boot history:
 2. Perform the user action.
 3. Collect entries after that cursor from the system and user journals.
 4. Fail on a new crash, core dump, segfault, failed unit, GNOME Shell
-   `JS ERROR`, extension exception, assertion failure, or priority 0-3 message
-   owned by the exercised component.
-5. Apply only a versioned allowlist whose entries contain a reason, an owner,
-   and an expiry release.
+   `JS ERROR`, extension exception, unknown assertion failure, or unexpected
+   priority 0-3 message owned by the exercised component.
+5. Classify a known diagnostic as non-blocking only when its exact component,
+   message, scenario, package-version glob, and bounded occurrence count all
+   match, and an independent functional oracle for that component passes.
+6. Keep known diagnostics visible in the result rather than deleting them from
+   the evidence. A version change, count increase, or near-match expires the
+   exception and restores the release failure automatically.
 
 The unfiltered slice and the filtered verdict are both evidence. A global boot
 journal guard also covers the interval from kernel start through desktop idle.
+The executable global policy lives in `journal-policy.json`; broad regex
+allowlists and unversioned exceptions are invalid by design.
 
 ### Host integration drivers
 
@@ -414,7 +420,9 @@ and KVM slots. ARM64-on-amd64 TCG visual suites default to nightly because of
 runtime; architecture-neutral command assertions still run against ARM64
 installation bases.
 
-The dashboard becomes hierarchical:
+The current installation matrix dashboard is hierarchical: its ten disposable
+installation scenarios remain the top-level progress units, while the active
+scenario exposes each implemented assertion boundary and its real lifecycle:
 
 ```text
 ● installed-zh-shell                         RUNNING
@@ -424,10 +432,11 @@ The dashboard becomes hierarchical:
   ○ shortcut.super-shift-s                   NOT STARTED
 ```
 
-Plain/CI output preserves the same transitions as JSON Lines. Final output
-includes `summary.json`, JUnit XML, the base/overlay provenance graph, and an
-HTML evidence index. A failed visual or UI check links directly to its frame,
-accessibility tree, journal slice, and command transcript.
+Plain/CI output preserves the same transitions as durable lines, and final
+output records the child verdicts in `summary.json`. JSON Lines, JUnit XML, the
+future base/overlay provenance graph, and an HTML evidence index remain part of
+the feature-suite design below. A failed visual or UI check will link directly
+to its frame, accessibility tree, journal slice, and command transcript.
 
 ## Delivery order
 

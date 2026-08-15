@@ -18,7 +18,7 @@ from .firmware import FirmwareOverrides, resolve_firmware
 from .iso import inspect_iso
 from .model import Architecture, TestMatrix
 from .qemu import resolve_qemu
-from .runner import RunnerOptions, ScenarioRunner
+from .runner import RunnerOptions, ScenarioRunner, scenario_check_ids
 from .storage import (
     DEFAULT_RAMDISK_THRESHOLD_GIB,
     assert_disk_storage_ready,
@@ -73,6 +73,13 @@ def main(argv: list[str] | None = None) -> int:
                 iso=inspection.path,
                 architecture=architecture.value,
                 artifacts=options.artifacts_root,
+                checks={
+                    item.id: scenario_check_ids(
+                        item,
+                        smoke_only=options.smoke_only,
+                    )
+                    for item in selected
+                },
                 live=False if args.no_tui else None,
             )
             runner = ScenarioRunner(
@@ -81,6 +88,7 @@ def main(argv: list[str] | None = None) -> int:
                 matrix.defaults,
                 options,
                 status_callback=dashboard.phase,
+                check_callback=dashboard.check,
             )
             results = []
             dashboard.start()
@@ -116,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
                         "seconds": item.seconds,
                         "artifacts": str(item.artifacts),
                         "error": item.error,
+                        "checks": dashboard.check_results(item.id),
                     }
                     for item in results
                 ],
@@ -369,6 +378,8 @@ def _print_dry_run(inspection, architecture, selected, options) -> None:
             f"desktop-gate={scenario.desktop_release_gate}, "
             f"mok={scenario.mok_enrollment}"
         )
+        checks = scenario_check_ids(scenario, smoke_only=options.smoke_only)
+        print(f"  CHECKS ({len(checks)}): " + ", ".join(checks))
 
 
 @contextlib.contextmanager

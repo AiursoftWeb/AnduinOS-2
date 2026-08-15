@@ -38,8 +38,9 @@ retention/removal, and three SSH policies. It also directly verifies:
   except SimpleWeather and Network Stats, which must both remain inactive;
 - a real SPICE GTK client resizing twice, with `spice-vdagent`, the virtio
   channel, and Mutter's reported current mode all required to follow;
-- failed system and user units, boot priority 0-3 journal messages, crashes,
-  GNOME extension errors, and assertion failures as strict release failures.
+- failed system and user units, crashes, GNOME extension errors, and unknown
+  high-priority/fatal journal messages as release failures, while narrowly
+  versioned known diagnostics remain visible without blocking healthy builds.
 
 The test runner never edits the ISO. It temporarily adds a systemd debug shell
 to the selected GRUB entry through QEMU keyboard events, uses that root serial
@@ -167,11 +168,20 @@ architecture from the filename. To choose an image explicitly:
 make test ISO=dist/AnduinOS-2.0.2-amd64.iso ARCH=amd64
 ```
 
-On an interactive terminal the runner shows a live table with every case in
-NOT STARTED, RUNNING, PASSED, or FAILED state, its current phase, elapsed time,
-overall progress, and artifact directory. Redirected output and CI use durable
-line-by-line transitions automatically. `TEST_ARGS=--no-tui` forces that plain
-mode locally.
+On an interactive terminal the runner shows the ten installation scenarios as
+the top-level matrix. The active scenario expands into the real child assertion
+boundaries that it executes, such as `installer-ui`, `automatic-login-policy`,
+`cursor-theme`, `desktop-file-dispatch`, `journal-health`, and
+`plymouth-passive-boot`. Every child is shown as NOT STARTED, RUNNING, PASSED,
+or FAILED; the journal child also reports the number of classified known
+diagnostics. Small terminals keep the currently running child visible and show
+which slice of the child list is on screen.
+
+The top-level progress denominator deliberately remains the number of complete,
+disposable installations. Child checks reuse those installed systems and are
+not additional VM installations. Redirected output and CI preserve every case
+and child transition line by line. `TEST_ARGS=--no-tui` forces that plain mode
+locally, and `summary.json` records the same child verdicts.
 
 `CASES` accepts a space-separated subset, and `TEST_ARGS` passes additional
 runner arguments:
@@ -222,6 +232,9 @@ The default output is `test-results/<UTC timestamp>/`. Each scenario contains:
 - AT-SPI event logs and accessibility-tree snapshots;
 - the complete executor transcript produced through the installer's real
   Save Log button, including driver-command evidence for online cases;
+- structured system and user Journal candidates, the package versions used by
+  the Journal policy, independent GNOME functional-health evidence, and a
+  machine-readable blocker/known-diagnostic verdict;
 - screenshots at Live, completion, GDM, MOK, or failure boundaries;
 - the fresh UEFI VARS used by that case;
 - `target-disk-retention.txt`, recording whether the disposable target disk was
@@ -296,6 +309,59 @@ A scenario fails closed: a missing firmware file, unexpected architecture,
 reused disk or artifact path, installer warning promoted to fatal state,
 package inconsistency, incorrect root filesystem, SSH mismatch, or incomplete
 MOK workflow all produce a non-zero result and preserve evidence.
+
+## Journal release policy
+
+The Journal gate is designed to find defects, not to require a modern GNOME
+desktop to produce an unrealistically empty log. Its executable policy is
+[`journal-policy.json`](journal-policy.json), and its host-side classifier is
+[`iso_test/journal.py`](iso_test/journal.py).
+
+The classifier has three outcomes:
+
+- **Release blocker:** failed system/user units, priority 0-3 entries not
+  covered by an exact policy, crashes, core dumps, segfaults, OOM events,
+  tracebacks, GNOME Shell JavaScript errors, extension exceptions, and unknown
+  fatal/assertion messages.
+- **Known diagnostic:** an exact component and message match whose scenario,
+  package-version glob, and maximum occurrence count all match. The entry and
+  reason remain in the report and raw JSONL evidence. It is never silently
+  discarded.
+- **Observation:** a collected candidate that is neither fatal nor covered by
+  a release-blocking rule. It is retained but does not change the exit code.
+
+Known diagnostics are deliberately fail-closed. Every entry declares an
+owner, reason, scenario conditions, package version, and occurrence budget.
+Changing from GNOME 50 to a later major release automatically expires the
+current GNOME exceptions; a similar-but-not-identical message, a missing
+package version, a second occurrence, or the same message in the wrong
+scenario is a release blocker again.
+
+The current GNOME 50 policy recognizes three bounded diagnostics observed in
+AnduinOS with Ubuntu's GNOME packages: GDM cannot unlock a password-protected
+login keyring when automatic login supplies no password, `gsd-keyboard` can
+emit one null-variant assertion during input-source startup, and Mutter can
+emit one transient stack-position assertion. They are non-blocking only in
+the applicable release-gate scenario. The same run independently requires a
+live GNOME Shell, `gsd-keyboard`, GNOME Keyring daemon, configured Rime input
+source, working extensions, window activation, and SPICE resizing. A failed
+functional oracle remains fatal regardless of the Journal exception.
+
+For every run, inspect:
+
+```text
+installed-system-journal.jsonl
+installed-user-journal.jsonl
+installed-journal-package-versions.txt
+installed-journal-functional-health.txt
+installed-journal-verdict.json
+journal-policy.json
+```
+
+Do not broaden a regular expression merely to make a release green. Add or
+change a known diagnostic only after reproducing it, proving the associated
+function still works, limiting its applicable versions and scenarios, and
+adding a regression test that proves nearby unknown errors still fail.
 
 The desktop file fixture is activated through Nautilus's selected-item default
 action using a real QMP Enter key. This follows the same file-manager launch
