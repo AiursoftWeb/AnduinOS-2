@@ -146,11 +146,16 @@ class SerialConsole:
         return result
 
     def upload(self, source: Path, destination: str, mode: int = 0o600) -> None:
-        data = base64.b64encode(source.read_bytes()).decode("ascii")
         temporary = f"{destination}.tmp-{os.getpid()}"
+        self.run(f": > '{temporary}'")
+        with source.open("rb") as stream:
+            while chunk := stream.read(48 * 1024):
+                data = base64.b64encode(chunk).decode("ascii")
+                self.run(
+                    f"printf '%s' '{data}' | base64 -d >> '{temporary}'"
+                )
         self.run(
             "set -e\n"
-            f"printf '%s' '{data}' | base64 -d > '{temporary}'\n"
             f"chmod {mode:o} '{temporary}'\n"
             f"mv '{temporary}' '{destination}'"
         )
@@ -158,10 +163,30 @@ class SerialConsole:
     def _send(self, value: bytes) -> None:
         if self._socket is None:
             raise ProtocolError("Serial socket is not connected")
-        try:
-            self._socket.sendall(value)
-        except OSError as error:
-            raise ProtocolError(f"Cannot write to serial socket: {error}") from error
+        remaining = memoryview(value)
+        deadline = time.monotonic() + self.timeout
+        while remaining:
+            wait = deadline - time.monotonic()
+            if wait <= 0:
+                raise ProtocolError(
+                    f"Timed out writing {len(value)} bytes to serial socket"
+                )
+            try:
+                _, writable, _ = select.select(
+                    [], [self._socket], [], min(0.5, wait)
+                )
+                if not writable:
+                    continue
+                sent = self._socket.send(remaining)
+            except BlockingIOError:
+                continue
+            except OSError as error:
+                raise ProtocolError(
+                    f"Cannot write to serial socket: {error}"
+                ) from error
+            if sent <= 0:
+                raise ProtocolError("Serial socket closed while writing")
+            remaining = remaining[sent:]
 
     def _read_until(self, pattern: re.Pattern[bytes], timeout: float) -> bytes:
         if self._socket is None:

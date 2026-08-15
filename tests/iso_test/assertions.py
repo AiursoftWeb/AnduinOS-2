@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import shlex
 from pathlib import Path
 
+from .errors import TestFailure
 from .model import Architecture, Firmware, Network, Scenario, SshPolicy
 from .serial import SerialConsole
 
@@ -23,6 +25,8 @@ def assert_live_environment(
     console: SerialConsole,
     scenario: Scenario,
     evidence: Path,
+    expected_locale: str,
+    expected_timezone: str,
 ) -> None:
     script = r"""
 set -euo pipefail
@@ -68,6 +72,31 @@ ip -brief link
             evidence / "live-firmware.txt",
         )
     _assert_network(console, scenario.network, evidence)
+    _assert_live_region(console, expected_locale, expected_timezone, evidence)
+
+
+def _assert_live_region(
+    console: SerialConsole,
+    expected_locale: str,
+    expected_timezone: str,
+    evidence: Path,
+) -> None:
+    script = f"""
+set -euo pipefail
+system_locale=$(localectl status | sed -n 's/^[[:space:]]*System Locale: LANG=//p')
+timezone=$(timedatectl show -p Timezone --value)
+zone_target=$(readlink -f /etc/localtime)
+session_pid=$(pgrep -n -f '/usr/bin/gnome-shell' || true)
+test -n "$session_pid"
+session_lang=$(tr '\\0' '\\n' < "/proc/$session_pid/environ" | sed -n 's/^LANG=//p' | tail -n1)
+printf 'system-locale=%s\\ntimezone=%s\\nzone-target=%s\\nsession-lang=%s\\n' \\
+    "$system_locale" "$timezone" "$zone_target" "$session_lang"
+test "$system_locale" = {shlex.quote(expected_locale)}
+test "$timezone" = {shlex.quote(expected_timezone)}
+test "$zone_target" = /usr/share/zoneinfo/{shlex.quote(expected_timezone)}
+test "$session_lang" = {shlex.quote(expected_locale)}
+"""
+    _record(console, script, evidence / "live-locale-timezone.txt")
 
 
 def assert_installed_environment(
@@ -129,6 +158,8 @@ printf 'graphical-target=active\\ngdm=active\\ndpkg-audit=clean\\n'
     _assert_boot_packages(console, architecture, evidence)
     _assert_snapshots_manager(console, scenario, evidence)
     _assert_optional_software(console, scenario, username, evidence)
+    _assert_automatic_login_configuration(console, scenario, username, evidence)
+    _assert_release_contracts(console, username, evidence)
     _assert_secure_boot(console, scenario, evidence)
     _assert_ssh_units(console, scenario.ssh, evidence)
 
@@ -152,6 +183,17 @@ printf 'apt-probe=%s\n' "$url"
     if network is Network.ONLINE:
         script = source_probe + r"""
 curl --fail --location --silent --show-error --max-time 45 --output /dev/null "$url"
+installer_endpoint=$(PYTHONPATH=/usr/lib/anduinos-installer-beta python3 - <<'PY'
+from installer_core.network import _codename, probe_ubuntu_archive
+from pathlib import Path
+
+endpoint = probe_ubuntu_archive(_codename(Path('/etc/os-release')))
+if endpoint is None:
+    raise SystemExit(1)
+print(endpoint)
+PY
+)
+printf 'installer-network-probe=%s\n' "$installer_endpoint"
 printf 'network=online\n'
 """
     else:
@@ -222,23 +264,139 @@ def _assert_optional_software(
     username: str,
     evidence: Path,
 ) -> None:
-    if scenario.online_features:
-        script = f"""
+    rime = f"""
 set -euo pipefail
-for package in anduinos-rime anduinos-multimedia-codecs; do
-    dpkg-query -W -f='${{db:Status-Abbrev}} ${{Package}} ${{Version}}\\n' "$package" | grep '^ii '
-done
+"""
+    if scenario.rime:
+        rime += f"""
+dpkg-query -W -f='${{db:Status-Abbrev}} ${{Package}} ${{Version}}\\n' anduinos-rime | grep '^ii '
 sources=$(runuser -u {username} -- env HOME=/home/{username} dbus-run-session -- \\
     gsettings get org.gnome.desktop.input-sources sources)
 printf 'input-sources=%s\\n' "$sources"
 printf '%s' "$sources" | grep -q "'ibus', 'rime'"
+"""
+    else:
+        rime += f"""
+! dpkg-query -W -f='${{db:Status-Abbrev}}' anduinos-rime 2>/dev/null | grep -q '^ii '
+sources=$(runuser -u {username} -- env HOME=/home/{username} dbus-run-session -- \\
+    gsettings get org.gnome.desktop.input-sources sources)
+printf 'input-sources=%s\\n' "$sources"
+! printf '%s' "$sources" | grep -q "'ibus', 'rime'"
+"""
+    if scenario.online_features:
+        script = rime + r"""
+dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' anduinos-multimedia-codecs | grep '^ii '
 available_drivers=$(ubuntu-drivers list)
 printf 'ubuntu-drivers-list=%s\\n' "$available_drivers"
 test -z "$available_drivers"
 """
     else:
-        script = "printf 'online-features=not-requested\\n'"
+        script = rime + r"""
+! dpkg-query -W -f='${db:Status-Abbrev}' anduinos-multimedia-codecs 2>/dev/null | grep -q '^ii '
+printf 'downloaded-online-features=not-requested\n'
+"""
     _record(console, script, evidence / "installed-optional-software.txt")
+
+
+def _assert_automatic_login_configuration(
+    console: SerialConsole,
+    scenario: Scenario,
+    username: str,
+    evidence: Path,
+) -> None:
+    expected = "true" if scenario.automatic_login else "false"
+    forbidden = (
+        "false" if scenario.automatic_login else f"AutomaticLogin={username}"
+    )
+    script = f"""
+set -euo pipefail
+test -f /etc/gdm3/custom.conf
+grep -Fx 'AutomaticLoginEnable={expected}' /etc/gdm3/custom.conf
+"""
+    if scenario.automatic_login:
+        script += f"grep -Fx 'AutomaticLogin={username}' /etc/gdm3/custom.conf\n"
+    else:
+        script += f"! grep -Fx {forbidden!r} /etc/gdm3/custom.conf\n"
+    script += f"""
+password_hash=$(getent shadow {username} | cut -d: -f2)
+test -n "$password_hash"
+case "$password_hash" in '!'|'*'|'!!') exit 1;; esac
+printf 'automatic-login={expected}\\npassword-hash=present\\n'
+"""
+    _record(console, script, evidence / "installed-gdm-policy.txt")
+
+
+def _assert_release_contracts(
+    console: SerialConsole,
+    username: str,
+    evidence: Path,
+) -> None:
+    script = f"""
+set -euo pipefail
+
+# Kernel/runtime policy must be active, not merely present in a sysctl file.
+inotify_instances=$(sysctl -n fs.inotify.max_user_instances)
+inotify_watches=$(sysctl -n fs.inotify.max_user_watches)
+inotify_events=$(sysctl -n fs.inotify.max_queued_events)
+printf 'inotify-instances=%s\\n' "$inotify_instances"
+printf 'inotify-watches=%s\\n' "$inotify_watches"
+printf 'inotify-events=%s\\n' "$inotify_events"
+test "$inotify_instances" = 524288
+
+# Query the associations through the same freedesktop API used by desktop apps.
+query_mime() {{
+    runuser -u {username} -- env HOME=/home/{username} XDG_CONFIG_HOME=/home/{username}/.config \\
+        XDG_CURRENT_DESKTOP=GNOME XDG_DATA_DIRS=/usr/local/share:/usr/share \\
+        xdg-mime query default "$1"
+}}
+mime_image=$(query_mime image/png)
+mime_video=$(query_mime video/mp4)
+mime_deb=$(query_mime application/vnd.debian.binary-package)
+mime_exe=$(query_mime application/x-msdownload)
+mime_pe=$(query_mime application/vnd.microsoft.portable-executable)
+printf 'image/png=%s\\n' "$mime_image"
+printf 'video/mp4=%s\\n' "$mime_video"
+printf 'application/vnd.debian.binary-package=%s\\n' "$mime_deb"
+printf 'application/x-msdownload=%s\\n' "$mime_exe"
+printf 'application/vnd.microsoft.portable-executable=%s\\n' "$mime_pe"
+test "$mime_image" = org.gnome.Loupe.desktop
+test "$mime_video" = io.github.celluloid_player.Celluloid.desktop
+test "$mime_deb" = gnome-software-local-file-packagekit.desktop
+test "$mime_exe" = com.anduinos.ExeRunner.desktop
+test "$mime_pe" = com.anduinos.ExeRunner.desktop
+for desktop in org.gnome.Loupe.desktop io.github.celluloid_player.Celluloid.desktop \\
+    gnome-software-local-file-packagekit.desktop com.anduinos.ExeRunner.desktop; do
+    test -f "/usr/share/applications/$desktop"
+done
+
+# The deliberately small non-AI `why` command is itself a product contract.
+set +e
+why_output=$(why 2>&1)
+why_status=$?
+set -e
+printf 'why-exit=%s\\n%s\\n' "$why_status" "$why_output"
+test "$why_status" = 1
+printf '%s\\n' "$why_output" | grep -Fx 'To use the full AnduinOS AI-powered assistant, install anduinos-why-ai:'
+printf '%s\\n' "$why_output" | grep -Fx '    sudo apt install anduinos-why-ai'
+
+# Prove the installed fontconfig stack resolves both specified Chinese glyphs
+# and the pistol emoji to the AnduinOS-selected font families.
+chinese_font=$(fc-match -f '%{{family}}\\n' 'sans-serif:lang=zh-cn:charset=53d8 89d2 6b21 4eae 91c7 4e4b 95e8' | head -n1)
+emoji_font=$(fc-match -f '%{{family}}\\n' 'emoji:charset=1f52b' | head -n1)
+printf 'chinese-font=%s\\nemoji-font=%s\\n' "$chinese_font" "$emoji_font"
+printf '%s' "$chinese_font" | grep -q 'Noto Sans CJK SC'
+printf '%s' "$emoji_font" | grep -q 'Twemoji'
+test -s /usr/share/fonts/Twemoji/twemoji-colr.ttf
+grep -a -q COLR /usr/share/fonts/Twemoji/twemoji-colr.ttf
+grep -a -q CPAL /usr/share/fonts/Twemoji/twemoji-colr.ttf
+
+# The passive visual boot later proves this selected theme actually paints.
+plymouth_theme=$(readlink -f /etc/alternatives/default.plymouth)
+printf 'plymouth-theme=%s\\n' "$plymouth_theme"
+test "$plymouth_theme" = /usr/share/plymouth/themes/anduinos/anduinos.plymouth
+test -s /usr/share/plymouth/themes/anduinos/watermark.png
+"""
+    _record(console, script, evidence / "installed-release-contracts.txt")
 
 
 def _assert_secure_boot(
@@ -315,6 +473,11 @@ sshd -T | grep -qx 'permitrootlogin no'
 
 
 def _record(console: SerialConsole, script: str, destination: Path) -> None:
-    result = console.run(script)
+    result = console.run(script, check=False)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(result.stdout + "\n", encoding="utf-8")
+    if result.returncode != 0:
+        raise TestFailure(
+            f"Guest assertion {destination.name} failed with exit "
+            f"{result.returncode}:\n{result.stdout[-8000:]}"
+        )

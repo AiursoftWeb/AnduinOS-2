@@ -4,6 +4,43 @@ This directory contains a black-box acceptance framework for completed ISO
 files. It replaces source-tree greps with disposable QEMU machines and drives
 the same graphical installer a user sees.
 
+The long-range architecture for reusable installed-system overlays, additional
+desktop suites, virtual Wi-Fi, GNOME Boxes, and the complete requirement
+backlog is documented in [`ARCHITECTURE.md`](ARCHITECTURE.md). That document
+and `coverage-plan.json` are a roadmap, not evidence that every listed check is
+implemented. The executable authority is `matrix.json` plus code reached from
+`run.py`; a check counts only when `make test` runs it and retains evidence.
+
+The current default `make test` release gate executes ten fresh installations
+covering BIOS, UEFI with Secure Boot disabled, UEFI with Secure Boot enabled,
+online/offline networking, Btrfs, Ext4, MOK enrollment, snapshot-manager
+retention/removal, and three SSH policies. It also directly verifies:
+
+- Rime selected and installed in three online cases, and explicitly not
+  selected or installed in the other seven;
+- GDM automatic login enabled in one case without sending credentials, and
+  disabled in the other nine before their password login;
+- the active GNOME cursor theme and size;
+- image, video, DEB, and Windows executable MIME defaults;
+- the `why` placeholder, the requested inotify runtime value, Noto CJK glyph
+  coverage, and Twemoji color-font tables;
+- real GTK/Pango rendering of `🤓 🍔 🔫 👽 ✨` and `变角次亮采之门`, including a
+  pixel oracle requiring the pistol to be green;
+- an ordinary ISO-detached boot with no GRUB input displaying the installed
+  AnduinOS Plymouth watermark;
+- the selected Simplified Chinese GRUB entry's locale and timezone arguments,
+  all 28 regional menu entries, and the resulting Live session locale,
+  timezone, `/etc/localtime`, and GNOME Shell environment;
+- Nautilus default activation of a real Type-2 AppImage and a structurally
+  valid CPU-Z-named PE fixture, including the MIME type and resolved desktop
+  handler used by the installed system;
+- every installed GNOME Shell extension enabled and in the `ACTIVE` state,
+  except SimpleWeather and Network Stats, which must both remain inactive;
+- a real SPICE GTK client resizing twice, with `spice-vdagent`, the virtio
+  channel, and Mutter's reported current mode all required to follow;
+- failed system and user units, boot priority 0-3 journal messages, crashes,
+  GNOME extension errors, and assertion failures as strict release failures.
+
 The test runner never edits the ISO. It temporarily adds a systemd debug shell
 to the selected GRUB entry through QEMU keyboard events, uses that root serial
 shell as its control channel, and copies an AT-SPI driver into `/run`. The
@@ -17,10 +54,13 @@ host use a semantic handshake: the guest requests one QMP Tab at a time and
 observes accessibility focus, then requests Space only when the intended
 checkbox is focused. The host never assumes a coordinate or fixed Tab count.
 
-Every full scenario creates a new qcow2 target. Every UEFI scenario also copies
-a fresh writable VARS file. After installation QEMU is powered off, the ISO is
-detached, and the installed target is booted again. Secure Boot scenarios must
-complete MOK enrollment rather than merely reaching MokManager.
+Every full scenario creates a new qcow2 target. By default the runner places
+that target on a generic Linux tmpfs when `MemAvailable` is above 16 GiB and
+the complete memory budget is safe; logs and screenshots remain in the durable
+artifact directory. Every UEFI scenario also copies a fresh writable VARS
+file. After installation QEMU is powered off, the ISO is detached, and the
+installed target is booted again. Secure Boot scenarios must complete MOK
+enrollment rather than merely reaching MokManager.
 
 For every installed target, the harness sets GRUB's standard `recordfail`
 environment flag before the controlled reboot. That exposes the real installed
@@ -50,8 +90,16 @@ within a fixed delay.
 On an amd64 test host:
 
 ```bash
-sudo apt install qemu-system-x86 ovmf qemu-utils openssh-client xorriso
+sudo apt install \
+  dbus-daemon openssh-client ovmf python3-pil qemu-system-x86 qemu-utils \
+  squashfs-tools virt-viewer xdotool xorriso xvfb
 ```
+
+The AppImage fixture uses the upstream Type-2 runtime pinned by architecture
+and SHA-256. The first desktop-gate run downloads it into the user's XDG cache;
+later runs reuse the verified cache entry. The payload itself is generated
+locally for the test and opens a uniquely named GTK window, so an executable
+bit or MIME-table assertion alone cannot produce a pass.
 
 To test arm64 through TCG on an amd64 host, also install:
 
@@ -175,9 +223,84 @@ The default output is `test-results/<UTC timestamp>/`. Each scenario contains:
 - the complete executor transcript produced through the installer's real
   Save Log button, including driver-command evidence for online cases;
 - screenshots at Live, completion, GDM, MOK, or failure boundaries;
-- the disposable qcow2 and UEFI VARS used by that case.
+- the fresh UEFI VARS used by that case;
+- `target-disk-retention.txt`, recording whether the disposable target disk was
+  discarded or explicitly retained.
+
+Passed and failed target disks are both discarded by default after QEMU stops;
+logs, screenshots, serial transcripts, UI evidence, and the summary remain.
+This keeps a matrix from accumulating one multi-gigabyte qcow2 per case.
+
+Target-disk placement is host-independent. `make test` never names, mounts,
+formats, or discovers block devices. In the default `auto` mode it considers
+only standard writable paths that the running Linux system reports as `tmpfs`
+(`/dev/shm`, `/run/shm`, the user runtime directory, and a tmpfs `/tmp`). A
+custom existing tmpfs may be offered through `ANDUINOS_TEST_RAMDISK`. Tiny CI
+`/dev/shm` mounts, hosts without Linux `MemAvailable`, and memory-constrained
+servers automatically use the artifact filesystem instead.
+
+RAM-disk selection is deliberately stricter than checking total RAM:
+
+- `/proc/meminfo` `MemAvailable` must be above 16 GiB;
+- the writable tmpfs must have at least 8 GiB free;
+- the qcow2 receives a kernel-enforced file-size limit of at most 12 GiB, and
+  that complete budget must still leave the configured QEMU guest memory plus
+  2 GiB for the host.
+
+The limit is enforced in the QEMU child with `RLIMIT_FSIZE`; it is not based on
+an assumed sparse-file size. The decision and exact reason are printed before
+QEMU starts and recorded in `summary.json` and each scenario manifest. The
+runner rechecks the budget before every scenario, deletes each qcow2 after QEMU
+is reaped, and removes its private tmpfs workspace on normal exit, SIGINT, or
+SIGTERM. A small CI tmpfs therefore falls back safely instead of failing
+halfway through an installation.
+
+The backend may be forced for diagnostics:
+
+```bash
+# Require RAM; fail before QEMU if no safe tmpfs exists.
+make test TEST_ARGS=--disk-backend=ramdisk
+
+# Always use the artifact filesystem.
+make test TEST_ARGS=--disk-backend=filesystem
+
+# Change only the automatic MemAvailable trigger.
+make test TEST_ARGS=--ramdisk-threshold=24
+```
+
+When the persistent filesystem backend is selected, before the run and again
+before every scenario the harness requires free host space for the guest's
+entire advertised disk plus a safety reserve (40 GiB + 10 GiB with the default
+matrix). It does not assume that yesterday's sparse qcow2 happened to allocate
+only a few GiB. A capacity failure occurs before QEMU starts. `--dry-run`
+reports the selected backend and its capacity calculation without requiring a
+persistent backend to pass.
+
+Retaining a disk is an explicit, single-case debugging operation. It is
+rejected for a matrix, preventing accidental accumulation:
+
+```bash
+make test \
+  CASES=uefi-nosb-online-btrfs-ssh-enabled \
+  TEST_ARGS=--keep-failed-disk
+```
+
+Use `--keep-passed-disk` only when a successful installed target is required.
+Either retention option automatically selects persistent storage even when
+RAM is abundant, because a retained disk must survive process exit and reboot.
+SIGINT and SIGTERM both stop QEMU and finalize the disposable disk before the
+runner exits. SIGKILL and host power loss cannot execute process cleanup, so a
+subsequent run still refuses to reuse an existing artifact directory.
 
 A scenario fails closed: a missing firmware file, unexpected architecture,
 reused disk or artifact path, installer warning promoted to fatal state,
 package inconsistency, incorrect root filesystem, SSH mismatch, or incomplete
 MOK workflow all produce a non-zero result and preserve evidence.
+
+The desktop file fixture is activated through Nautilus's selected-item default
+action using a real QMP Enter key. This follows the same file-manager launch
+and MIME-dispatch path as a double click, while avoiding fabricated screen
+coordinates: GTK4/Wayland currently exposes zero global component bounds for
+the Nautilus rows in this environment. Evidence records the exact semantic
+selection, QMP request, detected MIME type, default handler, and resulting
+accessible window.

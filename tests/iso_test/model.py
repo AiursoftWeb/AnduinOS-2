@@ -58,6 +58,9 @@ class MatrixDefaults:
     hostname: str
     password: str
     mok_password: str
+    live_grub_entry: str
+    live_locale: str
+    live_timezone: str
 
 
 @dataclass(frozen=True)
@@ -67,8 +70,11 @@ class Scenario:
     firmware: Firmware
     network: Network
     filesystem: Filesystem
+    rime: bool
     online_features: bool
     ssh: SshPolicy
+    automatic_login: bool
+    desktop_release_gate: bool
     snapshots_manager: bool
     mok_enrollment: bool
 
@@ -138,6 +144,9 @@ def _load_defaults(value: object) -> MatrixDefaults:
         "hostname",
         "password",
         "mok_password",
+        "live_grub_entry",
+        "live_locale",
+        "live_timezone",
     }
     if set(value) != required:
         raise ConfigurationError("Test matrix defaults have an invalid shape")
@@ -167,8 +176,11 @@ def _load_scenario(value: object) -> Scenario:
         "firmware",
         "network",
         "filesystem",
+        "rime",
         "online_features",
         "ssh",
+        "automatic_login",
+        "desktop_release_gate",
         "snapshots_manager",
         "mok_enrollment",
     }
@@ -192,11 +204,20 @@ def _load_scenario(value: object) -> Scenario:
         raise ConfigurationError(f"{identifier}: duplicate architecture")
     if firmware is Firmware.BIOS and architectures != (Architecture.AMD64,):
         raise ConfigurationError(f"{identifier}: BIOS is amd64-only")
-    for name in ("online_features", "snapshots_manager", "mok_enrollment"):
+    for name in (
+        "rime",
+        "online_features",
+        "automatic_login",
+        "desktop_release_gate",
+        "snapshots_manager",
+        "mok_enrollment",
+    ):
         if type(value[name]) is not bool:
             raise ConfigurationError(f"{identifier}: {name} must be boolean")
     if value["online_features"] and network is Network.OFFLINE:
         raise ConfigurationError(f"{identifier}: offline case enables downloads")
+    if value["rime"] and network is Network.OFFLINE:
+        raise ConfigurationError(f"{identifier}: offline case enables Rime download")
     if value["mok_enrollment"] != firmware.secure_boot:
         raise ConfigurationError(f"{identifier}: MOK policy contradicts firmware")
     if value["snapshots_manager"] != (filesystem is Filesystem.BTRFS):
@@ -209,8 +230,11 @@ def _load_scenario(value: object) -> Scenario:
         firmware=firmware,
         network=network,
         filesystem=filesystem,
+        rime=value["rime"],
         online_features=value["online_features"],
         ssh=ssh,
+        automatic_login=value["automatic_login"],
+        desktop_release_gate=value["desktop_release_gate"],
         snapshots_manager=value["snapshots_manager"],
         mok_enrollment=value["mok_enrollment"],
     )

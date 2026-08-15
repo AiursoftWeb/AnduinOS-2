@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import tarfile
 import tempfile
@@ -19,6 +20,8 @@ from collections.abc import Callable
 
 from .assertions import assert_installed_environment, assert_live_environment
 from .errors import ProtocolError, TestFailure
+from .display import SpiceDisplayController
+from .fixtures import build_desktop_fixtures
 from .firmware import FirmwareOverrides, copy_variables, resolve_firmware
 from .grub import (
     InstalledBootFiles,
@@ -28,11 +31,14 @@ from .grub import (
 from .iso import IsoInspection
 from .model import Architecture, Firmware, MatrixDefaults, Scenario, SshPolicy
 from .qemu import QemuConfig, QemuVm, allocate_tcp_port, resolve_qemu
+from .storage import DiskStorage, assert_disk_storage_ready
+from .visual import assert_font_fixture, plymouth_match
 
 
 @dataclass(frozen=True)
 class RunnerOptions:
     artifacts_root: Path
+    disk_storage: DiskStorage
     firmware_overrides: FirmwareOverrides
     memory_mib: int
     cpus: int
@@ -41,7 +47,10 @@ class RunnerOptions:
     install_timeout_seconds: int
     command_timeout_seconds: int
     firmware_delay_seconds: float
+    free_space_reserve_gib: int = 10
     smoke_only: bool = False
+    keep_passed_disk: bool = False
+    keep_failed_disk: bool = False
 
 
 @dataclass(frozen=True)
@@ -75,13 +84,25 @@ class ScenarioRunner:
         if artifacts.exists():
             raise TestFailure(f"Refusing to reuse artifact directory: {artifacts}")
         artifacts.mkdir(parents=True)
+        # Recheck for every scenario. A previous explicitly retained disk or
+        # another host workload must not let a matrix consume the last bytes
+        # after the initial CLI preflight. Capacity failures abort the run;
+        # they are host safety failures, not product failures.
+        assert_disk_storage_ready(
+            self.options.disk_storage,
+            disk_gib=self.options.disk_gib,
+            filesystem_reserve_gib=self.options.free_space_reserve_gib,
+            memory_mib=self.options.memory_mib,
+        )
         vm: QemuVm | None = None
+        passed = False
         try:
             vm = self._create_vm(scenario, artifacts)
             vm.create_disk()
             self._write_manifest(scenario, vm.config, artifacts)
             boot_files = self._run_live_phase(vm, scenario, artifacts)
             if self.options.smoke_only:
+                passed = True
                 return ScenarioResult(
                     scenario.id,
                     "passed",
@@ -91,6 +112,7 @@ class ScenarioRunner:
             if boot_files is None:
                 raise TestFailure("Installer run did not discover target boot files")
             self._run_target_phase(vm, scenario, boot_files, artifacts)
+            passed = True
             return ScenarioResult(
                 scenario.id,
                 "passed",
@@ -115,7 +137,49 @@ class ScenarioRunner:
             )
         finally:
             if vm is not None:
-                vm.stop()
+                try:
+                    vm.stop()
+                finally:
+                    # Delete only after stop has either reaped QEMU or exposed
+                    # that it is still running. `_finalize_disk` refuses the
+                    # latter instead of unlinking a live block device.
+                    self._finalize_disk(vm, artifacts, passed=passed)
+
+    def _finalize_disk(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+        *,
+        passed: bool,
+    ) -> None:
+        if vm.running:
+            raise TestFailure("Cannot finalize a target disk while QEMU is running")
+        outcome = "passed" if passed else "failed"
+        keep = (
+            self.options.keep_passed_disk
+            if passed
+            else self.options.keep_failed_disk
+        )
+        if keep:
+            message = (
+                f"{outcome} target disk retained by explicit single-case option\n"
+            )
+        elif vm.config.disk.exists():
+            vm.config.disk.unlink()
+            message = (
+                f"{outcome} target disk discarded; durable logs, screenshots, "
+                "serial transcripts, and structured evidence remain\n"
+            )
+        else:
+            message = f"{outcome} target disk was never created\n"
+        if self.options.disk_storage.is_ramdisk:
+            try:
+                vm.config.disk.parent.rmdir()
+            except OSError:
+                pass
+        (artifacts / "target-disk-retention.txt").write_text(
+            message, encoding="utf-8"
+        )
 
     def _create_vm(self, scenario: Scenario, artifacts: Path) -> QemuVm:
         selection = resolve_firmware(
@@ -136,12 +200,13 @@ class ScenarioRunner:
             disk_gib=self.options.disk_gib,
             ssh_forward_port=allocate_tcp_port(),
             iso=self.inspection.path,
-            disk=artifacts / "target.qcow2",
+            disk=self.options.disk_storage.root / scenario.id / "target.qcow2",
             variables=variables,
             firmware_selection=selection,
             artifacts=artifacts,
             qemu_binary=qemu_binary,
             acceleration=acceleration,
+            file_size_limit_bytes=self.options.disk_storage.qcow_limit_bytes,
         )
         return QemuVm(config)
 
@@ -162,6 +227,10 @@ class ScenarioRunner:
                 "memory_mib": config.memory_mib,
                 "cpus": config.cpus,
                 "disk_gib": config.disk_gib,
+                "disk_backend": self.options.disk_storage.backend,
+                "disk_workspace": str(self.options.disk_storage.root),
+                "disk_backend_reason": self.options.disk_storage.reason,
+                "disk_file_size_limit_bytes": config.file_size_limit_bytes,
                 "ssh_forward_port": config.ssh_forward_port,
                 "firmware_code": (
                     str(config.firmware_selection.code)
@@ -195,11 +264,18 @@ class ScenarioRunner:
             self.architecture,
             firmware_delay=self.options.firmware_delay_seconds,
             synchronize_prompt=scenario.firmware.secure_boot,
+            kernel_arguments=self._live_grub_entry().kernel_arguments,
         )
         vm.serial.timeout = self.options.command_timeout_seconds
         vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
         self.status(scenario.id, "Live GNOME and serial control are ready")
-        assert_live_environment(vm.serial, scenario, artifacts)
+        assert_live_environment(
+            vm.serial,
+            scenario,
+            artifacts,
+            self.defaults.live_locale,
+            self.defaults.live_timezone,
+        )
         vm.screenshot("live-desktop")
         if self.options.smoke_only:
             _power_off(vm)
@@ -331,14 +407,18 @@ fi
             self.defaults.hostname.casefold(),
             artifacts,
         )
-        vm.screenshot("installed-gdm")
-        self.status(scenario.id, "Logging into the installed GNOME desktop")
-        _login_gdm(
-            vm,
-            self.defaults.username,
-            self.defaults.password,
-            timeout=120,
-        )
+        self._assert_automatic_login_behavior(vm, scenario, artifacts)
+        if not scenario.automatic_login:
+            vm.screenshot("installed-gdm")
+            self.status(scenario.id, "Logging into the installed GNOME desktop")
+            _login_gdm(
+                vm,
+                self.defaults.username,
+                self.defaults.password,
+                timeout=120,
+            )
+        else:
+            vm.screenshot("installed-automatic-login")
         graphical_user = _graphical_user(vm.serial)
         if graphical_user != self.defaults.username:
             raise TestFailure(
@@ -346,12 +426,572 @@ fi
                 f"{graphical_user}"
             )
         vm.screenshot("installed-desktop")
+        self._assert_desktop_session(vm, scenario, artifacts)
+        desktop_failures: list[str] = []
+        if scenario.desktop_release_gate:
+            for label, check in (
+                (
+                    "font-rendering",
+                    lambda: self._exercise_font_rendering(vm, scenario, artifacts),
+                ),
+                (
+                    "desktop-file-dispatch",
+                    lambda: self._exercise_desktop_file_dispatch(
+                        vm, scenario, artifacts
+                    ),
+                ),
+                (
+                    "gnome-extensions",
+                    lambda: self._assert_gnome_extensions(vm, scenario, artifacts),
+                ),
+                (
+                    "spice-resolution",
+                    lambda: self._exercise_dynamic_resolution(
+                        vm, scenario, artifacts
+                    ),
+                ),
+            ):
+                self._collect_desktop_gate_failure(
+                    label, check, desktop_failures, artifacts
+                )
         if scenario.snapshots_manager:
             self._exercise_snapshots_manager(vm, scenario, artifacts)
-        self._assert_host_ssh(vm, scenario, artifacts)
+        if scenario.desktop_release_gate:
+            self._collect_desktop_gate_failure(
+                "host-ssh",
+                lambda: self._assert_host_ssh(vm, scenario, artifacts),
+                desktop_failures,
+                artifacts,
+            )
+        else:
+            self._assert_host_ssh(vm, scenario, artifacts)
         if scenario.ssh is SshPolicy.TOGGLE:
             self._exercise_gnome_ssh_switch(vm, scenario, artifacts)
+        if scenario.desktop_release_gate:
+            self._collect_desktop_gate_failure(
+                "journal-health",
+                lambda: self._assert_journal_health(vm, scenario, artifacts),
+                desktop_failures,
+                artifacts,
+            )
+        if scenario.desktop_release_gate:
+            _retrieve_file(
+                vm.serial,
+                "/usr/share/plymouth/themes/anduinos/watermark.png",
+                artifacts / "plymouth-watermark.png",
+            )
         _power_off(vm)
+        if scenario.desktop_release_gate:
+            self._collect_desktop_gate_failure(
+                "plymouth-passive-boot",
+                lambda: self._assert_passive_plymouth_boot(
+                    vm, scenario, artifacts
+                ),
+                desktop_failures,
+                artifacts,
+            )
+        if desktop_failures:
+            raise TestFailure(
+                "Desktop release gates failed:\n- "
+                + "\n- ".join(desktop_failures)
+            )
+
+    def _collect_desktop_gate_failure(
+        self,
+        label: str,
+        check: Callable[[], None],
+        failures: list[str],
+        artifacts: Path,
+    ) -> None:
+        try:
+            check()
+        except Exception as error:
+            message = f"{label}: {type(error).__name__}: {error}"
+            failures.append(message)
+            with (artifacts / "desktop-gate-failures.txt").open(
+                "a", encoding="utf-8"
+            ) as stream:
+                stream.write(message + "\n")
+
+    def _live_grub_entry(self):
+        entry = self.inspection.live_entry(self.defaults.live_grub_entry)
+        if entry.locale != self.defaults.live_locale:
+            raise TestFailure(
+                f"GRUB entry locale is {entry.locale}, expected {self.defaults.live_locale}"
+            )
+        if entry.timezone != self.defaults.live_timezone:
+            raise TestFailure(
+                "GRUB entry timezone is "
+                f"{entry.timezone}, expected {self.defaults.live_timezone}"
+            )
+        return entry
+
+    def _assert_automatic_login_behavior(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        if scenario.automatic_login:
+            self.status(
+                scenario.id,
+                "Waiting for GDM automatic login without sending credentials",
+            )
+            deadline = time.monotonic() + 180
+            observed = ""
+            while time.monotonic() < deadline:
+                observed = _graphical_user_optional(vm.serial)
+                if observed == self.defaults.username:
+                    break
+                if observed:
+                    raise TestFailure(
+                        "GDM automatically opened the wrong account: " + observed
+                    )
+                time.sleep(2)
+            else:
+                raise TestFailure(
+                    "GDM automatic login was selected, but no user desktop opened "
+                    "without keyboard input"
+                )
+            message = "automatic-login=observed-without-input\n"
+        else:
+            # GDM is already active here. Give it enough time to expose an
+            # accidental auto-login, while deliberately sending no QMP keys.
+            time.sleep(8)
+            observed = _graphical_user_optional(vm.serial)
+            if observed:
+                raise TestFailure(
+                    "GDM automatic login was disabled, but a graphical user session "
+                    f"opened for {observed}"
+                )
+            message = "automatic-login=not-observed-before-password\n"
+        (artifacts / "installed-gdm-behavior.txt").write_text(
+            message, encoding="utf-8"
+        )
+
+    def _assert_desktop_session(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        self.status(scenario.id, "Checking the active GNOME cursor contract")
+        script = r"""
+set -euo pipefail
+theme=$(gsettings get org.gnome.desktop.interface cursor-theme)
+size=$(gsettings get org.gnome.desktop.interface cursor-size)
+printf 'cursor-theme=%s\ncursor-size=%s\n' "$theme" "$size"
+test "$theme" = "'Fluent-dark-cursors'"
+test "$size" = 32
+test -d /usr/share/icons/Fluent-dark-cursors/cursors
+test -e /usr/share/icons/Fluent-dark-cursors/cursors/left_ptr
+"""
+        result = vm.serial.run(
+            _desktop_command(
+                self.defaults.username,
+                ("bash", "-lc", script),
+            ),
+            timeout=60,
+        )
+        (artifacts / "installed-desktop-contracts.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+
+    def _exercise_font_rendering(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        self.status(
+            scenario.id,
+            "Rendering Chinese and the green Twemoji water pistol in GTK",
+        )
+        remote_root = "/run/anduinos-acceptance-fonts"
+        vm.serial.run(f"install -d -m 0777 {remote_root}/evidence")
+        vm.serial.upload(self.driver, f"{remote_root}/atspi_driver.py", 0o755)
+        fixture = Path(__file__).parents[1] / "guest" / "font_fixture.py"
+        vm.serial.upload(fixture, f"{remote_root}/font_fixture.py", 0o755)
+        command = _desktop_command(
+            self.defaults.username,
+            (
+                "python3",
+                f"{remote_root}/atspi_driver.py",
+                "font-rendering",
+                "--evidence",
+                f"{remote_root}/evidence",
+            ),
+        )
+        result = vm.serial.run(command, timeout=180, check=False)
+        with (artifacts / "atspi-events.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(result.stdout + "\n")
+        _retrieve_tree(
+            vm.serial,
+            remote_root,
+            artifacts / "guest-font-evidence",
+        )
+        _retrieve_file(
+            vm.serial,
+            "/tmp/anduinos-font-fixture.stdout",
+            artifacts / "font-fixture.stdout",
+        )
+        if result.returncode != 0:
+            raise TestFailure(
+                "GTK font rendering fixture failed through AT-SPI:\n"
+                + result.stdout[-8000:]
+            )
+        time.sleep(1)
+        screenshot = vm.screenshot("font-rendering")
+        assert_font_fixture(screenshot, artifacts / "font-rendering-analysis.json")
+        vm.serial.run(
+            "pkill -f '/run/anduinos-acceptance-fonts/font_fixture.py' || true",
+            timeout=30,
+            check=False,
+        )
+
+    def _exercise_desktop_file_dispatch(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        self.status(
+            scenario.id,
+            "Double-opening a real AppImage and CPU-Z PE through Nautilus",
+        )
+        fixture_root = artifacts / "host-desktop-fixtures"
+        appimage, pe = build_desktop_fixtures(self.architecture, fixture_root)
+        remote_root = "/run/anduinos-acceptance-files"
+        downloads = f"/home/{self.defaults.username}/Downloads"
+        vm.serial.run(
+            f"install -d -m 0777 {remote_root}/evidence\n"
+            f"install -d -o {self.defaults.username} -g {self.defaults.username} "
+            f"-m 0755 {shlex.quote(downloads)}"
+        )
+        vm.serial.upload(self.driver, f"{remote_root}/atspi_driver.py", 0o755)
+        vm.serial.upload(appimage, f"{downloads}/{appimage.name}", 0o755)
+        vm.serial.upload(pe, f"{downloads}/{pe.name}", 0o644)
+        validation = vm.serial.run(
+            f"set -euo pipefail\n"
+            f"chown {self.defaults.username}:{self.defaults.username} "
+            f"{shlex.quote(downloads)}/{appimage.name} "
+            f"{shlex.quote(downloads)}/{pe.name}\n"
+            f"test \"$(dd if={shlex.quote(downloads)}/{appimage.name} "
+            "bs=1 skip=8 count=3 status=none | base64 -w0)\" = QUkC\n"
+            f"grep -a -q hsqs {shlex.quote(downloads)}/{appimage.name}\n"
+            f"test \"$(head -c2 {shlex.quote(downloads)}/{pe.name})\" = MZ\n"
+            f"offset=$(runuser -u {self.defaults.username} -- "
+            f"{shlex.quote(downloads)}/{appimage.name} --appimage-offset)\n"
+            f"test \"$offset\" -gt 0\n"
+            f"printf 'appimage-payload-offset=%s\\n' \"$offset\"\n"
+            f"pe_mime=$(runuser -u {self.defaults.username} -- "
+            f"xdg-mime query filetype {shlex.quote(downloads)}/{pe.name})\n"
+            f"pe_default=$(runuser -u {self.defaults.username} -- "
+            f"xdg-mime query default \"$pe_mime\")\n"
+            f"printf 'pe-mime=%s\\npe-default=%s\\n' \"$pe_mime\" \"$pe_default\"\n"
+            "test \"$pe_mime\" = application/vnd.microsoft.portable-executable\n"
+            "test \"$pe_default\" = com.anduinos.ExeRunner.desktop\n"
+            f"file {shlex.quote(downloads)}/{appimage.name} "
+            f"{shlex.quote(downloads)}/{pe.name}\n"
+            f"sha256sum {shlex.quote(downloads)}/{appimage.name} "
+            f"{shlex.quote(downloads)}/{pe.name}",
+            timeout=120,
+            check=False,
+        )
+        (artifacts / "desktop-fixtures.txt").write_text(
+            validation.stdout + "\n", encoding="utf-8"
+        )
+        if validation.returncode != 0:
+            raise TestFailure(
+                "CPU-Z PE MIME/default-handler contract failed before Nautilus "
+                "activation:\n" + validation.stdout[-8000:]
+            )
+        command = _desktop_command(
+            self.defaults.username,
+            (
+                "python3",
+                f"{remote_root}/atspi_driver.py",
+                "desktop-files",
+                "--evidence",
+                f"{remote_root}/evidence",
+            ),
+        )
+        result = _run_with_qmp_key_requests(vm, command, timeout=300)
+        with (artifacts / "atspi-events.jsonl").open("a", encoding="utf-8") as stream:
+            stream.write(result.stdout + "\n")
+        _retrieve_tree(
+            vm.serial,
+            remote_root,
+            artifacts / "guest-desktop-files-evidence",
+        )
+        _retrieve_file(
+            vm.serial,
+            "/tmp/anduinos-nautilus.stdout",
+            artifacts / "nautilus.stdout",
+        )
+        if result.returncode != 0:
+            raise TestFailure(
+                "AppImage/CPU-Z desktop dispatch failed through Nautilus AT-SPI:\n"
+                + result.stdout[-8000:]
+            )
+
+    def _assert_gnome_extensions(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        self.status(scenario.id, "Checking every default GNOME extension's live state")
+        excluded = (
+            "simple-weather@romanlefler.com",
+            "network-stats@gnome.noroadsleft.xyz",
+        )
+        script = f"""
+set -euo pipefail
+installed=$(find /usr/share/gnome-shell/extensions -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort)
+configured=$(gsettings get org.gnome.shell enabled-extensions | tr "'[]," '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort)
+expected=$(printf '%s\\n' "$installed" | grep -Fvx {shlex.quote(excluded[0])} | grep -Fvx {shlex.quote(excluded[1])})
+printf '%s\\n' "$installed" > /tmp/anduinos-extensions-installed
+printf '%s\\n' "$configured" > /tmp/anduinos-extensions-configured
+printf '%s\\n' "$expected" > /tmp/anduinos-extensions-expected
+diff -u /tmp/anduinos-extensions-expected /tmp/anduinos-extensions-configured
+for uuid in $expected; do
+    info=$(LC_ALL=C gnome-extensions info "$uuid")
+    printf '\\n[%s]\\n%s\\n' "$uuid" "$info"
+    printf '%s\\n' "$info" | grep -Eq '^[[:space:]]*State:[[:space:]]+ACTIVE[[:space:]]*$'
+done
+for uuid in {shlex.quote(excluded[0])} {shlex.quote(excluded[1])}; do
+    printf '%s\\n' "$installed" | grep -Fx "$uuid"
+    info=$(LC_ALL=C gnome-extensions info "$uuid")
+    printf '\\n[%s]\\n%s\\n' "$uuid" "$info"
+    ! printf '%s\\n' "$info" | grep -Eq '^[[:space:]]*State:[[:space:]]+ACTIVE[[:space:]]*$'
+done
+"""
+        result = vm.serial.run(
+            _desktop_command(
+                self.defaults.username,
+                ("bash", "-lc", script),
+            ),
+            timeout=180,
+            check=False,
+        )
+        (artifacts / "installed-gnome-extensions.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+        if result.returncode != 0:
+            raise TestFailure(
+                "Default GNOME extension inventory/state is invalid:\n"
+                + result.stdout[-8000:]
+            )
+
+    def _exercise_dynamic_resolution(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        self.status(scenario.id, "Resizing a real SPICE client and querying Mutter")
+        agent = vm.serial.run(
+            "set -e\n"
+            "pgrep -a spice-vdagent\n"
+            "test -c /dev/virtio-ports/com.redhat.spice.0\n",
+            timeout=60,
+        )
+        observations: list[dict[str, object]] = []
+        with SpiceDisplayController(vm.spice_socket, artifacts) as viewer:
+            baseline, baseline_raw = self._wait_for_display_mode(vm, previous=None)
+            for width, height in ((1000, 760), (1420, 920)):
+                viewer.resize(width, height)
+                mode, raw = self._wait_for_display_mode(
+                    vm,
+                    previous=(
+                        tuple(observations[-1]["mode"])
+                        if observations
+                        else baseline
+                    ),
+                )
+                observations.append(
+                    {
+                        "requested_window": [width, height],
+                        "mode": list(mode),
+                        "gdctl": raw,
+                    }
+                )
+        first = tuple(observations[0]["mode"])
+        second = tuple(observations[1]["mode"])
+        if first == second or second[0] <= first[0] or second[1] <= first[1]:
+            raise TestFailure(
+                f"Mutter did not follow increasing SPICE client sizes: {first} -> {second}"
+            )
+        for observation in observations:
+            requested = observation["requested_window"]
+            mode = observation["mode"]
+            if abs(requested[0] - mode[0]) > 180 or abs(requested[1] - mode[1]) > 180:
+                raise TestFailure(
+                    "SPICE/Mutter mode is not close to the client geometry: "
+                    f"requested={requested}, mode={mode}"
+                )
+        (artifacts / "installed-spice-resolution.json").write_text(
+            json.dumps(
+                {
+                    "spice_agent": agent.stdout,
+                    "baseline": {"mode": list(baseline), "gdctl": baseline_raw},
+                    "observations": observations,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+
+    def _wait_for_display_mode(
+        self,
+        vm: QemuVm,
+        previous: tuple[int, int] | None,
+    ) -> tuple[tuple[int, int], str]:
+        assert vm.serial is not None
+        deadline = time.monotonic() + 45
+        last = ""
+        while time.monotonic() < deadline:
+            result = vm.serial.run(
+                _desktop_command(
+                    self.defaults.username,
+                    ("bash", "-lc", "LC_ALL=C gdctl show"),
+                ),
+                timeout=30,
+                check=False,
+            )
+            last = result.stdout
+            match = re.search(r"Current mode.*?([0-9]{3,5})x([0-9]{3,5})@", last, re.DOTALL)
+            if result.returncode == 0 and match is not None:
+                mode = (int(match.group(1)), int(match.group(2)))
+                if previous is None or mode != previous:
+                    return mode, last
+            time.sleep(1)
+        raise TestFailure(
+            "Mutter did not report a changed current mode after SPICE resize:\n"
+            + last[-4000:]
+        )
+
+    def _assert_journal_health(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        self.status(scenario.id, "Applying strict system and GNOME journal gates")
+        system = vm.serial.run(
+            r"""
+set -uo pipefail
+failed=$(systemctl --failed --no-legend --plain 2>&1)
+priority=$(journalctl -b -p 0..3 --no-pager -o short-iso 2>&1)
+patterns=$(journalctl -b --no-pager -o short-iso 2>&1 | grep -Ei 'segfault|core dumped|JS ERROR|extension.*(error|exception)|assertion.*failed|(^|[[:space:]])fatal(:|[[:space:]]+(error|failure))' || true)
+printf '%s\n' '=== systemctl --failed ===' "$failed"
+printf '%s\n' '=== journal priority 0..3 ===' "$priority"
+printf '%s\n' '=== fatal-pattern scan ===' "$patterns"
+test -z "$failed"
+test -z "$patterns"
+test -z "$priority" -o "$priority" = '-- No entries --'
+""",
+            timeout=180,
+            check=False,
+        )
+        user_script = r"""
+set -uo pipefail
+failed=$(systemctl --user --failed --no-legend --plain 2>&1)
+priority=$(journalctl --user -b -p 0..3 --no-pager -o short-iso 2>&1)
+patterns=$(journalctl --user -b --no-pager -o short-iso 2>&1 | grep -Ei 'segfault|core dumped|JS ERROR|extension.*(error|exception)|assertion.*failed|(^|[[:space:]])fatal(:|[[:space:]]+(error|failure))' || true)
+printf '%s\n' '=== systemctl --user --failed ===' "$failed"
+printf '%s\n' '=== user journal priority 0..3 ===' "$priority"
+printf '%s\n' '=== user fatal-pattern scan ===' "$patterns"
+test -z "$failed"
+test -z "$patterns"
+test -z "$priority" -o "$priority" = '-- No entries --'
+"""
+        user = vm.serial.run(
+            _desktop_command(
+                self.defaults.username,
+                ("bash", "-lc", user_script),
+            ),
+            timeout=180,
+            check=False,
+        )
+        (artifacts / "installed-system-journal-gate.txt").write_text(
+            system.stdout + "\n", encoding="utf-8"
+        )
+        (artifacts / "installed-user-journal-gate.txt").write_text(
+            user.stdout + "\n", encoding="utf-8"
+        )
+        if system.returncode != 0 or user.returncode != 0:
+            raise TestFailure(
+                "journal/systemd error gate failed; inspect "
+                "installed-system-journal-gate.txt and "
+                "installed-user-journal-gate.txt"
+            )
+
+    def _assert_passive_plymouth_boot(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        """Observe an ordinary installed boot without editing or driving GRUB."""
+
+        watermark = artifacts / "plymouth-watermark.png"
+        if not watermark.is_file() or not watermark.stat().st_size:
+            raise TestFailure("Installed AnduinOS Plymouth watermark is missing")
+        self.status(
+            scenario.id,
+            "Watching an unmodified installed boot for the AnduinOS Plymouth logo",
+        )
+        vm.start(attach_iso=False, phase="plymouth-passive")
+        deadline = time.monotonic() + self.options.boot_timeout_seconds
+        probe = artifacts / "plymouth-probe.ppm"
+        observations: list[dict[str, object]] = []
+        matched: dict[str, object] | None = None
+        try:
+            while time.monotonic() < deadline and vm.running:
+                try:
+                    vm.screenshot("plymouth-probe")
+                    result = plymouth_match(probe, watermark)
+                    result["seconds"] = round(
+                        self.options.boot_timeout_seconds
+                        - (deadline - time.monotonic()),
+                        2,
+                    )
+                    observations.append(result)
+                    if result.get("matched") is True:
+                        matched = result
+                        shutil.copy2(probe, artifacts / "plymouth-branding.ppm")
+                        break
+                except (OSError, ProtocolError):
+                    pass
+                time.sleep(0.2 if self.architecture is Architecture.AMD64 else 0.5)
+        finally:
+            vm.stop()
+        report = {
+            "matched": matched is not None,
+            "match": matched,
+            "observations": observations,
+            "boot_mode": "passive; ISO detached; no GRUB or guest input",
+        }
+        (artifacts / "plymouth-analysis.json").write_text(
+            json.dumps(report, indent=2) + "\n", encoding="utf-8"
+        )
+        probe.unlink(missing_ok=True)
+        if matched is None:
+            raise TestFailure(
+                "An ordinary installed boot never displayed the installed "
+                "AnduinOS Plymouth watermark"
+            )
 
     def _enroll_mok(
         self,
@@ -724,7 +1364,7 @@ def _run_with_qmp_key_requests(
                         identifier, key = request
                         if identifier in handled:
                             continue
-                        if key not in {"tab", "spc"}:
+                        if key not in {"tab", "spc", "ret"}:
                             raise TestFailure(
                                 f"Guest requested unsupported QMP key: {key!r}"
                             )
@@ -799,15 +1439,16 @@ def _extract_boot_filename(output: str, key: str, prefix: str) -> str:
     return filename
 
 
-def _graphical_user(console) -> str:
-    result = console.run(
-        r"""
+_GRAPHICAL_USER_SCRIPT = r"""
 set -e
 for runtime in $(find /run/user -mindepth 1 -maxdepth 1 -type d | sort -V -r); do
     uid=${runtime##*/}
     user=$(getent passwd "$uid" | cut -d: -f1)
+    shell=$(getent passwd "$uid" | cut -d: -f7)
     [ -n "$user" ] || continue
-    [ "$user" != gdm ] || continue
+    case "$user:$shell" in
+        gdm:*|gdm-greeter:*|*:/usr/sbin/nologin|*:/bin/false) continue ;;
+    esac
     [ -S "$runtime/bus" ] || continue
     find "$runtime" -maxdepth 1 -type s -name 'wayland-[0-9]*' 2>/dev/null | grep -q . || continue
     printf '%s\n' "$user"
@@ -815,7 +1456,17 @@ for runtime in $(find /run/user -mindepth 1 -maxdepth 1 -type d | sort -V -r); d
 done
 exit 1
 """
-    )
+
+
+def _graphical_user(console) -> str:
+    result = console.run(_GRAPHICAL_USER_SCRIPT)
+    return result.stdout.strip().splitlines()[-1]
+
+
+def _graphical_user_optional(console) -> str:
+    result = console.run(_GRAPHICAL_USER_SCRIPT, check=False)
+    if result.returncode != 0 or not result.stdout.strip():
+        return ""
     return result.stdout.strip().splitlines()[-1]
 
 
@@ -827,7 +1478,7 @@ def _desktop_command(
 ) -> str:
     rendered = shlex.join(command)
     quoted_user = shlex.quote(user)
-    return f"""
+    common = f"""
 set -e
 user={quoted_user}
 uid=$(id -u "$user")
@@ -836,28 +1487,27 @@ home=$(getent passwd "$user" | cut -d: -f6)
 wayland=$(find "$runtime" -maxdepth 1 -type s -name 'wayland-[0-9]*' -printf '%f\\n' 2>/dev/null | head -n1)
 test -S "$runtime/bus"
 test -n "$wayland"
-managed={"true" if managed else "false"}
-if $managed; then
-    rendered="systemd-run --user --wait --pipe --collect --quiet \\
-        --setenv=HOME=$home \\
-        --setenv=XDG_RUNTIME_DIR=$runtime \\
-        --setenv=DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus \\
-        --setenv=WAYLAND_DISPLAY=$wayland --setenv=DISPLAY=:0 \\
-        --setenv=NO_AT_BRIDGE=0 --setenv=XDG_CURRENT_DESKTOP=GNOME \\
-        --setenv=XDG_SESSION_DESKTOP=gnome --setenv=DESKTOP_SESSION=gnome \\
-        --setenv=GDMSESSION=gnome -- {rendered}"
-else
-    rendered={shlex.quote(rendered)}
-fi
-runuser -u "$user" -- env \\
-    HOME="$home" \\
-    XDG_RUNTIME_DIR="$runtime" \\
-    DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \\
-    WAYLAND_DISPLAY="$wayland" DISPLAY=:0 NO_AT_BRIDGE=0 \\
-    XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_DESKTOP=gnome \\
-    DESKTOP_SESSION=gnome GDMSESSION=gnome \\
-    /bin/bash -c "$rendered"
 """
+    environment = r"""
+runuser -u "$user" -- env \
+    HOME="$home" \
+    XDG_RUNTIME_DIR="$runtime" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+    WAYLAND_DISPLAY="$wayland" DISPLAY=:0 NO_AT_BRIDGE=0 \
+    XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_DESKTOP=gnome \
+    DESKTOP_SESSION=gnome GDMSESSION=gnome"""
+    if managed:
+        return common + environment + f""" \
+    systemd-run --user --wait --pipe --collect --quiet \
+        --setenv=HOME="$home" \
+        --setenv=XDG_RUNTIME_DIR="$runtime" \
+        --setenv=DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+        --setenv=WAYLAND_DISPLAY="$wayland" --setenv=DISPLAY=:0 \
+        --setenv=NO_AT_BRIDGE=0 --setenv=XDG_CURRENT_DESKTOP=GNOME \
+        --setenv=XDG_SESSION_DESKTOP=gnome --setenv=DESKTOP_SESSION=gnome \
+        --setenv=GDMSESSION=gnome -- {rendered}
+"""
+    return common + environment + f" \\\n    {rendered}\n"
 
 
 def _retrieve_tree(console, remote_root: str, destination: Path) -> None:
@@ -1047,10 +1697,12 @@ def _power_off(vm: QemuVm) -> None:
     """Flush guest filesystems and close the disposable VM through QMP."""
 
     assert vm.serial is not None and vm.qmp is not None
-    vm.serial.run("sync", timeout=30)
-    vm.qmp.quit()
-    vm.wait(15)
-    vm.stop()
+    try:
+        vm.serial.run("sync", timeout=30)
+        vm.qmp.quit()
+        vm.wait(15)
+    finally:
+        vm.stop()
 
 
 def _status(identifier: str, message: str) -> None:

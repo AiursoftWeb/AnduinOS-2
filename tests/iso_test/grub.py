@@ -35,6 +35,7 @@ def boot_iso_with_debug_shell(
     *,
     firmware_delay: float,
     synchronize_prompt: bool = False,
+    kernel_arguments: tuple[str, ...] = (),
 ) -> None:
     """Boot the known immutable Casper paths from GRUB's command line."""
 
@@ -48,10 +49,13 @@ def boot_iso_with_debug_shell(
         # fixed sleeps can lose the first characters of the kernel command.
         console.wait_for_text("grub>", timeout=30)
         time.sleep(0.25)
-    kernel = (
-        "linux /casper/vmlinuz boot=casper nopersistent"
-        + debug_kernel_arguments(architecture)
+    arguments = tuple(
+        item for item in kernel_arguments if item not in {"quiet", "splash", "---"}
     )
+    if not arguments:
+        arguments = ("boot=casper", "nopersistent")
+    kernel = "linux /casper/vmlinuz " + " ".join(arguments)
+    kernel += debug_kernel_arguments(architecture)
     _submit_grub_command(qmp, console, kernel, synchronize_prompt)
     _submit_grub_command(
         qmp, console, "initrd /casper/initrd", synchronize_prompt

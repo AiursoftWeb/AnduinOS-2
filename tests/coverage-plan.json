@@ -1,0 +1,394 @@
+{
+  "schema_version": 1,
+  "kind": "architecture-coverage-plan",
+  "profiles": [
+    "unit",
+    "install",
+    "release-gate",
+    "nightly-online",
+    "platform-lab"
+  ],
+  "requirements": [
+    {
+      "id": "R01",
+      "summary": "Simplified Chinese localization is coherent on high-value desktop surfaces",
+      "checks": ["regional.installed-zh-cn", "localization.zh-cn-contract"]
+    },
+    {
+      "id": "R02",
+      "summary": "The visible boot splash uses AnduinOS Plymouth branding",
+      "checks": ["boot.plymouth-anduinos-logo"]
+    },
+    {
+      "id": "R03",
+      "summary": "GNOME does not enter Overview automatically after login",
+      "checks": ["shell.initial-overview-hidden"]
+    },
+    {
+      "id": "R04",
+      "summary": "The AnduinOS cursor theme is applied in the user session",
+      "checks": ["theme.cursor-user-session"]
+    },
+    {
+      "id": "R05",
+      "summary": "Guest resolution follows a resized GNOME Boxes KVM display",
+      "checks": ["display.spice-resize", "display.gnome-boxes-resize"]
+    },
+    {
+      "id": "R06",
+      "summary": "Locale and timezone follow the GRUB language choice into Live and installed systems",
+      "checks": [
+        "regional.grub-contract",
+        "regional.grub-live-propagation",
+        "regional.installed-zh-cn"
+      ]
+    },
+    {
+      "id": "R07",
+      "summary": "The desktop context menu can open the default terminal",
+      "checks": ["desktop.context-menu-terminal"]
+    },
+    {
+      "id": "R08",
+      "summary": "Default desktop icons are visible and functional",
+      "checks": ["desktop.icons-visible"]
+    },
+    {
+      "id": "R09",
+      "summary": "All intended GNOME extensions are active and healthy except Weather and Network Stats",
+      "checks": ["shell.extension-policy", "shell.extension-errors"]
+    },
+    {
+      "id": "R10",
+      "summary": "fs.inotify.max_user_instances is 524288",
+      "checks": ["system.inotify-max-user-instances"]
+    },
+    {
+      "id": "R11",
+      "summary": "Twemoji renders the pistol as the expected green water pistol",
+      "checks": ["render.twemoji-water-pistol"]
+    },
+    {
+      "id": "R12",
+      "summary": "The taskbar Start button renders the AnduinOS logo",
+      "checks": ["branding.start-button-logo"]
+    },
+    {
+      "id": "R13",
+      "summary": "A taskbar icon exposes the locale-correct Remove from taskbar action",
+      "checks": ["panel.remove-menu-localized"]
+    },
+    {
+      "id": "R14",
+      "summary": "An application can be pinned to the taskbar and placed on the desktop",
+      "checks": ["panel.pin-application", "desktop.create-shortcut"]
+    },
+    {
+      "id": "R15",
+      "summary": "Boot, idle, and exercised actions produce no unexpected fatal journal errors",
+      "checks": ["journal.boot-and-idle", "journal.action-scoped"]
+    },
+    {
+      "id": "R16",
+      "summary": "Super+Tab performs the configured Overview action",
+      "checks": ["shortcut.super-tab"]
+    },
+    {
+      "id": "R17",
+      "summary": "Alt+Tab switches between real application windows",
+      "checks": ["shortcut.alt-tab"]
+    },
+    {
+      "id": "R18",
+      "summary": "Super+I opens GNOME Settings",
+      "checks": ["shortcut.super-i"]
+    },
+    {
+      "id": "R19",
+      "summary": "GNOME Settings About displays AnduinOS branding",
+      "checks": ["branding.settings-about-logo"]
+    },
+    {
+      "id": "R20",
+      "summary": "Super+U displays and toggles network information",
+      "checks": ["shortcut.super-u"]
+    },
+    {
+      "id": "R21",
+      "summary": "Super+Shift+S opens the screenshot UI and produces an image",
+      "checks": ["shortcut.super-shift-s"]
+    },
+    {
+      "id": "R22",
+      "summary": "Searching Spotify in Start opens its Software details page",
+      "checks": ["search.spotify-store", "store.spotify-public"]
+    },
+    {
+      "id": "R23",
+      "summary": "The why command displays its intended placeholder",
+      "checks": ["command.why-placeholder"]
+    },
+    {
+      "id": "R24",
+      "summary": "Images receive useful previews in the file manager",
+      "checks": ["files.image-thumbnail"]
+    },
+    {
+      "id": "R25",
+      "summary": "Videos receive useful previews in the file manager",
+      "checks": ["files.video-thumbnail"]
+    },
+    {
+      "id": "R26",
+      "summary": "Double-clicking an image opens the image viewer",
+      "checks": ["files.image-open"]
+    },
+    {
+      "id": "R27",
+      "summary": "Double-clicking a video opens the media player",
+      "checks": ["files.video-open"]
+    },
+    {
+      "id": "R28",
+      "summary": "Double-clicking a DEB opens its Software local-package page",
+      "checks": ["files.deb-software"]
+    },
+    {
+      "id": "R29",
+      "summary": "Windows executables including the pinned CPU-Z build receive previews",
+      "checks": ["files.exe-thumbnail-fixture", "files.cpuz-thumbnail-and-open"]
+    },
+    {
+      "id": "R30",
+      "summary": "Double-clicking a Windows executable including CPU-Z launches it",
+      "checks": ["files.exe-open-fixture", "files.cpuz-thumbnail-and-open"]
+    },
+    {
+      "id": "R31",
+      "summary": "The editor preserves and renders the exact Chinese test phrase",
+      "checks": ["input.utf8-chinese-text"]
+    },
+    {
+      "id": "R32",
+      "summary": "Swap Control opens with the intended green landing page",
+      "checks": ["appearance.swapcontrol-green"]
+    },
+    {
+      "id": "R33",
+      "summary": "Super+Space selects Rime and produces the expected Chinese text",
+      "checks": ["input.super-space-rime"]
+    },
+    {
+      "id": "R34",
+      "summary": "Double-clicking an AppImage launches it",
+      "checks": ["files.appimage-open"]
+    },
+    {
+      "id": "R35",
+      "summary": "The public Nextcloud client PPA can be added without error",
+      "checks": ["apt.nextcloud-client-ppa"]
+    },
+    {
+      "id": "R36",
+      "summary": "WeChat installs and minimizes into the lower-right AppIndicator tray",
+      "checks": ["app.wechat-install", "app.wechat-tray"]
+    },
+    {
+      "id": "R37",
+      "summary": "Ctrl+Alt+F6 reaches tty6 with AnduinOS branding",
+      "checks": ["tty.tty6-branding"]
+    },
+    {
+      "id": "R38",
+      "summary": "The bottom light and dark selector is localized",
+      "checks": ["appearance.theme-menu-localized"]
+    },
+    {
+      "id": "R39",
+      "summary": "The light and dark selector changes GTK applications",
+      "checks": ["appearance.theme-gtk"]
+    },
+    {
+      "id": "R40",
+      "summary": "The light and dark selector changes Qt applications",
+      "checks": ["appearance.theme-qt"]
+    },
+    {
+      "id": "R41",
+      "summary": "The light and dark selector changes Firefox webpage preference",
+      "checks": ["appearance.theme-firefox"]
+    },
+    {
+      "id": "R42",
+      "summary": "A user added in Settings can log in and change the password",
+      "checks": ["account.add-user", "account.new-user-login", "account.change-password"]
+    },
+    {
+      "id": "R43",
+      "summary": "Logout reaches branded GDM with the correct cursor",
+      "checks": ["account.logout-gdm", "branding.gdm", "theme.cursor-gdm"]
+    },
+    {
+      "id": "R44",
+      "summary": "A Live Wi-Fi password is migrated and reconnects automatically after installation",
+      "checks": ["network.wifi-migration-hwsim", "network.wifi-migration-physical"]
+    },
+    {
+      "id": "R45",
+      "summary": "Installer automatic-login opt-in bypasses GDM while the default still requires authentication",
+      "checks": ["login.autologin-enabled", "login.autologin-disabled"]
+    }
+  ],
+  "suites": [
+    {
+      "id": "boot-regional-branding",
+      "profiles": ["install", "release-gate"],
+      "source": "iso-and-installed-zh-base",
+      "isolation": "per-check",
+      "observation_modes": ["passive", "controlled"],
+      "checks": [
+        "boot.plymouth-anduinos-logo",
+        "regional.grub-contract",
+        "regional.grub-live-propagation",
+        "regional.installed-zh-cn",
+        "localization.zh-cn-contract",
+        "shell.initial-overview-hidden",
+        "theme.cursor-user-session",
+        "branding.start-button-logo",
+        "branding.settings-about-logo",
+        "branding.gdm",
+        "theme.cursor-gdm",
+        "tty.tty6-branding"
+      ]
+    },
+    {
+      "id": "shell-desktop-panel",
+      "profiles": ["release-gate"],
+      "source": "installed-zh-base",
+      "isolation": "overlay",
+      "observation_modes": ["controlled"],
+      "checks": [
+        "desktop.context-menu-terminal",
+        "desktop.icons-visible",
+        "desktop.create-shortcut",
+        "panel.pin-application",
+        "panel.remove-menu-localized",
+        "shell.extension-policy",
+        "shell.extension-errors",
+        "journal.boot-and-idle",
+        "journal.action-scoped",
+        "shortcut.super-tab",
+        "shortcut.alt-tab",
+        "shortcut.super-i",
+        "shortcut.super-u",
+        "shortcut.super-shift-s",
+        "search.spotify-store",
+        "command.why-placeholder"
+      ]
+    },
+    {
+      "id": "input-and-appearance",
+      "profiles": ["release-gate"],
+      "source": "installed-zh-base",
+      "isolation": "overlay",
+      "observation_modes": ["controlled"],
+      "checks": [
+        "system.inotify-max-user-instances",
+        "render.twemoji-water-pistol",
+        "input.utf8-chinese-text",
+        "input.super-space-rime",
+        "appearance.swapcontrol-green",
+        "appearance.theme-menu-localized",
+        "appearance.theme-gtk",
+        "appearance.theme-qt",
+        "appearance.theme-firefox"
+      ]
+    },
+    {
+      "id": "file-integration",
+      "profiles": ["release-gate"],
+      "source": "installed-zh-base",
+      "isolation": "overlay",
+      "observation_modes": ["controlled"],
+      "checks": [
+        "files.image-thumbnail",
+        "files.video-thumbnail",
+        "files.image-open",
+        "files.video-open",
+        "files.deb-software",
+        "files.exe-thumbnail-fixture",
+        "files.exe-open-fixture",
+        "files.appimage-open"
+      ]
+    },
+    {
+      "id": "accounts-and-session",
+      "profiles": ["release-gate"],
+      "source": "installed-zh-base",
+      "isolation": "overlay",
+      "observation_modes": ["passive", "controlled"],
+      "checks": [
+        "account.add-user",
+        "account.new-user-login",
+        "account.change-password",
+        "account.logout-gdm"
+      ]
+    },
+    {
+      "id": "login-installation-policy",
+      "profiles": ["install", "release-gate"],
+      "source": "installer-advanced-options",
+      "isolation": "fresh-install",
+      "observation_modes": ["passive", "controlled"],
+      "checks": [
+        "login.autologin-disabled",
+        "login.autologin-enabled"
+      ]
+    },
+    {
+      "id": "display-integration",
+      "profiles": ["release-gate"],
+      "source": "installed-zh-base",
+      "isolation": "overlay",
+      "observation_modes": ["controlled"],
+      "checks": [
+        "display.spice-resize"
+      ]
+    },
+    {
+      "id": "wifi-installation-policy",
+      "profiles": ["install", "release-gate"],
+      "source": "installer-live-wifi",
+      "isolation": "fresh-install",
+      "observation_modes": ["passive", "controlled"],
+      "checks": [
+        "network.wifi-migration-hwsim"
+      ]
+    },
+    {
+      "id": "public-ecosystem",
+      "profiles": ["nightly-online"],
+      "source": "installed-online-amd64-base",
+      "isolation": "overlay",
+      "observation_modes": ["controlled"],
+      "checks": [
+        "files.cpuz-thumbnail-and-open",
+        "apt.nextcloud-client-ppa",
+        "app.wechat-install",
+        "app.wechat-tray",
+        "store.spotify-public"
+      ]
+    },
+    {
+      "id": "platform-host-integration",
+      "profiles": ["platform-lab"],
+      "source": "dedicated-platform-runner",
+      "isolation": "platform",
+      "observation_modes": ["platform"],
+      "checks": [
+        "display.gnome-boxes-resize",
+        "network.wifi-migration-physical"
+      ]
+    }
+  ]
+}

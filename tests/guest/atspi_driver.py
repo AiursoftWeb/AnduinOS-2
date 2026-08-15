@@ -102,6 +102,15 @@ ALIASES = {
         "Start your AnduinOS journey",
         "开始您的 AnduinOS 之旅",
     ),
+    "appimage_fixture": (
+        "AnduinOS AppImage Acceptance Fixture",
+        "A real Type-2 AppImage launched successfully.",
+    ),
+    "cpuz_recommendation": (
+        "Checking Hardware & Benchmarks?",
+        "正在检查硬件与基准测试？",
+    ),
+    "mission_center": ("Get Mission Center", "获取 Mission Center"),
 }
 
 
@@ -542,6 +551,10 @@ def assert_summary_plan(config: dict[str, object]) -> None:
         require("SSH password login: enabled", "SSH 密码登录: 已启用")
     else:
         require("SSH password login: disabled", "SSH 密码登录: 已禁用")
+    if bool(config["automatic_login"]):
+        require("Automatic desktop login: enabled", "自动登录桌面: 已启用")
+    else:
+        require("Automatic desktop login: disabled", "自动登录桌面: 已禁用")
     if str(config["network"]) == "offline":
         require("Install input method: do not install", "安装输入法: 不安装")
         require("System updates: do not install", "系统更新: 不安装")
@@ -550,17 +563,30 @@ def assert_summary_plan(config: dict[str, object]) -> None:
             "Extended multimedia formats: do not install",
             "扩展多媒体格式: 不安装",
         )
-    elif bool(config["online_features"]):
-        require("Install input method: AnduinOS Rime", "安装输入法: AnduinOS Rime")
+    else:
+        if bool(config["rime"]):
+            require(
+                "Install input method: AnduinOS Rime",
+                "安装输入法: AnduinOS Rime",
+            )
+        else:
+            require("Install input method: do not install", "安装输入法: 不安装")
         require("System updates: download and install", "系统更新: 下载并安装")
-        require(
-            "Third-party drivers: detect and install",
-            "第三方驱动程序: 检测并安装",
-        )
-        require(
-            "Extended multimedia formats: download and install",
-            "扩展多媒体格式: 下载并安装",
-        )
+        if bool(config["online_features"]):
+            require(
+                "Third-party drivers: detect and install",
+                "第三方驱动程序: 检测并安装",
+            )
+            require(
+                "Extended multimedia formats: download and install",
+                "扩展多媒体格式: 下载并安装",
+            )
+        else:
+            require("Third-party drivers: do not install", "第三方驱动程序: 不安装")
+            require(
+                "Extended multimedia formats: do not install",
+                "扩展多媒体格式: 不安装",
+            )
     event("summary-plan", filesystem=filesystem, hostname=expected_hostname)
 
 
@@ -665,7 +691,12 @@ def install(config: dict[str, object], evidence: Path) -> None:
 
     wait_page("keyboard")
     online = str(config["network"]) == "online"
+    rime = bool(config["rime"])
     assert_toggle("rime", sensitive=online, active=online)
+    if online:
+        set_toggle("rime", rime)
+    elif rime:
+        raise UiFailure("Offline scenario cannot request AnduinOS Rime")
     if not online:
         find("offline_input")
     click("next")
@@ -740,6 +771,7 @@ def install(config: dict[str, object], evidence: Path) -> None:
     wait_page("advanced")
     assert_toggle("sudo", sensitive=True, active=False)
     assert_toggle("automatic_login", sensitive=True, active=False)
+    set_toggle("automatic_login", bool(config["automatic_login"]))
     ssh_enabled = str(config["ssh"]) == "enabled"
     set_toggle("ssh", ssh_enabled)
     click("next")
@@ -1029,6 +1061,263 @@ def verify_snapshots_manager(evidence: Path) -> None:
     event("snapshots-manager", application=application)
 
 
+def verify_font_rendering(evidence: Path) -> None:
+    """Open the production GTK/Pango stack and expose exact text over AT-SPI."""
+
+    dismiss_initial_setup()
+    fixture = Path(__file__).with_name("font_fixture.py")
+    if not fixture.is_file():
+        raise UiFailure(f"Font rendering fixture is missing: {fixture}")
+    output_path = Path("/tmp/anduinos-font-fixture.stdout")
+    output_stream = output_path.open("wb")
+    process = subprocess.Popen(
+        [sys.executable, str(fixture)],
+        stdin=subprocess.DEVNULL,
+        stdout=output_stream,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    deadline = time.monotonic() + 90
+    while time.monotonic() < deadline:
+        if any(
+            name(item) == "AnduinOS Font Rendering Fixture"
+            for item in visible_nodes()
+        ):
+            break
+        if process.poll() is not None:
+            output_stream.close()
+            output = output_path.read_text(encoding="utf-8", errors="replace")
+            raise UiFailure(
+                f"Font fixture exited with {process.returncode}: {output[-4000:]}"
+            )
+        time.sleep(0.25)
+    else:
+        output_stream.close()
+        raise UiFailure("AT-SPI did not discover the font fixture window")
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        visible_names = {name(item) for item in visible_nodes() if name(item)}
+        if {"🤓 🍔 🔫 👽 ✨", "变角次亮采之门"} <= visible_names:
+            (evidence / "font-rendering-text.txt").write_text(
+                "🤓 🍔 🔫 👽 ✨\n变角次亮采之门\n",
+                encoding="utf-8",
+            )
+            break
+        time.sleep(0.25)
+    else:
+        dump_accessibility(evidence / "font-rendering-failure.txt")
+        raise UiFailure("Font fixture did not expose the exact test strings")
+    dump_accessibility(evidence / "font-rendering.txt")
+    event(
+        "font-rendering",
+        application="AnduinOS Font Rendering Fixture",
+        emoji="🤓 🍔 🔫 👽 ✨",
+        chinese="变角次亮采之门",
+    )
+
+
+def _open_download_in_nautilus(filename: str, expected: str, evidence: Path) -> None:
+    """Invoke Nautilus' semantic Open action, equivalent to a double click."""
+
+    downloads = Path.home() / "Downloads"
+    target_path = downloads / filename
+    if not target_path.is_file():
+        raise UiFailure(f"Desktop fixture is missing: {target_path}")
+    subprocess.Popen(
+        ["nautilus", "--new-window", str(downloads)],
+        stdin=subprocess.DEVNULL,
+        stdout=open("/tmp/anduinos-nautilus.stdout", "ab"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    wait_application(("Files", "Nautilus", "文件"), timeout=90)
+    deadline = time.monotonic() + 60
+    candidates = []
+    while time.monotonic() < deadline:
+        candidates = [
+            item
+            for item in visible_nodes()
+            if name(item) == filename or name(item).startswith(filename + ".")
+        ]
+        if candidates:
+            priority = {"table row": 0, "table cell": 1, "label": 2}
+            candidates.sort(key=lambda item: priority.get(role(item), 3))
+            break
+        time.sleep(0.25)
+    if not candidates:
+        raise UiFailure(f"Nautilus did not expose {filename!r}")
+
+    action_evidence = []
+    opened = False
+    # Wayland may deliberately report global coordinates as (0, 0). Prefer a
+    # real pointer double click only when AT-SPI supplies usable screen bounds.
+    for file_node in candidates:
+        try:
+            if not file_node.is_component():
+                continue
+            bounds = file_node.get_extents(Atspi.CoordType.SCREEN)
+            if (
+                bounds.x <= 0
+                or bounds.y <= 0
+                or bounds.width <= 0
+                or bounds.height <= 0
+            ):
+                continue
+            x = bounds.x + bounds.width // 2
+            y = bounds.y + bounds.height // 2
+            if not Atspi.generate_mouse_event(x, y, "b1d"):
+                continue
+            event(
+                "nautilus-open-attempt",
+                filename=filename,
+                method="semantic-node-double-click",
+                bounds=[bounds.x, bounds.y, bounds.width, bounds.height],
+            )
+            opened = True
+            break
+        except Exception:
+            continue
+
+    # Keyboard activation is Nautilus' coordinate-free equivalent of opening
+    # the focused item by double click. QEMU supplies the physical Enter key;
+    # AT-SPI merely proves which semantic file item owns focus first.
+    if not opened:
+        for file_node in candidates:
+            if role(file_node) != "table row":
+                continue
+            try:
+                parent = file_node.get_parent()
+                index = file_node.get_index_in_parent()
+                if parent is None or not parent.is_selection():
+                    continue
+                if not parent.select_child(index):
+                    continue
+            except Exception:
+                continue
+            time.sleep(0.2)
+            selected = has_state(file_node, Atspi.StateType.SELECTED)
+            if not selected:
+                continue
+            event(
+                "qmp-key",
+                request=f"open-{filename}-ret",
+                key="ret",
+            )
+            event(
+                "nautilus-open-attempt",
+                filename=filename,
+                method="semantic-selection-keyboard-activation",
+                row_index=index,
+            )
+            opened = True
+            break
+
+    if not opened:
+        for file_node in candidates:
+            focus_candidates = [file_node]
+            try:
+                parent = file_node.get_parent()
+                if parent is not None:
+                    focus_candidates.append(parent)
+            except Exception:
+                pass
+            for target in focus_candidates:
+                try:
+                    if not target.grab_focus():
+                        continue
+                except Exception:
+                    continue
+                time.sleep(0.2)
+                focused = has_state(target, Atspi.StateType.FOCUSED) or any(
+                    has_state(item, Atspi.StateType.FOCUSED)
+                    for item in walk(target, maximum=100)
+                )
+                if not focused:
+                    continue
+                event(
+                    "qmp-key",
+                    request=f"open-{filename}-ret",
+                    key="ret",
+                )
+                event(
+                    "nautilus-open-attempt",
+                    filename=filename,
+                    method="semantic-keyboard-activation",
+                )
+                opened = True
+                break
+            if opened:
+                break
+
+    # Some accessibility backends reject pointer synthesis. Only then use
+    # Nautilus' named Open action; a generic selection click is never accepted.
+    for file_node in (() if opened else candidates):
+        try:
+            target = actionable(file_node)
+            actions = [
+                action_name(target, index) for index in range(action_count(target))
+            ]
+        except Exception:
+            continue
+        action_evidence.append(actions)
+        preferred = next(
+            (
+                index
+                for index, action in enumerate(actions)
+                if any(token in action.casefold() for token in ("open", "activate"))
+            ),
+            None,
+        )
+        if preferred is not None and perform_action(target, preferred):
+            event(
+                "nautilus-open-attempt",
+                filename=filename,
+                method="accessible-action",
+                actions=actions,
+                selected_action=actions[preferred],
+            )
+            opened = True
+            break
+
+    if not opened:
+        raise UiFailure(
+            f"Nautilus exposed no Open action or clickable bounds for "
+            f"{filename!r}: {action_evidence!r}"
+        )
+    observed = name(find(expected, timeout=90))
+    dump_accessibility(evidence / f"{filename}-opened.txt")
+    event(
+        "nautilus-open",
+        filename=filename,
+        actions=action_evidence,
+        observed=observed,
+    )
+
+
+def verify_desktop_files(evidence: Path) -> None:
+    dismiss_initial_setup()
+    _open_download_in_nautilus(
+        "AnduinOS-Acceptance.AppImage",
+        "appimage_fixture",
+        evidence,
+    )
+    subprocess.run(
+        ["pkill", "-f", "AnduinOS-Acceptance.AppImage"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    subprocess.run(
+        ["pkill", "-x", "zenity"],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    _open_download_in_nautilus("cpu-z.exe", "cpuz_recommendation", evidence)
+    find("mission_center", timeout=30)
+    event("cpu-z-recommendation", application="AnduinOS Windows EXE Runner")
+
+
 def dismiss_initial_setup() -> None:
     if find_optional("finish_setup", timeout=3) is None:
         return
@@ -1056,6 +1345,8 @@ def main() -> int:
             "secure-shell-assert-on",
             "secure-shell-assert-off",
             "snapshots-manager",
+            "font-rendering",
+            "desktop-files",
         ),
     )
     parser.add_argument("--config", type=Path)
@@ -1077,8 +1368,12 @@ def main() -> int:
             assert_secure_shell(args.mode.endswith("on"), args.evidence)
         elif args.mode.startswith("secure-shell-"):
             toggle_secure_shell(args.mode.endswith("on"), args.evidence)
-        else:
+        elif args.mode == "snapshots-manager":
             verify_snapshots_manager(args.evidence)
+        elif args.mode == "font-rendering":
+            verify_font_rendering(args.evidence)
+        else:
+            verify_desktop_files(args.evidence)
         return 0
     except Exception as error:
         event("failure", error=str(error), type=type(error).__name__)

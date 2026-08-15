@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import platform
+import resource
 import shutil
 import socket
 import subprocess
@@ -35,6 +36,7 @@ class QemuConfig:
     artifacts: Path
     qemu_binary: str
     acceleration: str
+    file_size_limit_bytes: int | None = None
 
 
 class QemuVm:
@@ -45,6 +47,12 @@ class QemuVm:
         self.serial: SerialConsole | None = None
         self._runtime: tempfile.TemporaryDirectory[str] | None = None
         self._log = None
+
+    @property
+    def spice_socket(self) -> Path:
+        if self._runtime is None:
+            raise RuntimeError("QEMU runtime directory is not initialized")
+        return Path(self._runtime.name) / "spice.sock"
 
     @property
     def running(self) -> bool:
@@ -74,6 +82,7 @@ class QemuVm:
         runtime = Path(self._runtime.name)
         qmp_path = runtime / "qmp.sock"
         serial_path = runtime / "serial.sock"
+        spice_path = runtime / "spice.sock"
         command = [
             cfg.qemu_binary,
             "-name",
@@ -86,6 +95,8 @@ class QemuVm:
             str(cfg.cpus),
             "-display",
             "none",
+            "-spice",
+            f"unix=on,addr={spice_path},disable-ticketing=on",
             "-qmp",
             f"unix:{qmp_path},server=on,wait=off",
             "-chardev",
@@ -115,8 +126,17 @@ class QemuVm:
             "usb-kbd,bus=xhci.0",
             "-device",
             "usb-tablet,bus=xhci.0",
+            "-device",
+            "virtio-serial-pci,id=virtio-serial0",
+            "-chardev",
+            "spicevmc,id=vdagent,name=vdagent",
+            "-device",
+            "virtserialport,chardev=vdagent,name=com.redhat.spice.0",
         ]
         if cfg.architecture is Architecture.AMD64:
+            # q35 already creates its chipset i8042/PS2 controller even with
+            # -nodefaults.  Adding a second `-device i8042` duplicates the
+            # firmware's KBD/MOU ACPI namespace and pollutes the guest journal.
             machine = "q35,smm=on" if cfg.firmware.is_uefi else "q35"
             command += [
                 "-machine",
@@ -125,11 +145,6 @@ class QemuVm:
                 "host" if cfg.acceleration == "kvm" else "max",
                 "-device",
                 "virtio-vga,id=video0",
-                # SeaBIOS and GRUB cannot consume the xHCI keyboard. Keep a
-                # legacy controller for pre-boot automation; the USB devices
-                # remain the normal GNOME input path.
-                "-device",
-                "i8042",
             ]
             if cfg.firmware.secure_boot:
                 command += [
@@ -167,7 +182,7 @@ class QemuVm:
             ]
         return command
 
-    def start(self, *, attach_iso: bool) -> None:
+    def start(self, *, attach_iso: bool, phase: str | None = None) -> None:
         if self.running:
             raise RuntimeError("QEMU is already running")
         self._runtime = tempfile.TemporaryDirectory(prefix="anduinos-qemu-")
@@ -175,27 +190,29 @@ class QemuVm:
         qmp_path = runtime / "qmp.sock"
         serial_path = runtime / "serial.sock"
         self.config.artifacts.mkdir(parents=True, exist_ok=True)
-        log_path = self.config.artifacts / (
-            "qemu-live.log" if attach_iso else "qemu-installed.log"
-        )
+        stem = phase or ("live" if attach_iso else "installed")
+        log_path = self.config.artifacts / f"qemu-{stem}.log"
         self._log = log_path.open("wb")
         command = self.command(attach_iso=attach_iso)
-        (self.config.artifacts / (
-            "qemu-live.command" if attach_iso else "qemu-installed.command"
-        )).write_text(_shell_render(command) + "\n", encoding="utf-8")
+        (self.config.artifacts / f"qemu-{stem}.command").write_text(
+            _shell_render(command) + "\n", encoding="utf-8"
+        )
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=self._log,
             stderr=subprocess.STDOUT,
+            preexec_fn=(
+                _file_size_limiter(self.config.file_size_limit_bytes)
+                if self.config.file_size_limit_bytes is not None
+                else None
+            ),
         )
         self.qmp = QmpClient(qmp_path, timeout=30)
         self.qmp.connect()
         if self.config.network is Network.OFFLINE:
             self.qmp.set_link("nic0", up=False)
-        transcript = self.config.artifacts / (
-            "serial-live.log" if attach_iso else "serial-installed.log"
-        )
+        transcript = self.config.artifacts / f"serial-{stem}.log"
         self.serial = SerialConsole(serial_path, transcript, timeout=30)
         self.serial.connect()
 
@@ -215,30 +232,65 @@ class QemuVm:
             raise ProtocolError("QEMU did not stop before the timeout") from error
 
     def stop(self) -> None:
-        if self.qmp is not None:
-            self.qmp.quit()
-            self.qmp.close()
-            self.qmp = None
-        if self.process is not None:
+        # Shutdown is deliberately best-effort across independent resources.
+        # A stale QMP/serial socket must never skip process termination and
+        # leave the multi-gigabyte target disk in use.
+        qmp = self.qmp
+        self.qmp = None
+        if qmp is not None:
             try:
-                self.process.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.process.terminate()
+                qmp.quit()
+            except Exception:
+                pass
+            try:
+                qmp.close()
+            except Exception:
+                pass
+
+        process = self.process
+        if process is not None:
+            if process.poll() is None:
                 try:
-                    self.process.wait(timeout=5)
+                    process.wait(timeout=10)
                 except subprocess.TimeoutExpired:
-                    self.process.kill()
-                    self.process.wait(timeout=5)
+                    try:
+                        process.terminate()
+                        process.wait(timeout=5)
+                    except (subprocess.TimeoutExpired, OSError):
+                        pass
+                except OSError:
+                    pass
+                finally:
+                    if process.poll() is None:
+                        process.kill()
+                        process.wait(timeout=5)
+            if process.poll() is None:
+                raise ProtocolError("QEMU remained alive after SIGKILL")
             self.process = None
-        if self.serial is not None:
-            self.serial.close()
-            self.serial = None
-        if self._log is not None:
-            self._log.close()
-            self._log = None
-        if self._runtime is not None:
-            self._runtime.cleanup()
-            self._runtime = None
+
+        serial = self.serial
+        self.serial = None
+        if serial is not None:
+            try:
+                serial.close()
+            except Exception:
+                pass
+
+        log = self._log
+        self._log = None
+        if log is not None:
+            try:
+                log.close()
+            except Exception:
+                pass
+
+        runtime = self._runtime
+        self._runtime = None
+        if runtime is not None:
+            try:
+                runtime.cleanup()
+            except OSError:
+                pass
 
 
 def resolve_qemu(architecture: Architecture) -> tuple[str, str]:
@@ -281,6 +333,15 @@ def _run_checked(command: list[str]) -> None:
         raise ConfigurationError(
             f"Command failed ({command[0]}): {result.stdout.strip()}"
         )
+
+
+def _file_size_limiter(limit_bytes: int):
+    """Return the minimal child hook that hard-limits RAM-backed qcow growth."""
+
+    def apply_limit() -> None:
+        resource.setrlimit(resource.RLIMIT_FSIZE, (limit_bytes, limit_bytes))
+
+    return apply_limit
 
 
 def _shell_render(command: list[str]) -> str:

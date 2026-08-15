@@ -11,7 +11,10 @@
     "full_name": "AnduinOS Acceptance Test",
     "hostname": "TT-VIEW-71",
     "password": "AnduinOS-Test-123!",
-    "mok_password": "123456"
+    "mok_password": "123456",
+    "live_grub_entry": "Simplified Chinese (China Mainland)",
+    "live_locale": "zh_CN.UTF-8",
+    "live_timezone": "Asia/Shanghai"
   },
   "cases": [
     {
@@ -20,8 +23,11 @@
       "firmware": "bios",
       "network": "offline",
       "filesystem": "btrfs",
+      "rime": false,
       "online_features": false,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": true,
       "mok_enrollment": false
     },
@@ -31,8 +37,11 @@
       "firmware": "bios",
       "network": "online",
       "filesystem": "btrfs",
+      "rime": true,
       "online_features": true,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": true,
       "mok_enrollment": false
     },
@@ -42,8 +51,11 @@
       "firmware": "bios",
       "network": "online",
       "filesystem": "ext4",
+      "rime": false,
       "online_features": false,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": false,
       "mok_enrollment": false
     },
@@ -53,8 +65,11 @@
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "btrfs",
+      "rime": false,
       "online_features": false,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": true,
       "mok_enrollment": false
     },
@@ -64,8 +79,11 @@
       "firmware": "uefi-nosb",
       "network": "online",
       "filesystem": "btrfs",
+      "rime": true,
       "online_features": true,
       "ssh": "enabled",
+      "automatic_login": true,
+      "desktop_release_gate": true,
       "snapshots_manager": true,
       "mok_enrollment": false
     },
@@ -75,8 +93,11 @@
       "firmware": "uefi-nosb",
       "network": "online",
       "filesystem": "btrfs",
+      "rime": false,
       "online_features": false,
       "ssh": "toggle",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": true,
       "mok_enrollment": false
     },
@@ -86,8 +107,11 @@
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "ext4",
+      "rime": false,
       "online_features": false,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": false,
       "mok_enrollment": false
     },
@@ -97,8 +121,11 @@
       "firmware": "uefi-sb",
       "network": "offline",
       "filesystem": "btrfs",
+      "rime": false,
       "online_features": false,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": true,
       "mok_enrollment": true
     },
@@ -108,8 +135,11 @@
       "firmware": "uefi-sb",
       "network": "online",
       "filesystem": "btrfs",
+      "rime": true,
       "online_features": true,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": true,
       "mok_enrollment": true
     },
@@ -119,8 +149,11 @@
       "firmware": "uefi-sb",
       "network": "online",
       "filesystem": "ext4",
+      "rime": false,
       "online_features": false,
       "ssh": "disabled",
+      "automatic_login": false,
+      "desktop_release_gate": false,
       "snapshots_manager": false,
       "mok_enrollment": true
     }
