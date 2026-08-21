@@ -84,6 +84,9 @@ from iso_test.feature_runner import (
     _validate_swapcontrol_events,
     _validate_same_fixture_process,
     _validate_search_provider_preflight,
+    _validate_local_search_provider_isolation_configuration,
+    _validate_local_search_provider_post_action_isolation,
+    _validate_local_search_provider_runtime_isolation,
     _validate_theme_marker,
     _validate_theme_selection,
     _validate_tty6_evidence,
@@ -4797,6 +4800,75 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
         self.assertLess(
             body.index('scope="shell-search-provider-preflight"'),
             body.rindex("cursors = self._journal_cursors"),
+        )
+
+    def test_local_arcmenu_search_isolated_without_weakening_store_checks(self):
+        configured = "\n".join(
+            (
+                "provider=org.gnome.Software.desktop",
+                "configured=['org.gnome.Software.desktop']",
+            )
+        )
+        runtime = "\n".join(
+            (
+                "provider=org.gnome.Software.desktop",
+                "configured=['org.gnome.Software.desktop']",
+                "before_state=inactive before_restarts=0",
+                "after_load=masked after_state=inactive after_pid=0",
+            )
+        )
+        post_action = "\n".join(
+            (
+                "provider=org.gnome.Software.desktop",
+                "configured=['org.gnome.Software.desktop']",
+                "load=masked state=inactive pid=0",
+            )
+        )
+        _validate_local_search_provider_isolation_configuration(configured, 0)
+        _validate_local_search_provider_runtime_isolation(runtime, 0)
+        _validate_local_search_provider_post_action_isolation(post_action, 0)
+
+        with self.assertRaisesRegex(TestFailure, "was not disabled"):
+            _validate_local_search_provider_isolation_configuration(
+                configured.replace(
+                    "configured=['org.gnome.Software.desktop']",
+                    "configured=@as []",
+                ),
+                0,
+            )
+        with self.assertRaisesRegex(TestFailure, "was not masked"):
+            _validate_local_search_provider_runtime_isolation(
+                runtime.replace("after_load=masked", "after_load=loaded"),
+                0,
+            )
+        with self.assertRaisesRegex(TestFailure, "activated GNOME Software"):
+            _validate_local_search_provider_post_action_isolation(
+                post_action.replace(
+                    "load=masked state=inactive pid=0",
+                    "load=loaded state=active pid=2247",
+                ),
+                0,
+            )
+
+        source = Path("tests/iso_test/feature_runner.py").read_text(encoding="utf-8")
+        boot = source.split("def _boot_overlay", 1)[1].split("def _check", 1)[0]
+        self.assertLess(
+            boot.index("self._configure_local_search_provider_isolation"),
+            boot.index("_login_gdm"),
+        )
+        self.assertIn("vm.config.artifacts", boot)
+        shell_driver = source.split("def _run_shell_driver", 1)[1].split(
+            "def _configure_local_search_provider_isolation", 1
+        )[0]
+        self.assertIn("if mode in _LOCAL_SEARCH_DRIVER_MODES", shell_driver)
+        self.assertIn("elif mode in _SOFTWARE_SEARCH_DRIVER_MODES", shell_driver)
+        self.assertIn(
+            "self._assert_local_search_provider_remained_isolated",
+            shell_driver,
+        )
+        self.assertLess(
+            shell_driver.index("self._assert_local_search_provider_isolation"),
+            shell_driver.index("preflight_cursors = self._journal_cursors"),
         )
 
     def test_named_non_secret_text_request_is_strictly_parsed(self):

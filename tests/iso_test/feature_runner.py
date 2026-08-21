@@ -86,6 +86,27 @@ _PANEL_FIXTURE_CHECKS = frozenset(
     }
 )
 _INDICATOR_FIXTURE_CHECKS = frozenset({"shell.appindicator-roundtrip"})
+_LOCAL_ARCMENU_SEARCH_CHECKS = frozenset(
+    {
+        "panel.pin-application",
+        "desktop.create-shortcut",
+    }
+)
+_LOCAL_SEARCH_DRIVER_MODES = frozenset(
+    {
+        "shell-panel-pin",
+        "shell-panel-pin-persisted",
+        "shell-panel-remove",
+        "shell-desktop-shortcut",
+    }
+)
+_SOFTWARE_SEARCH_DRIVER_MODES = frozenset(
+    {
+        "shell-spotify-store",
+        "public-wechat-install",
+    }
+)
+_SOFTWARE_SEARCH_PROVIDER_ID = "org.gnome.Software.desktop"
 
 _CPU_Z_VERSION = "2.20.2"
 _CPU_Z_ARCHIVE = f"cpu-z_{_CPU_Z_VERSION}-en.zip"
@@ -406,6 +427,16 @@ class FeatureSuiteRunner:
                 indicator_fixture=bool(
                     _INDICATOR_FIXTURE_CHECKS.intersection(suite.checks)
                 ),
+            )
+        if _LOCAL_ARCMENU_SEARCH_CHECKS.intersection(suite.checks):
+            # These suites exercise ArcMenu's own local application result.
+            # Disable the unrelated Software provider before GNOME Shell is
+            # born so an asynchronous PackageKit failure cannot be attributed
+            # to a taskbar or desktop-shortcut gesture. Store suites use a
+            # fresh overlay and deliberately keep the provider enabled.
+            self._configure_local_search_provider_isolation(
+                vm,
+                vm.config.artifacts,
             )
         self.phase_callback(base.scenario.id, suite.id, "Logging into GNOME through GDM")
         _login_gdm(vm, self.username, self.password, timeout=120)
@@ -2526,12 +2557,9 @@ class FeatureSuiteRunner:
 
         assert vm.serial is not None
         remote = self._prepare_shell_fixture(vm, launch_windows=False)
-        if mode in {
-            "shell-panel-pin",
-            "shell-desktop-shortcut",
-            "shell-spotify-store",
-            "public-wechat-install",
-        }:
+        if mode in _LOCAL_SEARCH_DRIVER_MODES:
+            self._assert_local_search_provider_isolation(vm, artifacts, mode)
+        elif mode in _SOFTWARE_SEARCH_DRIVER_MODES:
             preflight_cursors = self._journal_cursors(vm)
             self._stabilize_shell_search_provider(vm, artifacts)
             self._assert_scoped_journal(
@@ -2579,7 +2607,141 @@ class FeatureSuiteRunner:
             artifacts,
             scope=mode,
         )
+        if mode in _LOCAL_SEARCH_DRIVER_MODES:
+            self._assert_local_search_provider_remained_isolated(
+                vm,
+                artifacts,
+                mode,
+            )
         return validated
+
+    def _configure_local_search_provider_isolation(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+    ) -> None:
+        """Disable Software search before login in one disposable overlay.
+
+        ArcMenu's local application tests and GNOME Software's remote search
+        tests have different owners and different failure contracts. Writing
+        this setting before login prevents Shell from D-Bus-activating the
+        Software provider while it constructs the local-search model. The
+        overlay is discarded after the suite, so no installed user policy is
+        changed and the dedicated store suites still exercise the real
+        provider with fatal journal checking enabled.
+        """
+
+        assert vm.serial is not None
+        user = shlex.quote(self.username)
+        provider = shlex.quote(_SOFTWARE_SEARCH_PROVIDER_ID)
+        script = f"""
+set -euo pipefail
+user={user}
+provider={provider}
+home=$(getent passwd "$user" | cut -d: -f6)
+test -n "$home"
+provider_file=/usr/share/gnome-shell/search-providers/org.gnome.Software-search-provider.ini
+test -r "$provider_file"
+declared=$(sed -n 's/^DesktopId=//p' "$provider_file")
+test "$declared" = "$provider"
+runuser -u "$user" -- env HOME="$home" dbus-run-session -- \
+    python3 - "$provider" <<'PY'
+import sys
+
+from gi.repository import Gio
+
+provider = sys.argv[1]
+settings = Gio.Settings.new("org.gnome.desktop.search-providers")
+disabled = list(settings.get_strv("disabled"))
+if provider not in disabled:
+    disabled.append(provider)
+    if not settings.set_strv("disabled", disabled):
+        raise SystemExit("could not update the disabled search-provider list")
+Gio.Settings.sync()
+print(f"provider={{provider}}")
+print(f"configured={{settings.get_value('disabled').print_(True)}}")
+PY
+""".strip()
+        result = vm.serial.run(script, timeout=60, check=False)
+        (artifacts / "local-search-provider-isolation-before-login.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+        _validate_local_search_provider_isolation_configuration(
+            result.stdout,
+            result.returncode,
+        )
+
+    def _assert_local_search_provider_isolation(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+        scope: str,
+    ) -> None:
+        """Temporarily mask Software in a disposable local-search session."""
+
+        assert vm.serial is not None
+        script = """
+set -euo pipefail
+unit=gnome-software.service
+provider=org.gnome.Software.desktop
+configured=$(gsettings get org.gnome.desktop.search-providers disabled)
+before_state=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+before_restarts=$(systemctl --user show "$unit" -p NRestarts --value 2>/dev/null || printf 0)
+systemctl --user mask --runtime --now "$unit"
+after_load=$(systemctl --user show "$unit" -p LoadState --value)
+after_state=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+after_pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || printf 0)
+printf 'provider=%s\nconfigured=%s\n' "$provider" "$configured"
+printf 'before_state=%s before_restarts=%s\n' \
+    "$before_state" "$before_restarts"
+printf 'after_load=%s after_state=%s after_pid=%s\n' \
+    "$after_load" "$after_state" "$after_pid"
+""".strip()
+        result = vm.serial.run(
+            _desktop_command(self.username, ("bash", "-lc", script)),
+            timeout=60,
+            check=False,
+        )
+        (artifacts / f"{scope}-software-search-isolation.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+        _validate_local_search_provider_runtime_isolation(
+            result.stdout,
+            result.returncode,
+        )
+
+    def _assert_local_search_provider_remained_isolated(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+        scope: str,
+    ) -> None:
+        """Prove the local ArcMenu action did not activate Software."""
+
+        assert vm.serial is not None
+        script = """
+set -euo pipefail
+unit=gnome-software.service
+provider=org.gnome.Software.desktop
+configured=$(gsettings get org.gnome.desktop.search-providers disabled)
+load=$(systemctl --user show "$unit" -p LoadState --value)
+state=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || printf 0)
+printf 'provider=%s\nconfigured=%s\n' "$provider" "$configured"
+printf 'load=%s state=%s pid=%s\n' "$load" "$state" "$pid"
+""".strip()
+        result = vm.serial.run(
+            _desktop_command(self.username, ("bash", "-lc", script)),
+            timeout=30,
+            check=False,
+        )
+        (artifacts / f"{scope}-software-search-isolation-after.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+        _validate_local_search_provider_post_action_isolation(
+            result.stdout,
+            result.returncode,
+        )
 
     def _stabilize_shell_search_provider(
         self,
@@ -4112,6 +4274,85 @@ def _validate_search_provider_preflight(output: str, returncode: int) -> None:
         raise TestFailure(
             "GNOME Software ready marker contradicts its lifecycle evidence"
         )
+
+
+def _validate_local_search_provider_isolation_configuration(
+    output: str,
+    returncode: int,
+) -> None:
+    """Require the exact Software provider to be disabled before login."""
+
+    if returncode != 0:
+        raise TestFailure(
+            "Could not configure local-search provider isolation before login:\n"
+            + output[-4000:]
+        )
+    if f"provider={_SOFTWARE_SEARCH_PROVIDER_ID}" not in output:
+        raise TestFailure("Local-search isolation resolved an unexpected provider")
+    configured = re.search(r"^configured=(?P<value>.+)$", output, re.MULTILINE)
+    if configured is None or _SOFTWARE_SEARCH_PROVIDER_ID not in configured.group(
+        "value"
+    ):
+        raise TestFailure("GNOME Software was not disabled for local ArcMenu search")
+
+
+def _validate_local_search_provider_runtime_isolation(
+    output: str,
+    returncode: int,
+) -> None:
+    """Require an inactive runtime mask before a local-search action."""
+
+    if returncode != 0:
+        raise TestFailure(
+            "Could not enforce local-search provider isolation:\n" + output[-4000:]
+        )
+    configured = re.search(r"^configured=(?P<value>.+)$", output, re.MULTILINE)
+    after = re.search(
+        r"^after_load=(?P<load>[^ ]+) after_state=(?P<state>[^ ]+) "
+        r"after_pid=(?P<pid>[0-9]+)$",
+        output,
+        re.MULTILINE,
+    )
+    if configured is None or _SOFTWARE_SEARCH_PROVIDER_ID not in configured.group(
+        "value"
+    ):
+        raise TestFailure("Local ArcMenu search lost its Software-provider isolation")
+    if (
+        after is None
+        or after.group("load") != "masked"
+        or after.group("state") != "inactive"
+        or int(after.group("pid")) != 0
+    ):
+        raise TestFailure("GNOME Software was not masked for local ArcMenu search")
+
+
+def _validate_local_search_provider_post_action_isolation(
+    output: str,
+    returncode: int,
+) -> None:
+    """Require Software to remain masked and inactive after the action."""
+
+    if returncode != 0:
+        raise TestFailure(
+            "Could not verify local-search provider isolation:\n" + output[-4000:]
+        )
+    configured = re.search(r"^configured=(?P<value>.+)$", output, re.MULTILINE)
+    state = re.search(
+        r"^load=(?P<load>[^ ]+) state=(?P<state>[^ ]+) pid=(?P<pid>[0-9]+)$",
+        output,
+        re.MULTILINE,
+    )
+    if configured is None or _SOFTWARE_SEARCH_PROVIDER_ID not in configured.group(
+        "value"
+    ):
+        raise TestFailure("Local ArcMenu search lost its Software-provider isolation")
+    if (
+        state is None
+        or state.group("load") != "masked"
+        or state.group("state") != "inactive"
+        or int(state.group("pid")) != 0
+    ):
+        raise TestFailure("Local ArcMenu search activated GNOME Software")
 
 
 def _last_value(output: str, key: str) -> str:
