@@ -25,6 +25,7 @@ from .assertions import (
     assert_installed_region,
     assert_live_environment,
     assert_live_region,
+    assert_no_image_junk,
     assert_passwordless_sudo_behavior,
     assert_release_contract,
 )
@@ -96,6 +97,7 @@ def scenario_check_ids(
     checks = [
         "regional.grub-contract",
         "live-boot",
+        "packages.live-image-junk-absent",
         "regional.grub-live-propagation",
         "installer-ui",
         "target-boot-files",
@@ -539,6 +541,12 @@ class ScenarioRunner:
         if self.options.smoke_only:
             _power_off(vm)
             return None
+        with self._check(scenario, "packages.live-image-junk-absent"):
+            self.status(
+                scenario.id,
+                "Checking the Live image for forbidden packages",
+            )
+            assert_no_image_junk(vm.serial, artifacts, "live")
         with self._check(scenario, "regional.grub-live-propagation"):
             self.status(
                 scenario.id,
@@ -2427,6 +2435,8 @@ _SUPPORTED_GUEST_QMP_KEYS = frozenset(
         "spc",
         "ret",
         "down",
+        "up",
+        "end",
         "alt-tab",
         "alt-f4",
         "ctrl-shift-u",

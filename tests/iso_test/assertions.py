@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import shlex
 from pathlib import Path
 
@@ -20,7 +21,114 @@ LIVE_ONLY_PACKAGES = (
     "anduinos-live-settings",
 )
 
+FORBIDDEN_IMAGE_PACKAGES = (
+    # Ubuntu desktop metapackages and branding replaced by AnduinOS.
+    "ubuntu-desktop",
+    "ubuntu-desktop-minimal",
+    "ubuntu-session",
+    "yaru-theme-gnome-shell",
+    "yaru-theme-unity",
+    "yaru-theme-icon",
+    "yaru-theme-gtk",
+    "ubuntu-wallpapers",
+    "ubuntu-wallpaper",
+    # Snap and Ubuntu upgrade, telemetry, and reporting components.
+    "snapd",
+    "snap",
+    "snap-store",
+    "ubuntu-pro-client",
+    "ubuntu-advantage-desktop-daemon",
+    "ubuntu-advantage-tools",
+    "ubuntu-pro-client-l10n",
+    "ubuntu-release-upgrader-core",
+    "ubuntu-release-upgrader-gtk",
+    "update-notifier",
+    "update-notifier-common",
+    "update-manager",
+    "update-manager-core",
+    "apport",
+    "popularity-contest",
+    "ubuntu-report",
+    "whoopsie",
+    # Ubuntu extensions superseded by AnduinOS packages.
+    "gnome-shell-ubuntu-extensions",
+    "gnome-shell-extension-ubuntu-dock",
+    "gnome-shell-extension-appindicator",
+    "gnome-shell-extension-dash-to-panel",
+    "gnome-shell-extension-desktop-icons-ng",
+    "gnome-shell-extension-gtk4-desktop-icons-ng",
+    # Retired installer stack.
+    "ubiquity",
+    "ubiquity-casper",
+    "ubiquity-frontend-gtk",
+    "ubiquity-ubuntu-artwork",
+    "ubiquity-slideshow-ubuntu",
+    "anduinos-installer-config",
+    "anduinos-bwrap-hack",
+    # Packages replaced by AnduinOS forks.
+    "firefox",
+    "software-properties-common",
+    "software-properties-gtk",
+    "firmware-sof-signed",
+    "alsa-ucm-conf",
+    "plymouth-theme-spinner",
+    # Alternative terminals and unwanted desktop applications.
+    "alacritty",
+    "gnome-terminal",
+    "tilix",
+    "zutty",
+    "xterm",
+    "gnome-mahjongg",
+    "gnome-mines",
+    "gnome-sudoku",
+    "aisleriot",
+    "hitori",
+    "gnome-initial-setup",
+    "gnome-photos",
+    "eog",
+    "gnome-contacts",
+    # A production image is not a native package build environment. Kernel
+    # headers remain intentional because the HWE kernel metapackage owns them.
+    "autoconf",
+    "automake",
+    "bison",
+    "build-essential",
+    "dkms",
+    "dpkg-dev",
+    "fakeroot",
+    "flex",
+    "gdb",
+    "libcc1-0",
+    "libc6-dev",
+    "libcrypt-dev",
+    "libfakeroot",
+    "libtool",
+    "linux-libc-dev",
+    "lto-disabled-list",
+    "make",
+    "make-guile",
+    "patch",
+    "rpcsvc-proto",
+)
+
+# Versioned compiler packages cannot be exhaustively enumerated without
+# coupling the release test to one Ubuntu toolchain revision. These POSIX ERE
+# fragments deliberately exclude runtime packages such as gcc-15-base,
+# libgcc-s1, and libstdc++6.
+FORBIDDEN_IMAGE_PACKAGE_PATTERNS = (
+    r"libreoffice(-.*)?",
+    r"(gcc|g\+\+|cpp)(-[0-9]+)?(-(x86-64|aarch64)-linux-gnu)?",
+    r"binutils(-(x86-64|aarch64)-linux-gnu)?",
+    r"lib(gcc|stdc\+\+)-[0-9]+-dev",
+    r"lib(asan|tsan|ubsan|lsan|hwasan|itm|quadmath)[0-9]+",
+)
+
+_FORBIDDEN_IMAGE_PACKAGE_ERE = "^(" + "|".join(
+    (*map(re.escape, FORBIDDEN_IMAGE_PACKAGES), *FORBIDDEN_IMAGE_PACKAGE_PATTERNS)
+) + ")$"
+
 RELEASE_CONTRACT_CHECKS = (
+    "packages.installed-junk-absent",
     "system.inotify-max-user-instances",
     "terminal.ptyxis-initial-size",
     "desktop.mime-defaults",
@@ -28,6 +136,52 @@ RELEASE_CONTRACT_CHECKS = (
     "font.selection-contracts",
     "boot.plymouth-theme-selection",
 )
+
+
+def is_forbidden_image_package(package: str) -> bool:
+    """Return whether one architecture-neutral binary package is forbidden."""
+
+    return package in FORBIDDEN_IMAGE_PACKAGES or any(
+        re.fullmatch(pattern, package)
+        for pattern in FORBIDDEN_IMAGE_PACKAGE_PATTERNS
+    )
+
+
+def assert_no_image_junk(
+    console: SerialConsole,
+    evidence: Path,
+    scope: str,
+) -> None:
+    """Prove the Live or installed package database contains no build junk."""
+
+    if scope not in {"live", "installed"}:
+        raise ValueError(f"Unknown package-junk assertion scope: {scope}")
+    quoted_regex = shlex.quote(_FORBIDDEN_IMAGE_PACKAGE_ERE)
+    quoted_scope = shlex.quote(scope)
+    script = f"""
+set -euo pipefail
+installed_packages=$(
+    dpkg-query -W -f='${{binary:Package}}\\t${{db:Status-Abbrev}}\\n' | \
+        awk '$2 == "ii" {{ sub(/:.*/, "", $1); print $1 }}' | sort -u
+)
+violators=$(printf '%s\\n' "$installed_packages" | \
+    grep -E {quoted_regex} || true)
+printf 'scope=%s\\n' {quoted_scope}
+printf 'installed-package-count=%s\\n' \
+    "$(printf '%s\\n' "$installed_packages" | sed '/^$/d' | wc -l)"
+if test -n "$violators"; then
+    printf 'Forbidden packages remain in the %s image:\\n%s\\n' \
+        {quoted_scope} "$violators" >&2
+    exit 1
+fi
+printf 'forbidden-package-count=0\\n'
+"""
+    identifier = (
+        "packages-live-image-junk-absent"
+        if scope == "live"
+        else "packages-installed-junk-absent"
+    )
+    _record(console, script, evidence / f"{identifier}.txt")
 
 
 def assert_live_environment(
@@ -627,6 +781,9 @@ def assert_release_contract(
 ) -> None:
     """Execute one independently visible installed-system release contract."""
 
+    if identifier == "packages.installed-junk-absent":
+        assert_no_image_junk(console, evidence, "installed")
+        return
     if identifier == "system.inotify-max-user-instances":
         script = r"""
 set -euo pipefail

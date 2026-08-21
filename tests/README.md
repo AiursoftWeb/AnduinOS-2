@@ -156,6 +156,16 @@ After installation QEMU is powered off, the ISO is detached, and the installed
 target is booted again. Secure Boot scenarios must complete MOK enrollment
 rather than merely reaching MokManager.
 
+Every full installation scenario also owns two package-composition gates.
+`packages.live-image-junk-absent` reads the package database directly from the
+booted ISO, and `packages.installed-junk-absent` repeats the same policy after
+the target disk has booted without the ISO. The forbidden set includes retired
+Ubuntu/AnduinOS components and native build tooling such as DKMS, GCC, G++,
+Make, dpkg-dev, build-essential, and fakeroot. HWE kernel headers and compiler
+runtime libraries remain explicitly legal. The ISO builder does not purge
+violators to make this gate pass: package ownership must keep the image clean
+declaratively, and the test reports every injected package as a product defect.
+
 For every installed target, the harness discovers the exact versioned kernel
 and initrd created by the installer under `/boot`; it does not assume that
 optional `/vmlinuz` or `/initrd.img` compatibility links exist. While the

@@ -6654,7 +6654,7 @@ def _validate_desktop_shortcut_events(output: str) -> None:
         request="desktop-shortcut-context",
         key="shift-f10",
     )
-    plan, activated = _validate_context_menu_keyboard(
+    pointer, activated = _validate_context_menu_pointer(
         events,
         context="Desktop shortcut",
         target="desktop_shortcut_create",
@@ -6712,7 +6712,7 @@ def _validate_desktop_shortcut_events(output: str) -> None:
         < focused
         < context_plan
         < context
-        < plan
+        < pointer
         < activated
         < double_click
         < launched
@@ -6781,18 +6781,22 @@ def _validate_desktop_terminal_events(output: str) -> None:
         or len(bounds) != 4
     ):
         raise TestFailure("Desktop context click did not target DING's desktop frame")
-    activated, action = _one_event(
-        events,
-        context="Desktop terminal",
-        event="click",
-        target="desktop_open_terminal",
-    )
-    if action.get("accessible_name") not in {
-        "Open in Terminal",
-        "在终端中打开",
-        "打开终端",
-    }:
-        raise TestFailure("DING did not expose its Open in Terminal action")
+    previous = context
+    for request, key in (
+        ("desktop-terminal-menu-end", "end"),
+        ("desktop-terminal-menu-previous", "up"),
+        ("desktop-terminal-menu-activate", "ret"),
+    ):
+        key_index, _ = _one_event(
+            events,
+            context="Desktop terminal",
+            event="qmp-key",
+            request=request,
+            key=key,
+        )
+        if key_index <= previous:
+            raise TestFailure("Desktop terminal menu navigation is out of order")
+        previous = key_index
     opened, terminal = _one_event(
         events,
         context="Desktop terminal",
@@ -6811,6 +6815,7 @@ def _validate_desktop_terminal_events(output: str) -> None:
         or not isinstance(directory, str)
         or not directory.startswith("/")
         or Path(directory).name not in {"Desktop", "桌面"}
+        or terminal.get("activation") != "desktop-context-menu-keyboard"
     ):
         raise TestFailure("Desktop context action did not open Ptyxis in the desktop")
     close_key, _ = _one_event(
@@ -6827,8 +6832,50 @@ def _validate_desktop_terminal_events(output: str) -> None:
         phase="closed",
         visible=False,
     )
-    if not context < activated < opened < close_key < closed:
+    if not previous < opened < close_key < closed:
         raise TestFailure("Desktop terminal UI events are out of order")
+
+
+def _validate_context_menu_pointer(
+    events: list[dict[str, object]],
+    *,
+    context: str,
+    target: str,
+    localized: str,
+    request_prefix: str,
+) -> tuple[int, int]:
+    pointer_index, pointer = _one_event(
+        events,
+        context=context,
+        event="qmp-click",
+        request=f"{request_prefix}-click",
+        target=target,
+        accessible_name=localized,
+        button="left",
+    )
+    bounds = pointer.get("bounds")
+    if (
+        not isinstance(bounds, list)
+        or len(bounds) != 4
+        or any(
+            isinstance(component, bool) or not isinstance(component, int)
+            for component in bounds
+        )
+        or bounds[2] < 2
+        or bounds[3] < 2
+    ):
+        raise TestFailure(f"{context} returned unusable menu-item bounds")
+    activated_index, _ = _one_event(
+        events,
+        context=context,
+        event="context-menu-activated",
+        target=target,
+        accessible_name=localized,
+        method="qmp-pointer",
+    )
+    if pointer_index >= activated_index:
+        raise TestFailure(f"{context} pointer activation is out of order")
+    return pointer_index, activated_index
 
 
 def _validate_context_menu_keyboard(

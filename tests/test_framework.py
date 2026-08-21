@@ -1948,6 +1948,25 @@ class FeatureOracleTests(unittest.TestCase):
         ]
 
     @staticmethod
+    def _context_pointer_events(target, label, request_prefix):
+        return [
+            {
+                "event": "qmp-click",
+                "request": f"{request_prefix}-click",
+                "target": target,
+                "accessible_name": label,
+                "button": "left",
+                "bounds": [480, 320, 260, 36],
+            },
+            {
+                "event": "context-menu-activated",
+                "target": target,
+                "accessible_name": label,
+                "method": "qmp-pointer",
+            },
+        ]
+
+    @staticmethod
     def _graphical_vt_output(vt: int = 2) -> str:
         return "\n".join(
             (
@@ -2820,10 +2839,19 @@ class FeatureOracleTests(unittest.TestCase):
                 "bounds": [0, 0, 1280, 752],
             },
             {
-                "event": "click",
-                "target": "desktop_open_terminal",
-                "accessible_name": "Open in Terminal",
-                "actions": ["click"],
+                "event": "qmp-key",
+                "request": "desktop-terminal-menu-end",
+                "key": "end",
+            },
+            {
+                "event": "qmp-key",
+                "request": "desktop-terminal-menu-previous",
+                "key": "up",
+            },
+            {
+                "event": "qmp-key",
+                "request": "desktop-terminal-menu-activate",
+                "key": "ret",
             },
             {
                 "event": "desktop-terminal",
@@ -2832,6 +2860,7 @@ class FeatureOracleTests(unittest.TestCase):
                 "application": "ptyxis",
                 "windows": [["ptyxis", "frame", "Desktop"]],
                 "directory": "/home/anduinostest/Desktop",
+                "activation": "desktop-context-menu-keyboard",
             },
             {
                 "event": "qmp-key",
@@ -2848,9 +2877,9 @@ class FeatureOracleTests(unittest.TestCase):
         mutations = (
             (0, "target", "主目录", "exactly one semantic event"),
             (0, "application", "gnome-shell", "target DING"),
-            (1, "accessible_name", "Delete", "Open in Terminal"),
-            (2, "application", "org.gnome.Nautilus", "open Ptyxis"),
-            (2, "directory", "/tmp", "in the desktop"),
+            (1, "key", "home", "exactly one semantic event"),
+            (4, "application", "org.gnome.Nautilus", "open Ptyxis"),
+            (4, "directory", "/tmp", "in the desktop"),
         )
         for index, key, replacement, message in mutations:
             values = [json.loads(line) for line in passing.splitlines()]
@@ -3640,18 +3669,10 @@ class FeatureOracleTests(unittest.TestCase):
                 "request": "desktop-shortcut-context",
                 "key": "shift-f10",
             },
-            *self._context_action_events(
+            *self._context_pointer_events(
                 "desktop_shortcut_create",
                 "创建桌面快捷方式",
                 "desktop-shortcut-action",
-                [
-                    "新建窗口",
-                    "创建桌面快捷方式",
-                    "添加到任务栏",
-                    "固定到开始菜单",
-                    "应用详细信息",
-                ],
-                1,
             ),
             {
                 "event": "spice-double-click",
@@ -5095,6 +5116,22 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
             "def dump_accessibility", 1
         )[0]
         self.assertIn('requested_key = "down"', radio_body)
+
+    def test_desktop_context_menu_navigation_keys_are_narrowly_supported(self):
+        self.assertTrue(_guest_qmp_key_supported("end"))
+        self.assertTrue(_guest_qmp_key_supported("up"))
+        self.assertFalse(_guest_qmp_key_supported("home"))
+        source = Path("tests/guest/atspi_driver.py").read_text(encoding="utf-8")
+        terminal_body = source.split("def exercise_desktop_terminal", 1)[1].split(
+            "def exercise_default_desktop_icons", 1
+        )[0]
+        self.assertIn('(\"desktop-terminal-menu-end\", \"end\")', terminal_body)
+        self.assertIn(
+            '(\"desktop-terminal-menu-previous\", \"up\")', terminal_body
+        )
+        self.assertIn(
+            '(\"desktop-terminal-menu-activate\", \"ret\")', terminal_body
+        )
 
     def test_wifi_password_focus_recovery_supports_reverse_tab(self):
         self.assertIn("shift-tab", _SUPPORTED_GUEST_QMP_KEYS)
@@ -6596,11 +6633,11 @@ test \"$value\" = 'nested quotes'
                 (scenario, check, state, detail)
             )
         )
-        contract.side_effect = [
-            None,
-            TestFailure("injected invalid Ptyxis dconf value"),
-            *([None] * (len(RELEASE_CONTRACT_CHECKS) - 2)),
-        ]
+        def inject_ptyxis_failure(_console, _username, _artifacts, identifier):
+            if identifier == "terminal.ptyxis-initial-size":
+                raise TestFailure("injected invalid Ptyxis dconf value")
+
+        contract.side_effect = inject_ptyxis_failure
         vm = SimpleNamespace(serial=object())
         scenario = SimpleNamespace(id="bios-offline-btrfs")
 

@@ -4488,6 +4488,22 @@ def activate_shell_context_action(key: str, request: str) -> str:
     return localized
 
 
+def activate_shell_context_action_pointer(key: str, request: str) -> str:
+    """Click one semantically identified Shell menu item with QEMU input."""
+
+    node = _wait_shell_named(key, True)[0]
+    localized = name(node)
+    request_shell_click(key, f"{request}-click")
+    _wait_shell_named(key, False)
+    event(
+        "context-menu-activated",
+        target=key,
+        accessible_name=localized,
+        method="qmp-pointer",
+    )
+    return localized
+
+
 def exercise_start_button(evidence: Path) -> None:
     dismiss_initial_setup()
     asset = Path(
@@ -4827,10 +4843,17 @@ def exercise_desktop_terminal(evidence: Path) -> None:
         button="right",
         semantic_target="desktop-background",
     )
-    item = find("desktop_open_terminal", timeout=30, require_enabled=True)
-    menu_label = name(item)
-    dump_accessibility(evidence / "desktop-context-menu.txt")
-    click("desktop_open_terminal", timeout=30)
+    # DING renders this GTK/GMenu popup correctly but GNOME 50 does not put
+    # its rows in the AT-SPI tree.  Navigate from the stable bottom boundary:
+    # Change Background is last and Open in Terminal is the preceding action.
+    # The real Ptyxis window below remains the authoritative result oracle.
+    time.sleep(0.5)
+    for request, key in (
+        ("desktop-terminal-menu-end", "end"),
+        ("desktop-terminal-menu-previous", "up"),
+        ("desktop-terminal-menu-activate", "ret"),
+    ):
+        event("qmp-key", request=request, key=key)
     deadline = time.monotonic() + 60
     windows: list[tuple[str, str, str]] = []
     while time.monotonic() < deadline:
@@ -4847,7 +4870,7 @@ def exercise_desktop_terminal(evidence: Path) -> None:
         visible=True,
         application=windows[0][0],
         windows=windows,
-        menu_label=menu_label,
+        activation="desktop-context-menu-keyboard",
         directory=str(_desktop_fixture_path().parent),
     )
     event("qmp-key", request="desktop-terminal-close", key="alt-f4")
@@ -4904,7 +4927,7 @@ def exercise_desktop_shortcut(evidence: Path) -> None:
             "Chinese ArcMenu did not expose '创建桌面快捷方式': "
             f"{localized!r}"
         )
-    activated = activate_shell_context_action(
+    activated = activate_shell_context_action_pointer(
         "desktop_shortcut_create",
         "desktop-shortcut-action",
     )
