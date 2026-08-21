@@ -25,9 +25,24 @@ ROOT = Path(__file__).parent
 POLICY_PATH = ROOT / "journal-policy.json"
 VERSIONS = {
     "gdm3": "50.1-0ubuntu0.1",
+    "gnome-shell": "50.1-0ubuntu1.2",
     "gnome-settings-daemon": "50.0-1ubuntu1",
     "mutter-common": "50.1-0ubuntu2.2",
+    "spice-vdagent": "0.23.0-1",
 }
+
+DASH_NULL_ICON = "\n".join(
+    (
+        'JS ERROR: TypeError: can\'t access property "ensure_style", firstIcon.icon is null',
+        "_adjustIconSize@resource:///org/gnome/shell/ui/dash.js:602:9",
+        "_redisplay@resource:///org/gnome/shell/ui/dash.js:791:14",
+        "_runDeferredWork@resource:///org/gnome/shell/ui/main.js:986:31",
+        "_runAllDeferredWork@resource:///org/gnome/shell/ui/main.js:995:25",
+        "queueDeferredWork/_deferredTimeoutId<@resource:///org/gnome/shell/ui/main.js:1079:13",
+        "_init/this.timeout_add_seconds_once/id<@resource:///org/gnome/gjs/modules/core/overrides/GLib.js:444:13",
+        "@resource:///org/gnome/shell/ui/init.js:20:20",
+    )
+)
 
 
 def scenario(**overrides):
@@ -66,18 +81,31 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gdm-autologin-keyring-locked",
                 "gnome50-keyboard-null-variant",
                 "gnome50-transient-stack-position",
+                "gnome50-hidden-dash-null-icon",
+                "spice-vdagent-tty-switch-no-active-session",
             },
             {item.id for item in policy.known_diagnostics},
         )
         self.assertEqual(
-            ("gdm3", "gnome-settings-daemon", "mutter-common"),
+            (
+                "gdm3",
+                "gnome-settings-daemon",
+                "gnome-shell",
+                "mutter-common",
+                "spice-vdagent",
+            ),
             policy.packages,
         )
         for item in policy.known_diagnostics:
             self.assertNotEqual("*", item.version_glob)
             self.assertTrue(item.owner)
             self.assertGreater(len(item.reason), 40)
-            self.assertEqual(1, item.max_occurrences)
+            expected_budget = (
+                16
+                if item.id == "spice-vdagent-tty-switch-no-active-session"
+                else 1
+            )
+            self.assertEqual(expected_budget, item.max_occurrences)
             self.assertNotIn(".*", item.message_regex)
 
     def test_invalid_or_unbounded_policy_is_rejected(self):
@@ -180,6 +208,113 @@ class JournalClassificationTests(unittest.TestCase):
         verdict = self.policy.classify((item,), scenario(), VERSIONS)
         self.assertFalse(verdict.passed)
         self.assertEqual("unexpected-journal-error", verdict.blockers[0].kind)
+
+    def test_spice_vdagent_diagnostic_is_only_known_during_the_tty6_action(self):
+        item = entry(
+            "Error getting active session: No data available",
+            "spice-vdagentd.service",
+            priority=3,
+        )
+        outside = self.policy.classify((item,), scenario(), VERSIONS)
+        wrong_action = self.policy.classify(
+            (item,),
+            scenario(),
+            VERSIONS,
+            action_scope="shortcut-super-u",
+        )
+        during_switch = self.policy.classify(
+            (item,),
+            scenario(),
+            VERSIONS,
+            action_scope="tty6-branding",
+        )
+        self.assertFalse(outside.passed)
+        self.assertFalse(wrong_action.passed)
+        self.assertTrue(during_switch.passed)
+        self.assertEqual(
+            "spice-vdagent-tty-switch-no-active-session",
+            during_switch.known_diagnostics[0].rule_id,
+        )
+
+    def test_hidden_dash_null_icon_is_only_known_for_exact_about_action(self):
+        item = entry(DASH_NULL_ICON, "gnome-shell")
+        outside = self.policy.classify((item,), scenario(), VERSIONS)
+        wrong_action = self.policy.classify(
+            (item,),
+            scenario(),
+            VERSIONS,
+            action_scope="shortcut-super-i",
+        )
+        during_about = self.policy.classify(
+            (item,),
+            scenario(),
+            VERSIONS,
+            action_scope="settings-about-branding",
+        )
+        self.assertFalse(outside.passed)
+        self.assertFalse(wrong_action.passed)
+        self.assertTrue(during_about.passed)
+        self.assertEqual(
+            "gnome50-hidden-dash-null-icon",
+            during_about.known_diagnostics[0].rule_id,
+        )
+
+    def test_hidden_dash_exception_still_fails_on_drift_count_or_version(self):
+        item = entry(DASH_NULL_ICON, "gnome-shell")
+        changed = entry(
+            DASH_NULL_ICON.replace("firstIcon.icon is null", "firstIcon is null"),
+            "gnome-shell",
+        )
+        action = {"action_scope": "settings-about-branding"}
+        drifted = self.policy.classify((changed,), scenario(), VERSIONS, **action)
+        excessive = self.policy.classify(
+            (item, entry(DASH_NULL_ICON, "gnome-shell", cursor="cursor-2")),
+            scenario(),
+            VERSIONS,
+            **action,
+        )
+        expired = self.policy.classify(
+            (item,),
+            scenario(),
+            dict(VERSIONS, **{"gnome-shell": "51.0-1"}),
+            **action,
+        )
+        self.assertFalse(drifted.passed)
+        self.assertEqual("unexpected-journal-error", drifted.blockers[0].kind)
+        self.assertFalse(excessive.passed)
+        self.assertEqual("diagnostic-budget-exceeded", excessive.blockers[0].kind)
+        self.assertFalse(expired.passed)
+        self.assertIn("allowed 50.*", expired.blockers[0].reason)
+
+    def test_spice_vdagent_tty_switch_budget_and_version_remain_fail_closed(self):
+        items = tuple(
+            entry(
+                "Error getting active session: No data available",
+                "spice-vdagentd.service",
+                priority=3,
+                cursor=f"spice-{number}",
+            )
+            for number in range(17)
+        )
+        excessive = self.policy.classify(
+            items,
+            scenario(),
+            VERSIONS,
+            action_scope="tty6-branding",
+        )
+        expired = self.policy.classify(
+            (items[0],),
+            scenario(),
+            dict(VERSIONS, **{"spice-vdagent": "0.24.0-1"}),
+            action_scope="tty6-branding",
+        )
+        self.assertFalse(excessive.passed)
+        self.assertEqual(
+            "diagnostic-budget-exceeded",
+            excessive.blockers[0].kind,
+        )
+        self.assertFalse(expired.passed)
+        self.assertIn("allowed 0.23.*", expired.blockers[0].reason)
 
     def test_unknown_priority_three_and_high_priority_segfault_block(self):
         entries = (

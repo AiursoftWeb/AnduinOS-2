@@ -18,6 +18,7 @@ DEFAULT_RAMDISK_THRESHOLD_GIB = 16
 RAMDISK_MIN_FREE_GIB = 8
 RAMDISK_MAX_QCOW_GIB = 12
 RAMDISK_HOST_RESERVE_GIB = 2
+WORKSPACE_TOKEN_ENV = "ANDUINOS_TEST_WORKSPACE_TOKEN"
 
 
 @dataclass(frozen=True)
@@ -167,9 +168,12 @@ def select_disk_storage(
         return _ramdisk_unavailable(mode, persistent, details)
 
     mount, free, qcow_limit = max(safe, key=lambda item: (item[2], item[1]))
-    token = hashlib.sha256(
-        f"{artifacts_root.expanduser().resolve()}\0{os.getpid()}".encode()
-    ).hexdigest()[:16]
+    token = os.environ.get(WORKSPACE_TOKEN_ENV)
+    if token is None:
+        token = hashlib.sha256(
+            f"{artifacts_root.expanduser().resolve()}\0{os.getpid()}".encode()
+        ).hexdigest()[:16]
+    _validate_workspace_token(token)
     root = mount / f"anduinos-iso-tests-{os.getuid()}" / token
     return DiskStorage(
         root=root,
@@ -253,6 +257,28 @@ def cleanup_disk_storage(storage: DiskStorage) -> None:
         storage.root.parent.rmdir()
     except OSError:
         pass
+
+
+def cleanup_supervised_ramdisk_workspaces(token: str) -> None:
+    """Reclaim only the supervisor-token workspace on known writable tmpfs mounts."""
+
+    _validate_workspace_token(token)
+    for candidate in _ramdisk_candidates():
+        try:
+            mount = candidate.expanduser().resolve()
+            if not mount.is_dir() or _filesystem_type(mount) != "tmpfs":
+                continue
+            root = mount / f"anduinos-iso-tests-{os.getuid()}" / token
+            if not root.exists():
+                continue
+            cleanup_disk_storage(DiskStorage(root, "ramdisk", "supervisor cleanup"))
+        except OSError:
+            continue
+
+
+def _validate_workspace_token(token: str) -> None:
+    if len(token) != 16 or any(value not in "0123456789abcdef" for value in token):
+        raise ConfigurationError("Unsafe acceptance workspace token")
 
 
 def _ramdisk_unavailable(

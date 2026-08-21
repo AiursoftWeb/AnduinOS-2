@@ -52,6 +52,32 @@
       "version_glob": "50.*",
       "owner": "GNOME Mutter",
       "reason": "GNOME 50 can emit this transient window-stack diagnostic while the Shell remains healthy. Window activation, extension state, SPICE resize, and the live Shell process remain independent release gates."
+    },
+    {
+      "id": "gnome50-hidden-dash-null-icon",
+      "component_regex": "(^|/)gnome-shell($|[|/])",
+      "message_regex": "^JS ERROR: TypeError: can't access property \"ensure_style\", firstIcon\\.icon is null\\n_adjustIconSize@resource:///org/gnome/shell/ui/dash\\.js:[0-9]+:[0-9]+\\n_redisplay@resource:///org/gnome/shell/ui/dash\\.js:[0-9]+:[0-9]+\\n_runDeferredWork@resource:///org/gnome/shell/ui/main\\.js:[0-9]+:[0-9]+\\n_runAllDeferredWork@resource:///org/gnome/shell/ui/main\\.js:[0-9]+:[0-9]+\\nqueueDeferredWork/_deferredTimeoutId<@resource:///org/gnome/shell/ui/main\\.js:[0-9]+:[0-9]+\\n_init/this\\.timeout_add_seconds_once/id<@resource:///org/gnome/gjs/modules/core/overrides/GLib\\.js:[0-9]+:[0-9]+\\n@resource:///org/gnome/shell/ui/init\\.js:[0-9]+:[0-9]+$",
+      "conditions": {
+        "action_scope": "settings-about-branding"
+      },
+      "max_occurrences": 1,
+      "package": "gnome-shell",
+      "version_glob": "50.*",
+      "owner": "GNOME Shell",
+      "reason": "GNOME Shell 50 can size its hidden stock Dash while the first application icon is not yet constructed when Settings About starts. The same action must still paint the real AnduinOS identity, match the rendered logo, and leave the Shell and graphical session healthy."
+    },
+    {
+      "id": "spice-vdagent-tty-switch-no-active-session",
+      "component_regex": "(^|[|/])spice-vdagentd($|[|./])",
+      "message_regex": "^Error getting active session: No data available$",
+      "conditions": {
+        "action_scope": "tty6-branding"
+      },
+      "max_occurrences": 16,
+      "package": "spice-vdagent",
+      "version_glob": "0.23.*",
+      "owner": "SPICE vdagent",
+      "reason": "Switching away from the graphical VT deliberately creates a brief interval with no active graphical logind session. The same action independently proves tty6 contents, restores the exact Wayland VT, and requires the graphical session, GDM, and graphical.target to remain healthy."
     }
   ]
 }

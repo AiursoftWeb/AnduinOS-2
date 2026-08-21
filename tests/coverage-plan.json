@@ -45,8 +45,11 @@
     },
     {
       "id": "R07",
-      "summary": "The desktop context menu can open the default terminal",
-      "checks": ["desktop.context-menu-terminal"]
+      "summary": "The desktop context menu can open the default terminal with a valid initial window size",
+      "checks": [
+        "terminal.ptyxis-initial-size",
+        "desktop.context-menu-terminal"
+      ]
     },
     {
       "id": "R08",
@@ -190,8 +193,8 @@
     },
     {
       "id": "R36",
-      "summary": "WeChat installs and minimizes into the lower-right AppIndicator tray",
-      "checks": ["app.wechat-install", "app.wechat-tray"]
+      "summary": "WeChat installs and launches; an authenticated session minimizes into the lower-right AppIndicator tray",
+      "checks": ["app.wechat-install", "shell.appindicator-roundtrip", "app.wechat-tray"]
     },
     {
       "id": "R37",
@@ -237,6 +240,16 @@
       "id": "R45",
       "summary": "Installer automatic-login opt-in bypasses GDM while the default still requires authentication",
       "checks": ["login.autologin-enabled", "login.autologin-disabled"]
+    },
+    {
+      "id": "R46",
+      "summary": "A real Btrfs deployment can roll back an installed package and preserve a healthy boot",
+      "checks": ["storage.btrfs-docker-rollback"]
+    },
+    {
+      "id": "R47",
+      "summary": "Installer passwordless-sudo opt-in grants only the created account while the default requires authentication",
+      "checks": ["sudo.passwordless-enabled", "sudo.password-required"]
     }
   ],
   "suites": [
@@ -268,11 +281,13 @@
       "isolation": "overlay",
       "observation_modes": ["controlled"],
       "checks": [
+        "terminal.ptyxis-initial-size",
         "desktop.context-menu-terminal",
         "desktop.icons-visible",
         "desktop.create-shortcut",
         "panel.pin-application",
         "panel.remove-menu-localized",
+        "shell.appindicator-roundtrip",
         "shell.extension-policy",
         "shell.extension-errors",
         "journal.boot-and-idle",
@@ -342,7 +357,9 @@
       "observation_modes": ["passive", "controlled"],
       "checks": [
         "login.autologin-disabled",
-        "login.autologin-enabled"
+        "login.autologin-enabled",
+        "sudo.password-required",
+        "sudo.passwordless-enabled"
       ]
     },
     {
@@ -366,6 +383,16 @@
       ]
     },
     {
+      "id": "btrfs-rollback",
+      "profiles": ["nightly-online"],
+      "source": "uefi-nosb-online-btrfs-ssh-toggle",
+      "isolation": "overlay",
+      "observation_modes": ["passive", "controlled"],
+      "checks": [
+        "storage.btrfs-docker-rollback"
+      ]
+    },
+    {
       "id": "public-ecosystem",
       "profiles": ["nightly-online"],
       "source": "installed-online-amd64-base",
@@ -375,7 +402,6 @@
         "files.cpuz-thumbnail-and-open",
         "apt.nextcloud-client-ppa",
         "app.wechat-install",
-        "app.wechat-tray",
         "store.spotify-public"
       ]
     },
@@ -387,6 +413,7 @@
       "observation_modes": ["platform"],
       "checks": [
         "display.gnome-boxes-resize",
+        "app.wechat-tray",
         "network.wifi-migration-physical"
       ]
     }

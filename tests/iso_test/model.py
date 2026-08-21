@@ -32,6 +32,7 @@ class Firmware(str, Enum):
 class Network(str, Enum):
     OFFLINE = "offline"
     ONLINE = "online"
+    WIFI = "wifi"
 
 
 class Filesystem(str, Enum):
@@ -73,6 +74,7 @@ class Scenario:
     rime: bool
     online_features: bool
     ssh: SshPolicy
+    passwordless_sudo: bool
     automatic_login: bool
     desktop_release_gate: bool
     snapshots_manager: bool
@@ -179,6 +181,7 @@ def _load_scenario(value: object) -> Scenario:
         "rime",
         "online_features",
         "ssh",
+        "passwordless_sudo",
         "automatic_login",
         "desktop_release_gate",
         "snapshots_manager",
@@ -207,6 +210,7 @@ def _load_scenario(value: object) -> Scenario:
     for name in (
         "rime",
         "online_features",
+        "passwordless_sudo",
         "automatic_login",
         "desktop_release_gate",
         "snapshots_manager",
@@ -214,10 +218,18 @@ def _load_scenario(value: object) -> Scenario:
     ):
         if type(value[name]) is not bool:
             raise ConfigurationError(f"{identifier}: {name} must be boolean")
-    if value["online_features"] and network is Network.OFFLINE:
-        raise ConfigurationError(f"{identifier}: offline case enables downloads")
-    if value["rime"] and network is Network.OFFLINE:
-        raise ConfigurationError(f"{identifier}: offline case enables Rime download")
+    if value["online_features"] and network is not Network.ONLINE:
+        raise ConfigurationError(
+            f"{identifier}: non-Internet case enables downloads"
+        )
+    if value["rime"] and network is not Network.ONLINE:
+        raise ConfigurationError(
+            f"{identifier}: non-Internet case enables Rime download"
+        )
+    if network is Network.WIFI and architectures != (Architecture.AMD64,):
+        raise ConfigurationError(
+            f"{identifier}: the hwsim release gate is currently amd64-only"
+        )
     if value["mok_enrollment"] != firmware.secure_boot:
         raise ConfigurationError(f"{identifier}: MOK policy contradicts firmware")
     if value["snapshots_manager"] != (filesystem is Filesystem.BTRFS):
@@ -233,6 +245,7 @@ def _load_scenario(value: object) -> Scenario:
         rime=value["rime"],
         online_features=value["online_features"],
         ssh=ssh,
+        passwordless_sudo=value["passwordless_sudo"],
         automatic_login=value["automatic_login"],
         desktop_release_gate=value["desktop_release_gate"],
         snapshots_manager=value["snapshots_manager"],

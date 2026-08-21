@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AnduinOS Shell Acceptance Fixture
+Comment=Deterministic two-window fixture for GNOME Shell acceptance
+Exec=python3 /usr/local/lib/anduinos-acceptance-shell/shell_fixture.py
+Icon=utilities-terminal
+Terminal=false
+StartupNotify=true
+DBusActivatable=false
+Categories=Utility;

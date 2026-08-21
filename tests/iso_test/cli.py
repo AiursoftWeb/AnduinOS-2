@@ -14,10 +14,13 @@ from pathlib import Path
 from .errors import AcceptanceError, ConfigurationError
 from .dashboard import AcceptanceDashboard
 from .display import SpiceDisplayController
+from .feature_model import FeatureSuiteRegistry, TestProfile
+from .feature_runner import FeatureSuiteResult, FeatureSuiteRunner
 from .firmware import FirmwareOverrides, resolve_firmware
 from .iso import inspect_iso
 from .model import Architecture, TestMatrix
 from .qemu import resolve_qemu
+from .reporting import write_junit_report
 from .runner import RunnerOptions, ScenarioRunner, scenario_check_ids
 from .storage import (
     DEFAULT_RAMDISK_THRESHOLD_GIB,
@@ -34,26 +37,56 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         matrix = TestMatrix.load(args.matrix)
+        registry = FeatureSuiteRegistry.load(args.feature_suites, matrix)
         architecture = Architecture(args.arch) if args.arch else None
         if args.list:
-            _list_cases(matrix, architecture)
+            _list_cases(matrix, registry, architecture)
             return 0
         if architecture is None or args.iso is None:
             parser.error("--iso and --arch are required unless --list is used")
         selected = matrix.select(architecture, tuple(args.cases))
+        profile = TestProfile(args.profile)
+        suites = registry.select(architecture, profile, tuple(args.suites))
+        if args.cases and not args.suites:
+            selected_ids = {scenario.id for scenario in selected}
+            suites = tuple(
+                suite
+                for suite in suites
+                if suite.source_for(architecture) in selected_ids
+            )
+        registry.validate_sources(
+            suites,
+            matrix,
+            architecture,
+            {scenario.id for scenario in selected},
+        )
         if args.smoke and not args.cases:
             raise ConfigurationError("--smoke requires one or more explicit --case values")
+        if args.smoke and suites:
+            raise ConfigurationError("Feature suites cannot run with --smoke")
         _validate_disk_retention(args, selected)
+        if suites and (args.keep_passed_disk or args.keep_failed_disk):
+            raise ConfigurationError(
+                "Feature-suite overlays are always disposable; disk retention "
+                "cannot be combined with an executable feature profile"
+            )
         inspection = inspect_iso(args.iso, architecture)
         overrides = FirmwareOverrides(
             uefi_code=args.uefi_code,
             uefi_vars_no_secure_boot=args.uefi_vars,
             uefi_vars_secure_boot=args.secure_boot_vars,
         )
-        _preflight(architecture, selected, overrides)
+        _preflight(architecture, selected, overrides, suites)
         options = _options(args, matrix)
         if args.dry_run:
-            _print_dry_run(inspection, architecture, selected, options)
+            _print_dry_run(
+                inspection,
+                architecture,
+                selected,
+                suites,
+                profile,
+                options,
+            )
             return 0
         assert_disk_storage_ready(
             options.disk_storage,
@@ -80,6 +113,14 @@ def main(argv: list[str] | None = None) -> int:
                     )
                     for item in selected
                 },
+                suites={
+                    scenario.id: {
+                        suite.id: suite.checks
+                        for suite in suites
+                        if suite.source_for(architecture) == scenario.id
+                    }
+                    for scenario in selected
+                },
                 live=False if args.no_tui else None,
             )
             runner = ScenarioRunner(
@@ -91,12 +132,31 @@ def main(argv: list[str] | None = None) -> int:
                 check_callback=dashboard.check,
             )
             results = []
+            suite_results = []
+            suites_by_source = {
+                scenario.id: tuple(
+                    suite
+                    for suite in suites
+                    if suite.source_for(architecture) == scenario.id
+                )
+                for scenario in selected
+            }
+            feature_runner = FeatureSuiteRunner(
+                options,
+                matrix.defaults.username,
+                matrix.defaults.full_name,
+                matrix.defaults.password,
+                fail_fast=args.fail_fast,
+                phase_callback=dashboard.suite_phase,
+                check_callback=dashboard.suite_check,
+            )
             dashboard.start()
             try:
                 with _termination_as_interrupt():
                     for scenario in selected:
                         dashboard.begin(scenario.id)
-                        result = runner.run(scenario)
+                        source_suites = suites_by_source[scenario.id]
+                        result = runner.run(scenario, promote=bool(source_suites))
                         results.append(result)
                         dashboard.complete(
                             result.id,
@@ -104,37 +164,104 @@ def main(argv: list[str] | None = None) -> int:
                             result.seconds,
                             result.error,
                         )
+                        base = result.promoted_base
+                        try:
+                            if result.status == "passed":
+                                if source_suites and base is None:
+                                    raise ConfigurationError(
+                                        f"{scenario.id}: verified feature base was not promoted"
+                                    )
+                                for suite in source_suites:
+                                    assert base is not None
+                                    dashboard.begin_suite(scenario.id, suite.id)
+                                    suite_result = feature_runner.run(base, suite)
+                                    suite_results.append(suite_result)
+                                    dashboard.complete_suite(
+                                        scenario.id,
+                                        suite.id,
+                                        suite_result.status,
+                                        suite_result.seconds,
+                                        suite_result.error,
+                                    )
+                                    if (
+                                        suite_result.status != "passed"
+                                        and args.fail_fast
+                                    ):
+                                        break
+                            else:
+                                for suite in source_suites:
+                                    error = "Source installation scenario failed"
+                                    dashboard.complete_suite(
+                                        scenario.id,
+                                        suite.id,
+                                        "failed",
+                                        0.0,
+                                        error,
+                                    )
+                                    suite_results.append(
+                                        _failed_suite_result(
+                                            suite.id,
+                                            scenario.id,
+                                            options.artifacts_root,
+                                            error,
+                                        )
+                                    )
+                        finally:
+                            if base is not None:
+                                base.cleanup()
+                                (result.artifacts / "target-disk-retention.txt").write_text(
+                                    "Temporary immutable feature-suite base deleted "
+                                    "after every dependent overlay stopped.\n",
+                                    encoding="utf-8",
+                                )
                         if result.status != "passed" and args.fail_fast:
+                            break
+                        if (
+                            suite_results
+                            and suite_results[-1].status != "passed"
+                            and args.fail_fast
+                        ):
                             break
             finally:
                 dashboard.close()
             summary = {
+                "schema_version": 1,
                 "iso": str(inspection.path),
                 "iso_sha256": inspection.sha256,
                 "architecture": architecture.value,
+                "profile": profile.value,
                 "disk_storage": {
                     "backend": options.disk_storage.backend,
                     "root": str(options.disk_storage.root),
                     "reason": options.disk_storage.reason,
                 },
-                "results": [
-                    {
-                        "id": item.id,
-                        "status": item.status,
-                        "seconds": item.seconds,
-                        "artifacts": str(item.artifacts),
-                        "error": item.error,
-                        "checks": dashboard.check_results(item.id),
-                    }
-                    for item in results
-                ],
+                "results": _materialize_case_results(
+                    selected,
+                    results,
+                    dashboard,
+                    options.artifacts_root,
+                ),
+                "feature_suites": _materialize_suite_results(
+                    suites,
+                    suite_results,
+                    dashboard,
+                    architecture,
+                    options.artifacts_root,
+                ),
             }
             (options.artifacts_root / "summary.json").write_text(
                 json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
                 encoding="utf-8",
             )
+            write_junit_report(summary, options.artifacts_root / "junit.xml")
             passed = sum(item.status == "passed" for item in results)
-            return 0 if passed == len(results) == len(selected) else 1
+            suites_passed = sum(item.status == "passed" for item in suite_results)
+            return (
+                0
+                if passed == len(results) == len(selected)
+                and suites_passed == len(suite_results) == len(suites)
+                else 1
+            )
         finally:
             cleanup_disk_storage(options.disk_storage)
     except AcceptanceError as error:
@@ -157,6 +284,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--arch", choices=tuple(item.value for item in Architecture))
     parser.add_argument("--case", dest="cases", action="append", default=[])
     parser.add_argument("--matrix", type=Path, default=root / "matrix.json")
+    parser.add_argument(
+        "--feature-suites",
+        type=Path,
+        default=root / "feature-suites.json",
+    )
+    parser.add_argument(
+        "--profile",
+        choices=tuple(item.value for item in TestProfile),
+        default=TestProfile.INSTALL.value,
+        help="installation-only or executable installed-system feature profile",
+    )
+    parser.add_argument("--suite", dest="suites", action="append", default=[])
     parser.add_argument("--artifacts", type=Path)
     parser.add_argument("--list", action="store_true", help="list matrix cases")
     parser.add_argument("--dry-run", action="store_true", help="validate without QEMU")
@@ -165,7 +304,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="boot selected Live environments but do not install",
     )
-    parser.add_argument("--fail-fast", action="store_true")
+    parser.add_argument(
+        "--fail-fast",
+        action="store_true",
+        help=(
+            "stop after the first failed scenario, feature suite, or safe "
+            "in-suite product assertion"
+        ),
+    )
     parser.add_argument(
         "--keep-passed-disk",
         "--keep-passed-disks",
@@ -285,7 +431,84 @@ def _validate_disk_retention(args, selected) -> None:
         )
 
 
-def _preflight(architecture, selected, overrides) -> None:
+def _materialize_case_results(
+    selected,
+    actual_results,
+    dashboard,
+    artifacts_root: Path,
+) -> list[dict[str, object]]:
+    """Include not-started cases instead of omitting fail-fast coverage gaps."""
+
+    actual = {item.id: item for item in actual_results}
+    records = []
+    for scenario in selected:
+        view = dashboard.case_result(scenario.id)
+        result = actual.get(scenario.id)
+        records.append(
+            {
+                "id": scenario.id,
+                "status": view["status"],
+                "seconds": view["seconds"],
+                "artifacts": str(
+                    result.artifacts
+                    if result is not None
+                    else artifacts_root / scenario.id
+                ),
+                "error": result.error if result is not None else view["error"],
+                "detail": view["detail"],
+                "checks": view["checks"],
+            }
+        )
+    return records
+
+
+def _materialize_suite_results(
+    selected_suites,
+    actual_results,
+    dashboard,
+    architecture,
+    artifacts_root: Path,
+) -> list[dict[str, object]]:
+    """Include every selected suite, including fail-fast pending suites."""
+
+    actual = {(item.source_case, item.id): item for item in actual_results}
+    views = {
+        (case_id, value["id"]): value
+        for case_id in dashboard.cases
+        for value in dashboard.suite_results(case_id)
+    }
+    records = []
+    for suite in selected_suites:
+        source = suite.source_for(architecture)
+        if source is None:
+            raise ConfigurationError(
+                f"{suite.id}: no source for {architecture.value} while reporting"
+            )
+        view = views[(source, suite.id)]
+        result = actual.get((source, suite.id))
+        records.append(
+            {
+                "id": suite.id,
+                "source_case": source,
+                "status": view["status"],
+                "seconds": view["seconds"],
+                "artifacts": str(
+                    result.artifacts
+                    if result is not None
+                    else artifacts_root
+                    / source
+                    / "feature-suites"
+                    / suite.id
+                ),
+                "error": result.error if result is not None else view.get("error", ""),
+                "detail": view["detail"],
+                "checks": view["checks"],
+            }
+        )
+    return records
+
+
+def _preflight(architecture, selected, overrides, suites=()) -> None:
     if shutil.which("ssh") is None:
         raise ConfigurationError("Required executable is missing: ssh")
     try:
@@ -294,10 +517,17 @@ def _preflight(architecture, selected, overrides) -> None:
         raise ConfigurationError(
             "Required Python module is missing: Pillow (install python3-pil)"
         ) from error
-    if any(scenario.desktop_release_gate for scenario in selected):
+    if any(scenario.desktop_release_gate for scenario in selected) or suites:
         SpiceDisplayController.validate_dependencies()
+    if any(scenario.desktop_release_gate for scenario in selected):
         if shutil.which("mksquashfs") is None:
             raise ConfigurationError("Required executable is missing: mksquashfs")
+    if any(suite.id == "file-integration" for suite in suites):
+        for executable in ("ffmpeg", "dpkg-deb"):
+            if shutil.which(executable) is None:
+                raise ConfigurationError(
+                    f"Required executable is missing: {executable}"
+                )
     binary, acceleration = resolve_qemu(architecture)
     print(f"QEMU: {binary} ({acceleration})")
     seen = set()
@@ -315,7 +545,11 @@ def _preflight(architecture, selected, overrides) -> None:
             )
 
 
-def _list_cases(matrix: TestMatrix, architecture: Architecture | None) -> None:
+def _list_cases(
+    matrix: TestMatrix,
+    registry: FeatureSuiteRegistry,
+    architecture: Architecture | None,
+) -> None:
     for scenario in matrix.scenarios:
         if architecture is not None and not scenario.supports(architecture):
             continue
@@ -325,15 +559,37 @@ def _list_cases(matrix: TestMatrix, architecture: Architecture | None) -> None:
             f"{scenario.network.value:7} {scenario.filesystem.value:5} "
             f"rime={str(scenario.rime).lower():5} "
             f"ssh={scenario.ssh.value} "
+            f"passwordless-sudo={str(scenario.passwordless_sudo).lower():5} "
             f"autologin={str(scenario.automatic_login).lower():5} "
             f"desktop-gate={str(scenario.desktop_release_gate).lower()}"
         )
+    print("\nExecutable feature suites:")
+    for suite in registry.suites:
+        if architecture is not None and not suite.supports(architecture):
+            continue
+        sources = ",".join(
+            f"{arch.value}:{source}"
+            for arch, source in suite.source_cases.items()
+        )
+        profiles = ",".join(profile.value for profile in suite.profiles)
+        print(
+            f"{suite.id:43} profiles={profiles} sources={sources}\n"
+            f"  CHECKS ({len(suite.checks)}): " + ", ".join(suite.checks)
+        )
 
 
-def _print_dry_run(inspection, architecture, selected, options) -> None:
+def _print_dry_run(
+    inspection,
+    architecture,
+    selected,
+    suites,
+    profile,
+    options,
+) -> None:
     print(f"ISO: {inspection.path}")
     print(f"SHA-256: {inspection.sha256}")
     print(f"Architecture: {architecture.value}")
+    print(f"Profile: {profile.value}")
     print(f"Artifacts: {options.artifacts_root}")
     print(
         f"Resources: {options.memory_mib} MiB RAM, {options.cpus} CPUs, "
@@ -374,12 +630,39 @@ def _print_dry_run(inspection, architecture, selected, options) -> None:
             f"PLAN {scenario.id}: {scenario.firmware.value}, "
             f"{scenario.network.value}, {scenario.filesystem.value}, "
             f"rime={scenario.rime}, ssh={scenario.ssh.value}, "
+            f"passwordless-sudo={scenario.passwordless_sudo}, "
             f"autologin={scenario.automatic_login}, "
             f"desktop-gate={scenario.desktop_release_gate}, "
             f"mok={scenario.mok_enrollment}"
         )
         checks = scenario_check_ids(scenario, smoke_only=options.smoke_only)
         print(f"  CHECKS ({len(checks)}): " + ", ".join(checks))
+        for suite in suites:
+            if suite.source_for(architecture) != scenario.id:
+                continue
+            print(
+                f"  FEATURE SUITE {suite.id} (qcow2 overlay): "
+                + ", ".join(suite.checks)
+            )
+
+
+def _failed_suite_result(
+    identifier: str,
+    source_case: str,
+    artifacts_root: Path,
+    error: str,
+) -> FeatureSuiteResult:
+    artifacts = artifacts_root / source_case / "feature-suites" / identifier
+    artifacts.mkdir(parents=True, exist_ok=True)
+    (artifacts / "failure.txt").write_text(error + "\n", encoding="utf-8")
+    return FeatureSuiteResult(
+        identifier,
+        source_case,
+        "failed",
+        0.0,
+        artifacts,
+        error,
+    )
 
 
 @contextlib.contextmanager

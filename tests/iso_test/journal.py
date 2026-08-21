@@ -26,6 +26,7 @@ _CONDITION_NAMES = {
     "desktop_release_gate",
     "rime",
 }
+_ACTION_SCOPE_CONDITION = "action_scope"
 
 
 @dataclass(frozen=True)
@@ -74,9 +75,14 @@ class KnownDiagnostic:
         self,
         scenario: object,
         package_versions: dict[str, str],
+        action_scope: str,
     ) -> bool:
         for name, expected in self.conditions.items():
-            actual = getattr(scenario, name, None)
+            actual = (
+                action_scope
+                if name == _ACTION_SCOPE_CONDITION
+                else getattr(scenario, name, None)
+            )
             if hasattr(actual, "value"):
                 actual = actual.value
             if actual != expected:
@@ -185,6 +191,7 @@ class JournalPolicy:
         *,
         failed_system_units: Iterable[str] = (),
         failed_user_units: Iterable[str] = (),
+        action_scope: str = "",
     ) -> JournalVerdict:
         merged = merge_journal_entries(entries)
         blockers: list[JournalFinding] = []
@@ -215,7 +222,7 @@ class JournalPolicy:
                     rule
                     for rule in self.known_diagnostics
                     if rule.entry_matches(entry)
-                    and rule.applies(scenario, package_versions)
+                    and rule.applies(scenario, package_versions, action_scope)
                 ),
                 None,
             )
@@ -281,8 +288,14 @@ def render_guest_collection_script(
     policy: JournalPolicy,
     *,
     user: bool = False,
+    after_cursor: str | None = None,
 ) -> str:
-    """Return a guest command that emits only structured candidate entries."""
+    """Return a guest command that emits structured candidate entries.
+
+    ``after_cursor`` deliberately scopes a functional check to journal entries
+    created after the action began.  The cursor is passed as one quoted
+    argument to journalctl; callers never interpolate it into a shell program.
+    """
 
     patterns = base64.b64encode(
         json.dumps(policy.candidate_patterns).encode("utf-8")
@@ -328,9 +341,14 @@ for raw_line in sys.stdin:
     print(json.dumps(normalized, ensure_ascii=False, sort_keys=True))
 """.strip()
     journal_scope = " --user" if user else ""
+    cursor_scope = (
+        f" --after-cursor={shlex.quote(after_cursor)}"
+        if after_cursor is not None
+        else ""
+    )
     return (
         "set -o pipefail\n"
-        f"journalctl{journal_scope} -b --no-pager -o json | "
+        f"journalctl{journal_scope} -b{cursor_scope} --no-pager -o json | "
         f"python3 -c {shlex.quote(program)}"
     )
 
@@ -465,10 +483,18 @@ def _load_known_diagnostic(value: object) -> KnownDiagnostic:
     conditions = value["conditions"]
     if not isinstance(conditions, dict) or not conditions:
         raise ConfigurationError("Journal diagnostic conditions must be an object")
-    if not set(conditions) <= _CONDITION_NAMES:
+    if not set(conditions) <= _CONDITION_NAMES | {_ACTION_SCOPE_CONDITION}:
         raise ConfigurationError("Journal diagnostic has an unknown condition")
-    if not all(type(item) is bool for item in conditions.values()):
-        raise ConfigurationError("Journal diagnostic conditions must be booleans")
+    for name, item in conditions.items():
+        if name == _ACTION_SCOPE_CONDITION:
+            if not isinstance(item, str) or not item:
+                raise ConfigurationError(
+                    "Journal diagnostic action_scope must be a non-empty string"
+                )
+        elif type(item) is not bool:
+            raise ConfigurationError(
+                "Journal diagnostic scenario conditions must be booleans"
+            )
     maximum = value["max_occurrences"]
     if type(maximum) is not int or maximum <= 0:
         raise ConfigurationError(
@@ -513,7 +539,7 @@ def _unmatched_reason(
         for rule in near:
             version = package_versions.get(rule.package, "<missing>")
             details.append(
-                f"{rule.id} does not apply to this scenario or "
+                f"{rule.id} does not apply to this scenario/action scope or "
                 f"{rule.package}={version} (allowed {rule.version_glob})"
             )
         return "; ".join(details)

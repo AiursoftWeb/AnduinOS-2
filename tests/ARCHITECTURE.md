@@ -9,14 +9,73 @@ after runtime code reachable from `make test` executes it against a guest and
 retains authoritative evidence.
 
 The machine-readable planning inventory is `coverage-plan.json`; unit tests
-require its 60 identifiers to match this document exactly. Those shape tests
+require its 65 identifiers to match this document exactly. Those shape tests
 validate the roadmap, not the guest behavior. `README.md`, `matrix.json`, and
 the runtime modules under `iso_test/` describe the currently executable gate.
 
-The existing ten installation scenarios remain the authority for firmware,
-storage, Secure Boot, online/offline behavior, SSH, and post-install boot. The
-desktop suites do not duplicate those installations. They consume only target
-disks that have already passed every installation assertion.
+The executable matrix currently contains eleven amd64 installation scenarios
+and seven arm64 scenarios. They remain the authority for firmware, storage,
+Secure Boot, network policy, SSH, and post-install boot. The desktop suites do
+not duplicate those installations. They consume only target disks that have
+already passed every installation assertion.
+
+## Executable status
+
+`feature-suites.json` is the runtime authority, separate from the 65-check
+roadmap in `coverage-plan.json`. The implemented execution engine now promotes
+a passed source installation atomically, opens it read-only, creates a fresh
+qcow2 overlay and UEFI VARS copy per suite, supports multiple boots inside one
+suite, reports `scenario -> suite -> check` in the TUI and JSON summary, and
+removes overlays, temporary bases, and writable UEFI VARS on success, failure,
+SIGTERM, or Ctrl+C. Lossless PNG frames and variable-store hashes preserve the
+diagnostic evidence without retaining large raw framebuffer or firmware-state
+copies.
+The CLI runs inside a minimal crash supervisor: Linux parent-death signals
+contain QEMU and display helpers, and the parent can reclaim the exact
+supervisor-token workspace even when a native module terminates the worker
+with SIGSEGV. The recovery path is exercised by a real signal fault-injection
+test and preserves durable evidence while deleting only disposable boot state. A
+fatal Python thread dump is written atomically to `worker-fault.log` inside the
+run artifacts; successful workers leave no empty crash file behind.
+
+Installation-level desktop dispatch uses independent `files.appimage-open`,
+`files.exe-thumbnail-fixture`, and `files.exe-open-fixture` boundaries. Their
+fixture preparation, MIME oracle, AT-SPI driver, Nautilus log, and evidence
+directory are separate, so a broken native AppImage execution path cannot hide
+a working or broken Windows PE preview or dispatch path. The local PE contains
+a deterministic embedded icon: Nautilus must create a retrievable thumbnail
+which passes the purple-background/white-chip pixel oracle before the separate
+open check is allowed to prove EXE Runner dispatch.
+AT-SPI identifies the selected Nautilus row but does not perform the final
+activation. The host supplies a recorded SPICE double-click when semantic
+bounds are usable, or recorded QMP keyboard input after observable Nautilus
+focus. An accessibility action's boolean return is never a passing oracle.
+
+The deterministic `release-gate` currently executes Rime input, exact UTF-8
+editing and saving in GNOME Text Editor, the real green Swap Control dashboard,
+content-validated image and video thumbnails, Loupe and Celluloid activation,
+local-DEB dispatch to GNOME Software, an ordinary reboot, account/GDM lifecycle,
+the live GTK/Qt/Firefox theme transition, the untouched post-login Overview
+state, desktop shortcuts, shell shortcuts, localized default desktop icons,
+desktop-background terminal launch, Start branding, and taskbar Pin/Remove
+behavior. The `nightly-online` profile reruns those checks and additionally
+executes `storage.btrfs-docker-rollback` and the public Spotify store lane.
+Installing `docker.io` must not become a release gate until the configured APT
+source is a fixed signed snapshot. The positive rollback lane is sourced from
+the UEFI/Secure-Boot-disabled Btrfs scenario so the product's real one-shot EFI
+recovery path is exercised; BIOS Secure Boot classification remains an
+independent fail-closed compatibility contract rather than being silently
+treated as a successful recovery run.
+Its privileged oracle never treats the user-facing, metadata-redacted snapshot
+status as recovery evidence: it validates the exact target/fallback records,
+their real Btrfs UUIDs, the archived transaction, the active root's parent UUID,
+and cleared pending/EFI one-shot state from the protected recovery store.
+Every registered runtime check has a failure-injection unit oracle; a roadmap
+entry is not treated as executable merely because it appears in this document.
+The architecture tests additionally require all 57 deterministic release-gate
+IDs, and all 62 non-platform roadmap IDs, to be reachable under the exact same
+identifier from either an installation scenario or `feature-suites.json`.
+Aliases and prose-only claims cannot satisfy that closure check.
 
 ## Design principles
 
@@ -52,7 +111,7 @@ disks that have already passed every installation assertion.
 ISO + architecture + framework revision
                   |
                   v
-       installation matrix (currently 10)
+ installation matrix (11 amd64 / 7 arm64)
                   |
         all installation assertions pass
                   |
@@ -94,6 +153,12 @@ deleted while dependent suites are running. A stateful suite such as account
 creation, theme switching, Wine launch, or package installation gets its own
 overlay; independent suites may run in parallel within host RAM and CPU limits.
 
+Within one healthy overlay, a product assertion failure is recorded and later
+declared checks continue by default. This prevents one defect from hiding
+independent coverage. `--fail-fast` restores immediate termination. Protocol or
+configuration failures and a stopped QEMU always terminate the suite because
+subsequent observations would not be trustworthy.
+
 ## Three observation modes
 
 The serial debug shell is excellent for controlled assertions, but changing a
@@ -112,6 +177,17 @@ Checks that care about first boot may run a passive observation first, power
 off, then boot the disposable overlay in controlled mode for supporting system
 assertions. The passive observation is the behavioral oracle; the later
 configuration read is supporting evidence only.
+
+Controlled serial input has an additional ownership boundary. Firmware, GRUB,
+Linux, and the debug shell share the same UART, so the harness must not send a
+shell probe merely because the serial socket exists. It first waits passively
+for a Linux kernel diagnostic, then separately for Bash's exact
+`servicename=debug-shell.service` prompt marker. Only then may marker-framed
+shell commands be written. A fault-injection test must prove that firmware,
+GRUB, and the kernel-before-Bash transcript all receive zero bytes from the
+harness. Installed-system instrumentation edits only the generated real
+menuentries, is checked by `grub-script-check`, and carries a byte-for-byte
+backup that each disposable overlay restores before any ordinary reboot.
 
 ## Suite and check model
 
@@ -171,6 +247,15 @@ the actual logged-in user's systemd and D-Bus environment. Preferred state
 interfaces are `gsettings`, `busctl`/GIO D-Bus, `loginctl`, `localectl`,
 `timedatectl`, `systemctl`, `nmcli`, `gio`, `fc-match`, and package queries.
 
+Serial command output and asynchronous kernel/systemd diagnostics occupy the
+same byte stream. Binary evidence transfer is therefore framed rather than
+treated as one unverified base64 line: every bounded frame contains its guest
+offset and SHA-256, corrupt frames are retried independently, and the complete
+file identity is checked before and after download. Only transport corruption
+is retryable. Fatal kernel health, including death of the virtual input
+controller used by QMP, immediately invalidates the suite instead of being
+retried into a pass.
+
 ### AT-SPI driver
 
 AT-SPI discovers applications, roles, accessible names, text, states, actions,
@@ -222,6 +307,11 @@ contract, not a grep of the entire boot history:
    the evidence. A version change, count increase, or near-match expires the
    exception and restores the release failure automatically.
 
+GNOME Shell 50's hidden-Dash null-icon diagnostic is one such narrowly scoped
+exception: only its complete stack during `settings-about-branding`, once, is
+known. The About-page identity and rendered-logo oracles still have to pass,
+and any other Shell JavaScript error remains a release blocker.
+
 The unfiltered slice and the filtered verdict are both evidence. A global boot
 journal guard also covers the interval from kernel start through desktop idle.
 The executable global policy lives in `journal-policy.json`; broad regex
@@ -260,9 +350,17 @@ make test PROFILE=platform-lab
 make test SUITES='installed-zh-shell file-integration'
 ```
 
-Until feature suites are implemented, plain `make test` keeps its current
-installation-matrix meaning. The default may become `release-gate` only after
-that profile is deterministic and its runtime is documented.
+`platform-lab` is a reserved, fail-closed profile until a dedicated runner
+registers executable GNOME Boxes, authenticated WeChat tray, and physical
+Wi-Fi checks. Merely declaring those checks in `coverage-plan.json` must never
+silently fall back to the ordinary installation matrix or report platform
+coverage. Invoking the profile without such a runner is therefore a
+configuration error.
+
+Plain `make test` now selects `release-gate`. Use `PROFILE=install` for the
+architecture's installation scenarios only. A selected case automatically runs only suites
+whose declared base is that case; an explicitly selected suite without its
+required case fails during preflight.
 
 ## Installation variants added by feature coverage
 
@@ -274,12 +372,20 @@ inputs and therefore cannot be fabricated after installation:
    model. Set it to true in one existing advanced-options scenario (prefer the
    SSH-enabled UEFI/no-Secure-Boot case) and false everywhere else. This covers
    both secure default and explicit opt-in without another installation.
-2. **Wi-Fi credential migration.** Add one amd64 UEFI/no-Secure-Boot Btrfs
-   installation using a virtual WPA2 interface instead of Ethernet. It enters
-   the PSK once in Live, installs, recreates the same AP after reboot, and
-   proves NetworkManager reconnects without another secret input. This is the
-   eleventh full installation until reliable cross-architecture virtual Wi-Fi
-   support is available.
+2. **Passwordless sudo.** Add `passwordless_sudo` to the same advanced-options
+   scenario and leave it false everywhere else. The UI driver must prove the
+   default and selected summary, while the installed target must validate the
+   exact root-owned sudoers policy with `visudo`, clear all sudo timestamps,
+   and exercise `sudo -n` as the created non-root user. This covers both sides
+   without adding an installation.
+3. **Wi-Fi credential migration.** The amd64 matrix includes one
+   UEFI/no-Secure-Boot Btrfs installation using a virtual WPA2 interface
+   instead of Ethernet. It enters an ephemeral PSK once through the Live GNOME
+   dialog, installs, recreates the same local-only AP after reboot without
+   supplying credentials to the installed NetworkManager process, and proves
+   automatic reconnection with the exact migrated UUID. This is the eleventh
+   amd64 installation; it remains excluded from arm64 until reliable
+   cross-architecture virtual Wi-Fi support is available.
 
 GRUB regional propagation does not require 28 full installations. The ISO
 contract statically validates all 28 generated locale/timezone pairs, then
@@ -300,7 +406,7 @@ evidence and cannot independently pass the check.
 | `boot.plymouth-anduinos-logo` | release-gate, passive installed boot | Sample frames from kernel start to GDM; an AnduinOS animation/logo must be visible and Ubuntu branding must not be visible. |
 | `regional.grub-contract` | unit/install, ISO | All 28 GRUB entries contain the exact declared `locale`, `timezone`, and `systemd.timezone` values. |
 | `regional.grub-live-propagation` | release-gate, four boot-only Live variants | `locale`, `localectl`, `timedatectl`, GNOME session environment, clock timezone, and representative localized accessible text match the chosen GRUB entry. |
-| `regional.installed-zh-cn` | release-gate, installed zh_CN base | `/etc/default/locale`, timezone, user session environment, input sources, and high-value GNOME surfaces consistently report Simplified Chinese/Asia Shanghai. |
+| `regional.installed-zh-cn` | release-gate, installed zh_CN base | `/etc/default/locale`, timezone, generated locale, a real user GNOME session, and the already-running DING desktop's semantic Home/Trash labels consistently report Simplified Chinese/Asia Shanghai. Process environment is retained only as diagnostics because GNOME may clear it after `setlocale`. |
 | `localization.zh-cn-contract` | release-gate, installed zh_CN base | Curated Shell, Settings, Nautilus, taskbar, appearance-menu, and GDM strings are Chinese; no gettext key or designated high-impact English fallback is shown. |
 | `shell.initial-overview-hidden` | release-gate, first login | After the desktop reaches idle without input, AT-SPI/frame evidence shows the desktop rather than Overview; `start-in-overview=false` is supporting evidence. |
 | `theme.cursor-user-session` | release-gate | SPICE cursor shape and size match Fluent dark cursors over a controlled background; user GSettings agree. |
@@ -308,17 +414,19 @@ evidence and cannot independently pass the check.
 | `branding.settings-about-logo` | release-gate | Settings About displays the AnduinOS name and rendered AnduinOS logo. |
 | `branding.gdm` | release-gate after logout | Passive GDM frame contains AnduinOS branding and no Ubuntu branding. |
 | `theme.cursor-gdm` | release-gate after logout | GDM cursor-shape capture matches the distribution cursor; GDM dconf is supporting evidence. |
-| `tty.tty6-branding` | release-gate | QMP sends Ctrl+Alt+F6, `fgconsole` reports 6, OCR/template evidence contains `AnduinOS`, and the harness returns to the graphical VT. |
+| `tty.tty6-branding` | release-gate | QMP sends Ctrl+Alt+F6, the kernel's `/sys/class/tty/tty0/active` reports tty6, the active `/dev/vcs6` character cells contain `AnduinOS` and no Ubuntu branding, and the harness returns to the original graphical VT with the Wayland session intact. |
 
 ### GNOME Shell, desktop, panel, and shortcuts
 
 | Check ID | Profile/source | Driver and direct oracle |
 |---|---|---|
+| `terminal.ptyxis-initial-size` | release-gate, installed contract | Before the first desktop interaction can persist a window size, query the fresh installed user's effective `org.gnome.Ptyxis window-size`; its schema type must be `(uu)` and its value must be exactly the typed, nonzero `(uint32 80, uint32 24)` tuple. |
 | `desktop.context-menu-terminal` | release-gate | Right-click the real desktop, activate the terminal action, and observe a new Ptyxis window in the user session. |
 | `desktop.icons-visible` | release-gate | Home and Trash icons are visible through DING and their accessible/component bounds lie on the desktop; the extension process remains healthy. |
 | `desktop.create-shortcut` | release-gate overlay | Create/pin a fixture application on the desktop, observe its icon, double-click it, and observe the fixture window. |
 | `panel.pin-application` | release-gate overlay | Pin a fixture app from ArcMenu, then observe its launcher on Dash to Panel across a Shell restart. |
 | `panel.remove-menu-localized` | release-gate zh_CN/en_US | Right-click the pinned taskbar icon; the menu contains the locale-correct `Remove from taskbar` action, which removes the launcher when activated. |
+| `shell.appindicator-roundtrip` | release-gate overlay | Launch a GTK4 fixture which implements the production StatusNotifierItem and DBusMenu protocols without test-only packages. Send Alt+F4, require its window to disappear while the same kernel PID/start time survives, locate its semantic GNOME Shell icon in the lower-right tray, double-click it through host input (the extension's activation gesture), and require the same process/window to return. |
 | `shell.extension-policy` | release-gate | The exact installed extension inventory is loaded; every extension is active except `simple-weather@romanlefler.com` and `network-stats@gnome.noroadsleft.xyz`, which are installed but initially inactive. |
 | `shell.extension-errors` | release-gate | Login and exercise each enabled extension; no new GNOME Shell JS error or extension exception appears in the scoped journal. |
 | `journal.boot-and-idle` | release-gate | No unexpected fatal/error-policy event appears from kernel start through a settled desktop. |
@@ -328,7 +436,7 @@ evidence and cannot independently pass the check.
 | `shortcut.super-i` | release-gate | Super+I opens GNOME Settings and the resulting window is focused. |
 | `shortcut.super-u` | release-gate | Network Stats begins inactive; Super+U displays/toggles the network information UI, and a second invocation restores the default inactive state. |
 | `shortcut.super-shift-s` | release-gate | Super+Shift+S opens the Shell screenshot UI; completing a capture creates a valid non-empty image. |
-| `search.spotify-store` | release-gate plus nightly-online | Searching Spotify in the real start menu yields a Software result and opens the Spotify details page. Release uses pinned AppStream metadata; nightly repeats against the public catalog. |
+| `search.spotify-store` | release-gate plus nightly-online | With the VM link physically down, searching Spotify in the real start menu yields a Software result from ISO-shipped metadata and opens the Spotify details page. |
 | `command.why-placeholder` | release-gate | Running `why` in Ptyxis shows the expected placeholder and exits without a shell error. |
 
 ### Input, emoji, and appearance
@@ -337,9 +445,9 @@ evidence and cannot independently pass the check.
 |---|---|---|
 | `system.inotify-max-user-instances` | release-gate | `sysctl -n fs.inotify.max_user_instances` returns exactly `524288` in the installed kernel. |
 | `render.twemoji-water-pistol` | release-gate | Render `🤓 🍔 🔫 👽 ✨` in a controlled GTK text surface; font resolution selects Twemoji and the pistol crop satisfies the green-pixel/color-shape oracle. |
-| `input.utf8-chinese-text` | release-gate | The editor's AT-SPI text after inserting `变角次亮采之门` is byte-for-byte the expected normalized Unicode text and the screenshot has no tofu glyphs. |
+| `input.utf8-chinese-text` | release-gate | The editor's AT-SPI text after inserting `变角次亮采之门` is byte-for-byte the expected normalized Unicode text; the saved UTF-8 file contains exactly that text plus Text Editor's intentional implicit trailing newline. |
 | `input.super-space-rime` | release-gate, installed zh_CN base | Super+Space changes to Rime; QMP types a fixed ASCII composition and selection sequence; AT-SPI reads the exact expected Chinese result. |
-| `appearance.swapcontrol-green` | release-gate | Launch Swap Control; the home page becomes idle without an error and its designated primary region passes the green visual oracle. |
+| `appearance.swapcontrol-green` | release-gate | Launch Swap Control, authenticate its polkit prompt through an opaque QMP secret request, require the semantic home-page markers, and verify its designated primary region with the green visual oracle and scoped journal gate. |
 | `appearance.theme-menu-localized` | release-gate zh_CN/en_US | The bottom theme selector exposes localized Light/Dark labels appropriate to the session locale. |
 | `appearance.theme-gtk` | release-gate overlay | Toggle light then dark; a fixture GTK application reports and visibly renders the matching scheme both times. |
 | `appearance.theme-qt` | release-gate overlay | The same toggle changes a fixture Qt application's palette both times without restarting the session. |
@@ -348,8 +456,10 @@ evidence and cannot independently pass the check.
 ### File previews, associations, and launchers
 
 Release fixtures are generated by the project, redistributable, content-hash
-pinned, and mounted read-only. Actual CPU-Z is a separate cached nightly
-artifact because its public download and license are outside the ISO contract.
+pinned, and mounted read-only. Actual CPU-Z is a separate nightly artifact
+fetched from CPUID over HTTPS and accepted only when its pinned archive and
+member digests match. Its public availability and license remain outside the
+deterministic ISO contract.
 
 | Check ID | Profile/source | Driver and direct oracle |
 |---|---|---|
@@ -360,8 +470,8 @@ artifact because its public download and license are outside the ISO contract.
 | `files.deb-software` | release-gate | Double-clicking a benign fixture DEB opens its local-package page in GNOME Software; installation is not required. |
 | `files.exe-thumbnail-fixture` | release-gate amd64 | A project-owned PE fixture receives the expected EXE thumbnail rather than a generic file icon. |
 | `files.exe-open-fixture` | release-gate amd64 overlay | Double-clicking the PE fixture launches it through the configured Windows compatibility path and shows its fixture window. |
-| `files.cpuz-thumbnail-and-open` | nightly-online amd64 | Fetch the declared CPU-Z version, verify SHA-256, observe its preview, double-click it, and observe the CPU-Z window. |
-| `files.appimage-open` | release-gate per supported architecture | Double-clicking a signed project fixture AppImage launches its fixture window without a terminal workaround. |
+| `files.cpuz-thumbnail-and-open` | nightly-online amd64 | Fetch the declared CPU-Z 2.20.2 archive from CPUID, verify both archive and x64 member SHA-256, require Nautilus to cache and visibly expose the embedded white-chip-on-purple preview, then double-click the real PE. Its detected MIME must be one of the two PE types explicitly owned by AnduinOS EXE Runner (`application/vnd.microsoft.portable-executable` or `application/x-msdownload`). EXE Runner must recognize CPU-Z and show its CPU-X native-alternative recommendation with usable Get, Force Run, and Cancel actions. The check does not activate an external store or install Bottles. |
+| `files.appimage-open` | release-gate per supported architecture | The same signed project fixture is tested twice through real Nautilus input: mode `0755` must launch its window natively with no MIME handler, while mode `0644` must create neither a process nor a window. |
 
 ### Accounts, login policy, display, and networking
 
@@ -373,19 +483,27 @@ artifact because its public download and license are outside the ISO contract.
 | `account.logout-gdm` | release-gate | Invoke the real logout action and reach branded GDM with the correct cursor before any automatic input. |
 | `login.autologin-disabled` | install/release-gate | Default advanced options require GDM authentication on first target boot; no user session starts before QMP enters the password. |
 | `login.autologin-enabled` | install/release-gate, passive first boot | With explicit installer opt-in, the target reaches the created user's desktop without any password/key input; the account still has a password and can authenticate after logout. |
+| `sudo.password-required` | install/release-gate | With the default advanced option, the passwordless policy is absent, the managed state is empty, the account remains in `sudo`, and `sudo -n` is denied after `sudo -K` clears every cached credential. |
+| `sudo.passwordless-enabled` | install/release-gate | With explicit opt-in, the root-owned `0440` policy contains only the created account's exact `NOPASSWD` rule, the root-owned state is exact, `visudo` accepts the complete configuration, and that non-root account runs `sudo -n id -u` as UID 0 after `sudo -K`. |
 | `display.spice-resize` | release-gate | Resize the SPICE client through at least two non-native sizes; Mutter reports matching logical monitor geometry and the desktop remains usable. |
 | `display.gnome-boxes-resize` | platform-lab | Launch through actual GNOME Boxes/KVM, resize the Boxes window, and observe matching guest resolution changes. |
 | `network.wifi-migration-hwsim` | install/release-gate amd64 | Enter a WPA2 PSK once in Live, install, recreate the AP, and observe automatic target connection without another secret injection. The migrated Netplan is root-owned mode 0600. |
 | `network.wifi-migration-physical` | platform-lab | Repeat the exact workflow with a controlled physical AP and Wi-Fi adapter. |
+
+### Storage rollback
+
+| Check ID | Profile/source | Driver and direct oracle |
+|---|---|---|
+| `storage.btrfs-docker-rollback` | nightly-online, UEFI/no-Secure-Boot Btrfs overlay | Install the real `docker.io` package, require a complete snapshot transaction and exact protected recovery metadata, arm rollback through Disk Snapshots Manager, traverse the product-owned one-shot EFI recovery boot, then prove `docker.io` and its sentinel disappeared while the restored root UUID/parent UUID, fallback deployment, history record, package database, kernel, initramfs, GRUB, and GNOME boot are all healthy. |
 
 ### Public ecosystem integrations
 
 | Check ID | Profile/source | Driver and direct oracle |
 |---|---|---|
 | `apt.nextcloud-client-ppa` | nightly-online | Run the exact `sudo add-apt-repository -y ppa:nextcloud-devs/client`, require exit zero, a valid signed source, and a successful metadata refresh. |
-| `app.wechat-install` | nightly-online amd64 overlay | Install the declared WeChat package from the tested repository snapshot and launch its main window without package or loader errors. |
-| `app.wechat-tray` | nightly-online amd64 overlay | Minimize/close WeChat according to its supported action; an AppIndicator appears in the lower-right tray and restores the same process/window. |
-| `store.spotify-public` | nightly-online | Repeat start-menu Spotify discovery against the current public store and classify external catalog outages separately from product regressions. |
+| `app.wechat-install` | nightly-online amd64 overlay | Resolve current Flathub `app/com.tencent.WeChat/x86_64/stable`, install it including Tencent's declared extra-data payload, require the installed commit/origin and exported desktop file to match that resolution, then launch the real ArcMenu result. Since the proprietary X11/Qt client has no AT-SPI application, require one mapped EWMH WeChat window plus a screenshot crop containing its QR-code transitions and green login marker. |
+| `app.wechat-tray` | platform-lab authenticated amd64 session | Start from an explicitly supplied, disposable authenticated WeChat test profile. Send Alt+F4 to the visible WeChat window, require that same EWMH client PID and kernel process start time to remain while the window disappears, observe a semantic GNOME Shell AppIndicator whose geometry is in the lower-right tray, double-click it through host input, and require the same process/window to return. Anonymous CI must not pretend the QR login page has tray semantics. |
+| `store.spotify-public` | nightly-online amd64 | Refresh official Flathub AppStream over HTTPS, resolve the exact current `app/com.spotify.Client/x86_64/stable` ref and commit, prove that entry reached the local cache, reload GNOME Software, and repeat real ArcMenu-to-details navigation with networking up. Refresh/resolution failures are `external-catalog`; UI failure after successful resolution is `product-regression`. |
 
 ## Fixture and dependency policy
 
@@ -403,8 +521,9 @@ The release fixture set contains:
 
 Fixtures are identified by SHA-256 in the run manifest. Small redistributable
 fixtures may live in Git LFS or a generated fixture ISO. Large or restricted
-third-party artifacts are downloaded into a CI cache, verified against a
-versioned digest, and used only by `nightly-online`.
+third-party artifacts are fetched only by `nightly-online`, verified against
+versioned digests before use, and may be backed by a CI download cache that
+preserves the same byte identity.
 
 The host test environment is versioned separately from the guest and declares
 QEMU, OVMF/AAVMF, libvirt/Boxes for platform runs, SPICE client bindings,
@@ -418,10 +537,16 @@ independent overlays may run in parallel. A resource allocator owns QMP
 sockets, serial sockets, host-forward ports, temporary VARS, memory, vCPUs,
 and KVM slots. ARM64-on-amd64 TCG visual suites default to nightly because of
 runtime; architecture-neutral command assertions still run against ARM64
-installation bases.
+installation bases. An agent-independent SPICE channel delivers strictly
+mapped scan codes to graphical GRUB, and stable non-menu framebuffer repaints
+gate every following command. The resulting kernel/debug-shell arguments must
+then prove themselves on PL011; a default or malformed boot cannot pass merely
+because the VM stayed alive. The virtio GPU remains present for the complete
+firmware-to-graphical lifecycle.
 
-The current installation matrix dashboard is hierarchical: its ten disposable
-installation scenarios remain the top-level progress units, while the active
+The current installation matrix dashboard is hierarchical: its eleven amd64
+or seven arm64 disposable installation scenarios remain the top-level progress
+units, while the active
 scenario exposes each implemented assertion boundary and its real lifecycle:
 
 ```text
@@ -432,17 +557,18 @@ scenario exposes each implemented assertion boundary and its real lifecycle:
   ○ shortcut.super-shift-s                   NOT STARTED
 ```
 
-Plain/CI output preserves the same transitions as durable lines, and final
-output records the child verdicts in `summary.json`. JSON Lines, JUnit XML, the
-future base/overlay provenance graph, and an HTML evidence index remain part of
-the feature-suite design below. A failed visual or UI check will link directly
-to its frame, accessibility tree, journal slice, and command transcript.
+Plain/CI output preserves the same transitions as durable lines. Final output
+derives both `summary.json` and JUnit XML from the dashboard state, including
+pending work after fail-fast. JSON Lines are retained for individual action
+traces; the future base/overlay provenance graph and HTML evidence index remain
+part of the design below. A failed visual or UI check retains its frame,
+accessibility tree, journal slice, and command transcript.
 
 ## Delivery order
 
 1. Add suite/check models, profile selection, base promotion, overlay creation,
    resource allocation, nested reporting, JUnit output, and journal cursors
-   without changing the ten existing scenario verdicts.
+   without weakening existing installation verdicts.
 2. Implement deterministic state and Shell checks: inotify, locale/timezone,
    overview, cursor configuration, extension policy/errors, shortcut effects,
    branding configuration, and scoped journal policy.
@@ -450,8 +576,8 @@ to its frame, accessibility tree, journal slice, and command transcript.
    cursor shape, Twemoji, Swap Control, and VT branding.
 4. Add the fixture image/server and file, MIME, theme, Firefox, AppImage, PE,
    Rime, desktop, panel, and account suites.
-5. Extend the installer matrix for automatic login and virtual Wi-Fi, then add
-   deterministic SPICE resizing.
+5. Keep the automatic-login, virtual-Wi-Fi, and deterministic SPICE variants
+   under regression while expanding their cross-architecture coverage.
 6. Add nightly public ecosystem checks and platform-lab GNOME Boxes/physical
    Wi-Fi checks.
 

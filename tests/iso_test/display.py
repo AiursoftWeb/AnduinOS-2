@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import os
-import signal
 import shutil
 import subprocess
 import time
 from pathlib import Path
 
 from .errors import ConfigurationError, TestFailure
+from .process_lifecycle import parent_death_preexec
 
 
 class SpiceDisplayController:
@@ -55,7 +55,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._xvfb_log,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            preexec_fn=parent_death_preexec(),
         )
         display_number = self.display.removeprefix(":")
         x_socket = Path("/tmp/.X11-unix") / f"X{display_number}"
@@ -90,7 +90,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._viewer_log,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            preexec_fn=parent_death_preexec(),
         )
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
@@ -144,11 +144,11 @@ class SpiceDisplayController:
         for process in (self.viewer, self.xvfb):
             if process is None or process.poll() is not None:
                 continue
-            os.killpg(process.pid, signal.SIGTERM)
+            process.terminate()
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                process.kill()
                 process.wait(timeout=5)
         self.viewer = None
         self.xvfb = None

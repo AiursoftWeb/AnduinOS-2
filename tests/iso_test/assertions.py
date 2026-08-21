@@ -20,6 +20,15 @@ LIVE_ONLY_PACKAGES = (
     "anduinos-live-settings",
 )
 
+RELEASE_CONTRACT_CHECKS = (
+    "system.inotify-max-user-instances",
+    "terminal.ptyxis-initial-size",
+    "desktop.mime-defaults",
+    "command.why-placeholder",
+    "font.selection-contracts",
+    "boot.plymouth-theme-selection",
+)
+
 
 def assert_live_environment(
     console: SerialConsole,
@@ -27,6 +36,9 @@ def assert_live_environment(
     evidence: Path,
     expected_locale: str,
     expected_timezone: str,
+    session_timeout_seconds: int = 120,
+    *,
+    check_region: bool = True,
 ) -> None:
     script = r"""
 set -euo pipefail
@@ -72,31 +84,178 @@ ip -brief link
             evidence / "live-firmware.txt",
         )
     _assert_network(console, scenario.network, evidence)
-    _assert_live_region(console, expected_locale, expected_timezone, evidence)
+    if check_region:
+        assert_live_region(
+            console,
+            expected_locale,
+            expected_timezone,
+            evidence,
+            session_timeout_seconds=session_timeout_seconds,
+        )
 
 
-def _assert_live_region(
+def assert_live_region(
     console: SerialConsole,
     expected_locale: str,
     expected_timezone: str,
     evidence: Path,
+    *,
+    session_timeout_seconds: int = 120,
 ) -> None:
+    if session_timeout_seconds < 1:
+        raise ValueError("GNOME session timeout must be positive")
     script = f"""
-set -euo pipefail
-system_locale=$(localectl status | sed -n 's/^[[:space:]]*System Locale: LANG=//p')
-timezone=$(timedatectl show -p Timezone --value)
+set -uo pipefail
+localectl_output=$(localectl status 2>&1)
+localectl_status=$?
+system_locale=$(printf '%s\\n' "$localectl_output" | sed -n 's/^[[:space:]]*System Locale: LANG=//p')
+timedatectl_output=$(timedatectl show -p Timezone --value 2>&1)
+timedatectl_status=$?
+timezone=$timedatectl_output
 zone_target=$(readlink -f /etc/localtime)
-session_pid=$(pgrep -n -f '/usr/bin/gnome-shell' || true)
-test -n "$session_pid"
-session_lang=$(tr '\\0' '\\n' < "/proc/$session_pid/environ" | sed -n 's/^LANG=//p' | tail -n1)
-printf 'system-locale=%s\\ntimezone=%s\\nzone-target=%s\\nsession-lang=%s\\n' \\
-    "$system_locale" "$timezone" "$zone_target" "$session_lang"
-test "$system_locale" = {shlex.quote(expected_locale)}
-test "$timezone" = {shlex.quote(expected_timezone)}
-test "$zone_target" = /usr/share/zoneinfo/{shlex.quote(expected_timezone)}
-test "$session_lang" = {shlex.quote(expected_locale)}
+session_user=
+session_uid=
+session_pid=
+session_lang=
+session_ready=false
+session_deadline=$((SECONDS + {session_timeout_seconds}))
+while (( SECONDS < session_deadline )); do
+    for runtime in $(find /run/user -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r); do
+        uid=${{runtime##*/}}
+        user=$(getent passwd "$uid" | cut -d: -f1)
+        shell=$(getent passwd "$uid" | cut -d: -f7)
+        test -n "$user" || continue
+        case "$user:$shell" in
+            gdm:*|gdm-greeter:*|*:/usr/sbin/nologin|*:/bin/false) continue ;;
+        esac
+        test -S "$runtime/bus" || continue
+        wayland=
+        for candidate in "$runtime"/wayland-[0-9]*; do
+            test -S "$candidate" || continue
+            wayland=${{candidate##*/}}
+            break
+        done
+        test -n "$wayland" || continue
+        pid=$(pgrep -n -u "$uid" -x gnome-shell || true)
+        test -n "$pid" || continue
+        test -r "/proc/$pid/environ" || continue
+        lang=$(tr '\\0' '\\n' < "/proc/$pid/environ" | sed -n 's/^LANG=//p' | tail -n1)
+        test -n "$lang" || continue
+        session_user=$user
+        session_uid=$uid
+        session_pid=$pid
+        session_lang=$lang
+        session_ready=true
+        break
+    done
+    test "$session_ready" = true && break
+    sleep 1
+done
+printf 'localectl-status=%s\\ntimedatectl-status=%s\\n' \\
+    "$localectl_status" "$timedatectl_status"
+printf 'system-locale=%s\\ntimezone=%s\\nzone-target=%s\\n' \\
+    "$system_locale" "$timezone" "$zone_target"
+printf 'session-ready=%s\\nsession-user=%s\\nsession-uid=%s\\nsession-pid=%s\\nsession-lang=%s\\n' \\
+    "$session_ready" "$session_user" "$session_uid" "$session_pid" "$session_lang"
+printf '%s\\n' "$localectl_output" | sed 's/^/localectl-output: /'
+if test "$session_ready" != true; then
+    loginctl --no-pager list-sessions || true
+    ps -eo user:24,pid,comm,args | grep -E 'gnome-shell|gdm' || true
+    for runtime in $(find /run/user -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort -V -r); do
+        uid=${{runtime##*/}}
+        user=$(getent passwd "$uid" | cut -d: -f1)
+        shell=$(getent passwd "$uid" | cut -d: -f7)
+        printf 'candidate-runtime=%s uid=%s user=%s shell=%s\\n' \\
+            "$runtime" "$uid" "$user" "$shell"
+        stat -c 'candidate-bus-type=%F' "$runtime/bus" 2>&1 || true
+        find "$runtime" -maxdepth 1 -name 'wayland-*' -printf 'candidate-wayland=%f type=%y\\n' 2>&1 || true
+        pgrep -a -u "$uid" gnome-shell 2>&1 | sed 's/^/candidate-gnome-shell: /' || true
+    done
+fi
+status=0
+test "$localectl_status" -eq 0 || status=1
+test "$timedatectl_status" -eq 0 || status=1
+test "$system_locale" = {shlex.quote(expected_locale)} || status=1
+test "$timezone" = {shlex.quote(expected_timezone)} || status=1
+test "$zone_target" = /usr/share/zoneinfo/{shlex.quote(expected_timezone)} || status=1
+test "$session_ready" = true || status=1
+test "$session_lang" = {shlex.quote(expected_locale)} || status=1
+exit "$status"
 """
-    _record(console, script, evidence / "live-locale-timezone.txt")
+    _record(
+        console,
+        script,
+        evidence / "live-locale-timezone.txt",
+        timeout=session_timeout_seconds + 30,
+    )
+
+
+def assert_installed_region(
+    console: SerialConsole,
+    username: str,
+    expected_locale: str,
+    expected_timezone: str,
+    evidence: Path,
+) -> None:
+    """Prove both installed configuration and the real GNOME session region."""
+
+    quoted_user = shlex.quote(username)
+    quoted_locale = shlex.quote(expected_locale)
+    quoted_timezone = shlex.quote(expected_timezone)
+    expected_language = expected_locale.removesuffix(".UTF-8")
+    language_chain = f"{expected_language}:{expected_language.partition('_')[0]}"
+    script = f"""
+set -uo pipefail
+localectl_output=$(localectl status 2>&1)
+localectl_status=$?
+system_locale=$(printf '%s\n' "$localectl_output" | sed -n 's/^[[:space:]]*System Locale: LANG=//p')
+timezone=$(timedatectl show -p Timezone --value 2>&1)
+timedatectl_status=$?
+zone_target=$(readlink -f /etc/localtime)
+configured_lang=$(sh -c '. /etc/default/locale; printf %s "$LANG"')
+configured_language=$(sh -c '. /etc/default/locale; printf %s "$LANGUAGE"')
+uid=$(id -u {quoted_user})
+session_pid=$(pgrep -n -u "$uid" -x gnome-shell || true)
+session_lang=
+session_language=
+if test -n "$session_pid" && test -r "/proc/$session_pid/environ"; then
+    session_lang=$(tr '\0' '\n' < "/proc/$session_pid/environ" | sed -n 's/^LANG=//p' | tail -n1)
+    session_language=$(tr '\0' '\n' < "/proc/$session_pid/environ" | sed -n 's/^LANGUAGE=//p' | tail -n1)
+fi
+normalized_expected=$(printf '%s' {quoted_locale} | tr '[:upper:]' '[:lower:]' | tr -d '._-')
+generated_locale=$(locale -a | while IFS= read -r candidate; do
+    normalized=$(printf '%s' "$candidate" | tr '[:upper:]' '[:lower:]' | tr -d '._-')
+    if test "$normalized" = "$normalized_expected"; then
+        printf '%s\n' "$candidate"
+        break
+    fi
+done)
+printf 'localectl-status=%s\ntimedatectl-status=%s\n' "$localectl_status" "$timedatectl_status"
+printf 'system-locale=%s\nconfigured-lang=%s\nconfigured-language=%s\n' \
+    "$system_locale" "$configured_lang" "$configured_language"
+printf 'timezone=%s\nzone-target=%s\ngenerated-locale=%s\n' \
+    "$timezone" "$zone_target" "$generated_locale"
+printf 'session-pid=%s\nsession-lang=%s\nsession-language=%s\n' \
+    "$session_pid" "$session_lang" "$session_language"
+printf '%s\n' "$localectl_output" | sed 's/^/localectl-output: /'
+status=0
+test "$localectl_status" -eq 0 || status=1
+test "$timedatectl_status" -eq 0 || status=1
+test "$system_locale" = {quoted_locale} || status=1
+test "$configured_lang" = {quoted_locale} || status=1
+test "$configured_language" = {shlex.quote(language_chain)} || status=1
+test "$timezone" = {quoted_timezone} || status=1
+test "$zone_target" = /usr/share/zoneinfo/{quoted_timezone} || status=1
+test -n "$generated_locale" || status=1
+test -n "$session_pid" || status=1
+exit "$status"
+"""
+    _record(
+        console,
+        script,
+        evidence / "installed-locale-timezone-session.txt",
+        timeout=60,
+    )
 
 
 def assert_installed_environment(
@@ -159,7 +318,6 @@ printf 'graphical-target=active\\ngdm=active\\ndpkg-audit=clean\\n'
     _assert_snapshots_manager(console, scenario, evidence)
     _assert_optional_software(console, scenario, username, evidence)
     _assert_automatic_login_configuration(console, scenario, username, evidence)
-    _assert_release_contracts(console, username, evidence)
     _assert_secure_boot(console, scenario, evidence)
     _assert_ssh_units(console, scenario.ssh, evidence)
 
@@ -196,7 +354,7 @@ PY
 printf 'installer-network-probe=%s\n' "$installer_endpoint"
 printf 'network=online\n'
 """
-    else:
+    elif network is Network.OFFLINE:
         script = source_probe + r"""
 if curl --fail --location --silent --max-time 8 --output /dev/null "$url"; then
     echo 'Offline VM unexpectedly reached its package mirror' >&2
@@ -205,6 +363,25 @@ fi
 carrier=$(cat /sys/class/net/e*/carrier 2>/dev/null | sort -u | tr '\n' ' ' || true)
 test -z "$carrier" -o "$carrier" = "0 "
 printf 'network=link-down\n'
+"""
+    else:
+        script = source_probe + r"""
+if curl --fail --location --silent --max-time 8 --output /dev/null "$url"; then
+    echo 'Local-only Wi-Fi lab unexpectedly reached its package mirror' >&2
+    exit 1
+fi
+carrier=$(cat /sys/class/net/e*/carrier 2>/dev/null | sort -u | tr '\n' ' ' || true)
+test -z "$carrier" -o "$carrier" = "0 "
+test -d /sys/module/mac80211_hwsim
+test "$(find /sys/class/ieee80211 -mindepth 1 -maxdepth 1 | wc -l)" -eq 2
+test "$(iw dev | awk '$1 == "Interface" { count++ } END { print count + 0 }')" -eq 2
+test "$(iw dev | awk '$1 == "type" && $2 == "AP" { count++ } END { print count + 0 }')" -eq 1
+test "$(iw dev | awk '$1 == "type" && $2 == "managed" { count++ } END { print count + 0 }')" -eq 1
+if nmcli --terse --escape no --fields TYPE connection show --active | grep -Eq '^(802-11-wireless|wifi)$'; then
+    echo 'Wi-Fi client connected before the installer UI supplied credentials' >&2
+    exit 1
+fi
+printf 'network=local-wpa2-hwsim; ethernet=link-down; client=disconnected\n'
 """
     _record(console, script, evidence / "live-network.txt")
 
@@ -326,77 +503,219 @@ printf 'automatic-login={expected}\\npassword-hash=present\\n'
     _record(console, script, evidence / "installed-gdm-policy.txt")
 
 
+def assert_passwordless_sudo_behavior(
+    console: SerialConsole,
+    scenario: Scenario,
+    username: str,
+    evidence: Path,
+) -> None:
+    """Prove the installer sudo choice from the installed user's boundary."""
+
+    quoted_username = shlex.quote(username)
+    quoted_home = shlex.quote(f"/home/{username}")
+    expected_rule = f"{username} ALL=(ALL:ALL) NOPASSWD: ALL"
+    common = f"""
+set -euo pipefail
+user={quoted_username}
+home={quoted_home}
+policy=/etc/sudoers.d/90-anduinos-passwordless-admin
+state=/var/lib/anduinos-passwordless-sudo/users
+test "$(id -u "$user")" -gt 0
+id -nG "$user" | tr ' ' '\n' | grep -Fx sudo
+test -f "$state"
+test ! -L "$state"
+test "$(stat -c '%U:%G:%a' "$state")" = root:root:644
+visudo --check --file /etc/sudoers
+runuser -u "$user" -- sudo -K
+set +e
+sudo_output=$(runuser -u "$user" -- env -u SUDO_ASKPASS HOME="$home" \
+    sudo -n -p '' id -u 2>&1)
+sudo_status=$?
+set -e
+printf 'passwordless-sudo-selected=%s\n' \
+    {str(scenario.passwordless_sudo).lower()!r}
+printf 'sudo-noninteractive-status=%s\n' "$sudo_status"
+printf 'sudo-noninteractive-output=%s\n' "$sudo_output"
+"""
+    if scenario.passwordless_sudo:
+        script = common + f"""
+test -f "$policy"
+test ! -L "$policy"
+test "$(stat -c '%U:%G:%a' "$policy")" = root:root:440
+test "$(wc -c < "$policy")" -eq {len((expected_rule + chr(10)).encode())}
+grep -Fx {shlex.quote(expected_rule)} "$policy"
+test "$(cat "$state")" = "$user"
+test "$(wc -c < "$state")" -eq {len((username + chr(10)).encode())}
+test "$sudo_status" -eq 0
+test "$sudo_output" = 0
+printf 'SUDO_CONTRACT_SELECTED=enabled\n'
+printf 'SUDO_CONTRACT_POLICY=valid\n'
+printf 'SUDO_CONTRACT_STATE={username}\n'
+printf 'SUDO_CONTRACT_NONINTERACTIVE=root\n'
+"""
+    else:
+        script = common + r"""
+test ! -e "$policy"
+test ! -L "$policy"
+test ! -s "$state"
+test "$sudo_status" -ne 0
+printf 'SUDO_CONTRACT_SELECTED=disabled\n'
+printf 'SUDO_CONTRACT_POLICY=absent\n'
+printf 'SUDO_CONTRACT_STATE=empty\n'
+printf 'SUDO_CONTRACT_NONINTERACTIVE=denied\n'
+"""
+    destination = evidence / "installed-sudo-policy.txt"
+    _record(console, script, destination)
+    _validate_passwordless_sudo_evidence(
+        destination.read_text(encoding="utf-8"),
+        scenario.passwordless_sudo,
+        username,
+    )
+
+
+def _validate_passwordless_sudo_evidence(
+    output: str,
+    enabled: bool,
+    username: str,
+) -> None:
+    prefix = "SUDO_CONTRACT_"
+    markers: dict[str, str] = {}
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line.startswith(prefix):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or key in markers:
+            raise TestFailure("Malformed or duplicate sudo contract marker")
+        markers[key] = value
+    expected = (
+        {
+            "SUDO_CONTRACT_SELECTED": "enabled",
+            "SUDO_CONTRACT_POLICY": "valid",
+            "SUDO_CONTRACT_STATE": username,
+            "SUDO_CONTRACT_NONINTERACTIVE": "root",
+        }
+        if enabled
+        else {
+            "SUDO_CONTRACT_SELECTED": "disabled",
+            "SUDO_CONTRACT_POLICY": "absent",
+            "SUDO_CONTRACT_STATE": "empty",
+            "SUDO_CONTRACT_NONINTERACTIVE": "denied",
+        }
+    )
+    if markers != expected:
+        raise TestFailure(
+            "Installed sudo evidence contradicts the selected installer policy: "
+            f"expected {expected!r}, observed {markers!r}"
+        )
+
+
 def _assert_release_contracts(
     console: SerialConsole,
     username: str,
     evidence: Path,
 ) -> None:
-    script = f"""
-set -euo pipefail
+    for identifier in RELEASE_CONTRACT_CHECKS:
+        assert_release_contract(console, username, evidence, identifier)
 
-# Kernel/runtime policy must be active, not merely present in a sysctl file.
+
+def assert_release_contract(
+    console: SerialConsole,
+    username: str,
+    evidence: Path,
+    identifier: str,
+) -> None:
+    """Execute one independently visible installed-system release contract."""
+
+    if identifier == "system.inotify-max-user-instances":
+        script = r"""
+set -euo pipefail
 inotify_instances=$(sysctl -n fs.inotify.max_user_instances)
 inotify_watches=$(sysctl -n fs.inotify.max_user_watches)
 inotify_events=$(sysctl -n fs.inotify.max_queued_events)
-printf 'inotify-instances=%s\\n' "$inotify_instances"
-printf 'inotify-watches=%s\\n' "$inotify_watches"
-printf 'inotify-events=%s\\n' "$inotify_events"
+printf 'inotify-instances=%s\n' "$inotify_instances"
+printf 'inotify-watches=%s\n' "$inotify_watches"
+printf 'inotify-events=%s\n' "$inotify_events"
 test "$inotify_instances" = 524288
-
-# Query the associations through the same freedesktop API used by desktop apps.
+"""
+    elif identifier == "terminal.ptyxis-initial-size":
+        quoted_username = shlex.quote(username)
+        quoted_home = shlex.quote(f"/home/{username}")
+        script = f"""
+set -euo pipefail
+get_ptyxis_setting() {{
+    runuser -u {quoted_username} -- env HOME={quoted_home} \
+        XDG_CONFIG_HOME={quoted_home}/.config \
+        GSETTINGS_BACKEND=dconf \
+        gsettings "$@" org.gnome.Ptyxis window-size
+}}
+ptyxis_type=$(get_ptyxis_setting range)
+ptyxis_size=$(get_ptyxis_setting get)
+defaults_version=$(dpkg-query -W -f='${{Version}}' anduinos-dconf-defaults)
+printf 'anduinos-dconf-defaults-version=%s\n' "$defaults_version"
+printf 'ptyxis-window-size-type=%s\n' "$ptyxis_type"
+printf 'ptyxis-window-size=%s\n' "$ptyxis_size"
+test "$ptyxis_type" = 'type (uu)'
+test "$ptyxis_size" = '(uint32 80, uint32 24)'
+"""
+    elif identifier == "desktop.mime-defaults":
+        script = f"""
+set -euo pipefail
 query_mime() {{
-    runuser -u {username} -- env HOME=/home/{username} XDG_CONFIG_HOME=/home/{username}/.config \\
-        XDG_CURRENT_DESKTOP=GNOME XDG_DATA_DIRS=/usr/local/share:/usr/share \\
+    runuser -u {username} -- env HOME=/home/{username} XDG_CONFIG_HOME=/home/{username}/.config \
+        XDG_CURRENT_DESKTOP=GNOME XDG_DATA_DIRS=/usr/local/share:/usr/share \
         xdg-mime query default "$1"
 }}
 mime_image=$(query_mime image/png)
 mime_video=$(query_mime video/mp4)
 mime_deb=$(query_mime application/vnd.debian.binary-package)
-mime_exe=$(query_mime application/x-msdownload)
-mime_pe=$(query_mime application/vnd.microsoft.portable-executable)
-printf 'image/png=%s\\n' "$mime_image"
-printf 'video/mp4=%s\\n' "$mime_video"
-printf 'application/vnd.debian.binary-package=%s\\n' "$mime_deb"
-printf 'application/x-msdownload=%s\\n' "$mime_exe"
-printf 'application/vnd.microsoft.portable-executable=%s\\n' "$mime_pe"
+printf 'image/png=%s\n' "$mime_image"
+printf 'video/mp4=%s\n' "$mime_video"
+printf 'application/vnd.debian.binary-package=%s\n' "$mime_deb"
 test "$mime_image" = org.gnome.Loupe.desktop
 test "$mime_video" = io.github.celluloid_player.Celluloid.desktop
 test "$mime_deb" = gnome-software-local-file-packagekit.desktop
-test "$mime_exe" = com.anduinos.ExeRunner.desktop
-test "$mime_pe" = com.anduinos.ExeRunner.desktop
-for desktop in org.gnome.Loupe.desktop io.github.celluloid_player.Celluloid.desktop \\
-    gnome-software-local-file-packagekit.desktop com.anduinos.ExeRunner.desktop; do
+for desktop in org.gnome.Loupe.desktop io.github.celluloid_player.Celluloid.desktop \
+    gnome-software-local-file-packagekit.desktop; do
     test -f "/usr/share/applications/$desktop"
 done
-
-# The deliberately small non-AI `why` command is itself a product contract.
+"""
+    elif identifier == "command.why-placeholder":
+        script = r"""
+set -euo pipefail
 set +e
 why_output=$(why 2>&1)
 why_status=$?
 set -e
-printf 'why-exit=%s\\n%s\\n' "$why_status" "$why_output"
+printf 'why-exit=%s\n%s\n' "$why_status" "$why_output"
 test "$why_status" = 1
-printf '%s\\n' "$why_output" | grep -Fx 'To use the full AnduinOS AI-powered assistant, install anduinos-why-ai:'
-printf '%s\\n' "$why_output" | grep -Fx '    sudo apt install anduinos-why-ai'
-
-# Prove the installed fontconfig stack resolves both specified Chinese glyphs
-# and the pistol emoji to the AnduinOS-selected font families.
-chinese_font=$(fc-match -f '%{{family}}\\n' 'sans-serif:lang=zh-cn:charset=53d8 89d2 6b21 4eae 91c7 4e4b 95e8' | head -n1)
-emoji_font=$(fc-match -f '%{{family}}\\n' 'emoji:charset=1f52b' | head -n1)
-printf 'chinese-font=%s\\nemoji-font=%s\\n' "$chinese_font" "$emoji_font"
+printf '%s\n' "$why_output" | grep -Fx 'To use the full AnduinOS AI-powered assistant, install anduinos-why-ai:'
+printf '%s\n' "$why_output" | grep -Fx '    sudo apt install anduinos-why-ai'
+"""
+    elif identifier == "font.selection-contracts":
+        script = r"""
+set -euo pipefail
+chinese_font=$(fc-match -f '%{family}\n' 'sans-serif:lang=zh-cn:charset=53d8 89d2 6b21 4eae 91c7 4e4b 95e8' | head -n1)
+emoji_font=$(fc-match -f '%{family}\n' 'emoji:charset=1f52b' | head -n1)
+printf 'chinese-font=%s\nemoji-font=%s\n' "$chinese_font" "$emoji_font"
 printf '%s' "$chinese_font" | grep -q 'Noto Sans CJK SC'
 printf '%s' "$emoji_font" | grep -q 'Twemoji'
 test -s /usr/share/fonts/Twemoji/twemoji-colr.ttf
 grep -a -q COLR /usr/share/fonts/Twemoji/twemoji-colr.ttf
 grep -a -q CPAL /usr/share/fonts/Twemoji/twemoji-colr.ttf
-
-# The passive visual boot later proves this selected theme actually paints.
+"""
+    elif identifier == "boot.plymouth-theme-selection":
+        script = r"""
+set -euo pipefail
 plymouth_theme=$(readlink -f /etc/alternatives/default.plymouth)
-printf 'plymouth-theme=%s\\n' "$plymouth_theme"
+printf 'plymouth-theme=%s\n' "$plymouth_theme"
 test "$plymouth_theme" = /usr/share/plymouth/themes/anduinos/anduinos.plymouth
 test -s /usr/share/plymouth/themes/anduinos/watermark.png
 """
-    _record(console, script, evidence / "installed-release-contracts.txt")
+    else:
+        raise ValueError(f"Unknown release contract: {identifier}")
+    filename = identifier.replace(".", "-") + ".txt"
+    _record(console, script, evidence / filename)
 
 
 def _assert_secure_boot(
@@ -472,8 +791,14 @@ sshd -T | grep -qx 'permitrootlogin no'
     )
 
 
-def _record(console: SerialConsole, script: str, destination: Path) -> None:
-    result = console.run(script, check=False)
+def _record(
+    console: SerialConsole,
+    script: str,
+    destination: Path,
+    *,
+    timeout: float | None = None,
+) -> None:
+    result = console.run(script, check=False, timeout=timeout)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(result.stdout + "\n", encoding="utf-8")
     if result.returncode != 0:

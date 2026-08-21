@@ -13,9 +13,12 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from PIL import Image, UnidentifiedImageError
+
 from .errors import ConfigurationError, ProtocolError
 from .firmware import FirmwareSelection
 from .model import Architecture, Firmware, Network
+from .process_lifecycle import parent_death_preexec
 from .qmp import QmpClient
 from .serial import SerialConsole
 
@@ -37,6 +40,7 @@ class QemuConfig:
     qemu_binary: str
     acceleration: str
     file_size_limit_bytes: int | None = None
+    backing_disk: Path | None = None
 
 
 class QemuVm:
@@ -64,16 +68,23 @@ class QemuVm:
                 f"Refusing to reuse target disk: {self.config.disk}"
             )
         self.config.disk.parent.mkdir(parents=True, exist_ok=True)
-        _run_checked(
-            [
-                "qemu-img",
-                "create",
-                "-f",
-                "qcow2",
-                str(self.config.disk),
-                f"{self.config.disk_gib}G",
-            ]
-        )
+        command = ["qemu-img", "create", "-f", "qcow2"]
+        if self.config.backing_disk is not None:
+            try:
+                backing = self.config.backing_disk.resolve(strict=True)
+            except OSError as error:
+                raise ConfigurationError(
+                    f"Overlay backing disk is unavailable: {error}"
+                ) from error
+            if not backing.is_file() or backing.is_symlink():
+                raise ConfigurationError(
+                    f"Overlay backing disk is not a regular file: {backing}"
+                )
+            if backing == self.config.disk.resolve():
+                raise ConfigurationError("Overlay cannot back itself")
+            command.extend(("-F", "qcow2", "-b", str(backing)))
+        command.extend((str(self.config.disk), f"{self.config.disk_gib}G"))
+        _run_checked(command)
 
     def command(self, *, attach_iso: bool) -> list[str]:
         cfg = self.config
@@ -197,20 +208,21 @@ class QemuVm:
         (self.config.artifacts / f"qemu-{stem}.command").write_text(
             _shell_render(command) + "\n", encoding="utf-8"
         )
+        limiter = (
+            _file_size_limiter(self.config.file_size_limit_bytes)
+            if self.config.file_size_limit_bytes is not None
+            else None
+        )
         self.process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=self._log,
             stderr=subprocess.STDOUT,
-            preexec_fn=(
-                _file_size_limiter(self.config.file_size_limit_bytes)
-                if self.config.file_size_limit_bytes is not None
-                else None
-            ),
+            preexec_fn=parent_death_preexec(limiter),
         )
         self.qmp = QmpClient(qmp_path, timeout=30)
         self.qmp.connect()
-        if self.config.network is Network.OFFLINE:
+        if self.config.network is not Network.ONLINE:
             self.qmp.set_link("nic0", up=False)
         transcript = self.config.artifacts / f"serial-{stem}.log"
         self.serial = SerialConsole(serial_path, transcript, timeout=30)
@@ -219,8 +231,32 @@ class QemuVm:
     def screenshot(self, name: str) -> Path:
         if self.qmp is None:
             raise ProtocolError("QMP is not connected")
-        destination = self.config.artifacts / f"{name}.ppm"
-        self.qmp.screendump(destination)
+        # QMP screendump is universally available as an uncompressed PPM, but
+        # retaining every 1280x800 frame in that form consumes roughly 3 MiB.
+        # A full matrix captures dozens of frames, so immediately encode the
+        # exact pixels losslessly and keep only the substantially smaller PNG.
+        raw = self.config.artifacts / f".{name}.capture.ppm"
+        encoded = self.config.artifacts / f".{name}.capture.png"
+        destination = self.config.artifacts / f"{name}.png"
+        raw.unlink(missing_ok=True)
+        encoded.unlink(missing_ok=True)
+        try:
+            self.qmp.screendump(raw)
+            with Image.open(raw) as source:
+                source.load()
+                if source.format != "PPM":
+                    raise ProtocolError(
+                        f"QMP returned an unexpected screenshot format: {source.format}"
+                    )
+                source.save(encoded, format="PNG", compress_level=6)
+            os.replace(encoded, destination)
+        except (OSError, UnidentifiedImageError) as error:
+            raise ProtocolError(
+                f"Could not retain QMP screenshot {name!r} as PNG: {error}"
+            ) from error
+        finally:
+            raw.unlink(missing_ok=True)
+            encoded.unlink(missing_ok=True)
         return destination
 
     def wait(self, timeout: float) -> int:

@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=AnduinOS Panel Acceptance Fixture
+Comment=Deterministic taskbar and desktop acceptance fixture
+Exec=python3 /usr/local/lib/anduinos-acceptance-shell/panel_fixture.py
+Icon=utilities-terminal
+Terminal=false
+StartupNotify=true
+DBusActivatable=false
+Categories=Utility;

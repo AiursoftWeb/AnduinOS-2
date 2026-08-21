@@ -3,6 +3,10 @@ import re
 import unittest
 from pathlib import Path
 
+from iso_test.feature_model import FeatureSuiteRegistry, TestProfile
+from iso_test.model import TestMatrix
+from iso_test.runner import scenario_check_ids
+
 
 ROOT = Path(__file__).parent
 
@@ -69,7 +73,7 @@ class ArchitectureCoveragePlanTests(unittest.TestCase):
 
         self.assertEqual(len(suite_ids), len(set(suite_ids)))
         self.assertEqual(len(check_ids), len(set(check_ids)))
-        self.assertEqual(len(check_ids), 60)
+        self.assertEqual(len(check_ids), 65)
         self.assertTrue(all("." in identifier for identifier in check_ids))
 
         requirement_ids = []
@@ -83,7 +87,7 @@ class ArchitectureCoveragePlanTests(unittest.TestCase):
             referenced_checks.extend(requirement["checks"])
         self.assertEqual(
             requirement_ids,
-            [f"R{number:02d}" for number in range(1, 46)],
+            [f"R{number:02d}" for number in range(1, 48)],
         )
         self.assertEqual(set(referenced_checks), set(check_ids))
 
@@ -117,6 +121,57 @@ class ArchitectureCoveragePlanTests(unittest.TestCase):
             "wifi-installation-policy",
         ):
             self.assertEqual(suites[identifier]["isolation"], "fresh-install")
+
+    def test_every_release_roadmap_check_has_the_exact_runtime_identifier(self):
+        """A documented check cannot pass merely through an undocumented alias."""
+
+        matrix = TestMatrix.load(ROOT / "matrix.json")
+        registry = FeatureSuiteRegistry.load(ROOT / "feature-suites.json", matrix)
+        planned = {
+            identifier
+            for suite in self.plan["suites"]
+            if "release-gate" in suite["profiles"]
+            for identifier in suite["checks"]
+        }
+        direct = {
+            identifier
+            for scenario in matrix.scenarios
+            for identifier in scenario_check_ids(scenario)
+        }
+        overlays = {
+            identifier
+            for suite in registry.suites
+            if TestProfile.RELEASE_GATE in suite.profiles
+            for identifier in suite.checks
+        }
+        self.assertEqual(57, len(planned))
+        self.assertEqual(set(), planned - (direct | overlays))
+
+    def test_every_non_platform_roadmap_check_is_runtime_reachable(self):
+        matrix = TestMatrix.load(ROOT / "matrix.json")
+        registry = FeatureSuiteRegistry.load(ROOT / "feature-suites.json", matrix)
+        platform = {
+            identifier
+            for suite in self.plan["suites"]
+            if "platform-lab" in suite["profiles"]
+            for identifier in suite["checks"]
+        }
+        planned = {
+            identifier
+            for suite in self.plan["suites"]
+            for identifier in suite["checks"]
+        } - platform
+        executable = {
+            identifier
+            for scenario in matrix.scenarios
+            for identifier in scenario_check_ids(scenario)
+        } | {
+            identifier
+            for suite in registry.suites
+            for identifier in suite.checks
+        }
+        self.assertEqual(62, len(planned))
+        self.assertEqual(set(), planned - executable)
 
 
 if __name__ == "__main__":
