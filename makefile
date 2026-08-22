@@ -31,9 +31,8 @@ DEPS_arm64 := \
 
 TARGET_ARCH ?= $(shell env -u TARGET_ARCH bash -c 'source ./args.sh; printf "%s\n" "$$TARGET_ARCH"')
 DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH))
-PROFILE ?= release-gate
 
-.PHONY: current clean bootstrap menuconfig buildtorrent test test-unit help
+.PHONY: current clean bootstrap menuconfig buildtorrent test help
 
 help:
 	@echo "Usage:"
@@ -44,9 +43,6 @@ help:
 	@echo "  make buildtorrent                 Generate torrents for dist/*.iso"
 	@echo "  make test                         Test the newest ISO in dist/"
 	@echo "  make test ISO=... ARCH=...        Test an explicit ISO"
-	@echo "  make test PROFILE=install         Run only installation scenarios"
-	@echo "  make test SUITES=...              Run selected feature suites"
-	@echo "  make test-unit                    Test the acceptance framework itself"
 
 bootstrap:
 	@if [ "$$(id -u)" -eq 0 ]; then \
@@ -118,6 +114,7 @@ buildtorrent:
 	echo "[MAKE] Torrent generation complete."
 
 test:
+	@PYTHONPATH=tests python3 -m unittest discover -s tests/unit -p 'test_*.py'
 	@iso='$(ISO)'; arch='$(ARCH)'; \
 	if [ -z "$$iso" ]; then \
 		iso=$$(find dist -maxdepth 1 -type f -name '*.iso' -printf '%T@ %p\n' 2>/dev/null | sort -nr | sed -n '1s/^[^ ]* //p'); \
@@ -135,12 +132,7 @@ test:
 		esac; \
 	fi; \
 	python3 tests/run.py --iso "$$iso" --arch "$$arch" \
-		--profile "$(PROFILE)" \
-		$(foreach case,$(CASES),--case $(case)) \
-		$(foreach suite,$(SUITES),--suite $(suite)) $(TEST_ARGS)
-
-test-unit:
-	@PYTHONPATH=tests python3 -m unittest discover -s tests -p 'test_*.py' -v
+		$(TEST_ARGS)
 
 clean:
 	@echo "[MAKE] Cleaning build artifacts..."
