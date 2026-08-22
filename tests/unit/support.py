@@ -149,6 +149,7 @@ from business.install import (
     _assert_guest_ssh_stopped,
     _desktop_command,
     _guest_qmp_key_supported,
+    _login_gdm,
     _is_gnome_extension_entry,
     _parse_qmp_click_request,
     _parse_spice_double_click_request,

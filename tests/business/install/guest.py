@@ -116,20 +116,44 @@ def _retrieve_file(console, source: str, destination: Path) -> None:
 def _login_gdm(vm: QemuVm, username: str, password: str, timeout: float) -> None:
     assert vm.qmp is not None and vm.serial is not None
     deadline = time.monotonic() + timeout
-    for attempt in range(3):
-        active = vm.serial.run(
-            f"loginctl show-user {shlex.quote(username)} -p State --value 2>/dev/null || true"
-        ).stdout.strip()
-        if active == "active":
+    next_input = 0.0
+    attempts = 0
+    last_state = "unknown"
+    while time.monotonic() < deadline:
+        graphical_user = _graphical_user_optional(vm.serial)
+        if graphical_user:
+            if graphical_user != username:
+                raise TestFailure(
+                    "GDM opened a graphical session for unexpected user: "
+                    f"{graphical_user}"
+                )
             return
-        vm.qmp.send_key("ret")
+
+        now = time.monotonic()
+        if now >= next_input:
+            last_state = vm.serial.run(
+                f"loginctl show-user {shlex.quote(username)} "
+                "-p State --value 2>/dev/null || true"
+            ).stdout.strip() or "unknown"
+            # `active` only proves that PAM/user@.service has started.  On a
+            # TCG-emulated ARM guest GNOME may need considerably longer to
+            # create its D-Bus and Wayland sockets.  Do not type the password
+            # into that partially started session; wait for the real desktop
+            # boundary checked above.
+            if last_state != "active" and attempts < 3:
+                vm.qmp.send_key("ret")
+                time.sleep(1)
+                vm.qmp.type_text(password, interval=0.06)
+                vm.qmp.send_key("ret")
+                attempts += 1
+                next_input = time.monotonic() + 15
+            else:
+                next_input = now + 2
         time.sleep(1)
-        vm.qmp.type_text(password, interval=0.06)
-        vm.qmp.send_key("ret")
-        time.sleep(8)
-        if time.monotonic() >= deadline:
-            break
-    raise TestFailure("Could not log the test account into GNOME through GDM")
+    raise TestFailure(
+        "Could not log the test account into a ready GNOME session through "
+        f"GDM; attempts={attempts}, loginctl-state={last_state}"
+    )
 
 
 def _ssh_login(

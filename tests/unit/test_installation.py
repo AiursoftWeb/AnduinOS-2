@@ -185,6 +185,73 @@ class BootContractTests(unittest.TestCase):
         )
         self.assertEqual(330, console.run.call_args.kwargs["timeout"])
 
+    def test_gdm_login_waits_for_wayland_after_user_manager_becomes_active(self):
+        clock = [0.0]
+        serial = Mock()
+        serial.run.return_value = CommandResult("active\n", 0)
+        qmp = Mock()
+        vm = SimpleNamespace(serial=serial, qmp=qmp)
+        observations = iter(("", "", "anduinostest"))
+
+        with (
+            patch(
+                "business.install.guest._graphical_user_optional",
+                side_effect=lambda _console: next(observations),
+            ),
+            patch(
+                "business.install.guest.time.monotonic",
+                side_effect=lambda: clock[0],
+            ),
+            patch(
+                "business.install.guest.time.sleep",
+                side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            ),
+        ):
+            _login_gdm(vm, "anduinostest", "secret", timeout=120)
+
+        self.assertEqual(2.0, clock[0])
+        qmp.send_key.assert_not_called()
+        qmp.type_text.assert_not_called()
+
+    def test_gdm_login_types_once_then_waits_for_slow_wayland_session(self):
+        clock = [0.0]
+        serial = Mock()
+        state_probes = [0]
+
+        def loginctl_state(*_args, **_kwargs):
+            state_probes[0] += 1
+            state = "inactive" if state_probes[0] == 1 else "active"
+            return CommandResult(state + "\n", 0)
+
+        serial.run.side_effect = loginctl_state
+        qmp = Mock()
+        vm = SimpleNamespace(serial=serial, qmp=qmp)
+        probe_count = [0]
+
+        def graphical_user(_console):
+            probe_count[0] += 1
+            return "anduinostest" if probe_count[0] == 20 else ""
+
+        with (
+            patch(
+                "business.install.guest._graphical_user_optional",
+                side_effect=graphical_user,
+            ),
+            patch(
+                "business.install.guest.time.monotonic",
+                side_effect=lambda: clock[0],
+            ),
+            patch(
+                "business.install.guest.time.sleep",
+                side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+            ),
+        ):
+            _login_gdm(vm, "anduinostest", "secret", timeout=120)
+
+        self.assertGreaterEqual(clock[0], 19)
+        self.assertEqual([call("ret"), call("ret")], qmp.send_key.call_args_list)
+        qmp.type_text.assert_called_once_with("secret", interval=0.06)
+
     def test_installed_region_requires_configuration_and_real_gnome_process(self):
         console = Mock()
         console.run.return_value = CommandResult("", 0)
@@ -758,5 +825,3 @@ class BootContractTests(unittest.TestCase):
             self.assertEqual(0, restore.returncode, restore.stdout)
             self.assertEqual(original, config.read_text(encoding="utf-8"))
             self.assertIn("byte-for-byte-restored=yes", restore.stdout)
-
-
