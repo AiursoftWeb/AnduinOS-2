@@ -419,13 +419,6 @@ class SessionChecks:
         self, vm: QemuVm, base: PromotedBase, artifacts: Path
     ) -> None:
         expected = "变角次亮采之门"
-        assert vm.qmp is not None
-        framebuffer = vm.qmp.framebuffer_size()
-        if framebuffer != (1280, 800):
-            raise TestFailure(
-                "The Text Editor Save-row probe requires the acceptance "
-                f"framebuffer to be 1280x800, observed {framebuffer[0]}x{framebuffer[1]}"
-            )
         self._run_file_driver(
             vm,
             base,

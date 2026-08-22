@@ -525,19 +525,16 @@ def _validate_chinese_editor_events(output: str) -> dict[str, object]:
     save_events = [
         event
         for event in events
-        if event.get("event") == "qmp-click"
-        and event.get("request") == "chinese-editor-save-menu-row"
-        and event.get("target") == "Save"
-        and event.get("anchor") == "fixed-1280x800-framebuffer"
-        and event.get("framebuffer") == [1280, 800]
-        and event.get("button") == "left"
+        if event.get("event") == "qmp-key"
+        and event.get("request") == "chinese-editor-save"
+        and event.get("key") == "ctrl-s"
     ]
     if not 1 <= len(save_events) <= 3:
-        raise TestFailure("GNOME Text Editor Save menu row was not clicked")
+        raise TestFailure("GNOME Text Editor Ctrl+S action was not sent")
     if [event.get("attempt") for event in save_events] != list(
         range(1, len(save_events) + 1)
     ) or value.get("save_attempts") != len(save_events):
-        raise TestFailure("GNOME Text Editor Save retries were not bounded and ordered")
+        raise TestFailure("GNOME Text Editor save retries were not bounded and ordered")
     for index, _character in enumerate(expected):
         required = (
             ("qmp-key", f"chinese-editor-unicode-{index}-start", "ctrl-shift-u"),

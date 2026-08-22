@@ -738,66 +738,21 @@ def verify_chinese_editor(evidence: Path) -> None:
         raise UiFailure(
             f"GNOME Text Editor returned {observed!r}, expected {expected!r}"
         )
-    def activate_editor_control(names: tuple[str, ...], purpose: str) -> str:
-        semantic_names = {semantic_name(value) for value in names}
-        deadline = time.monotonic() + 30
-        while time.monotonic() < deadline:
-            for item in visible_nodes():
-                if (
-                    owning_application(item) != application
-                    or semantic_name(name(item)) not in semantic_names
-                    or not showing(item)
-                ):
-                    continue
-                try:
-                    control = actionable(item)
-                    actions = [
-                        action_name(control, action_index)
-                        for action_index in range(action_count(control))
-                    ]
-                except Exception:
-                    continue
-                if perform_action(control, 0):
-                    event(
-                        "text-editor-action",
-                        purpose=purpose,
-                        accessible_name=name(item),
-                        actions=actions,
-                    )
-                    time.sleep(0.35)
-                    return name(item)
-            time.sleep(0.25)
-        raise UiFailure(
-            f"GNOME Text Editor exposed no actionable {purpose}: {names!r}"
-        )
-
-    # GTK 4 does not expose ordinary GMenu rows (including Save) through
-    # AT-SPI, and the popover's custom children incorrectly report 0,0 for
-    # SCREEN coordinates. The title-bar menu button does expose correct screen
-    # bounds. This acceptance VM has an explicitly verified 1280x800
-    # framebuffer, and Text Editor opens at a deterministic centered size.
-    # Click the rendered Save row in that fixed viewport. A future resolution
-    # or layout change fails the host precondition or the exact-byte oracle.
-    save_name = "Save menu row"
+    # Ctrl+S is the application's real save action and is independent of
+    # window geometry. The exact bytes below remain the pass condition.
+    save_name = "Ctrl+S"
     # GNOME Text Editor deliberately enables GtkSourceBuffer's implicit
     # trailing newline by default. The visible document remains exactly the
     # requested seven characters; its normal serialized form contains one
     # additional LF and nothing else.
     serialized = (expected + "\n").encode("utf-8")
     saved = b""
-    menu_name = ""
     save_attempts = 0
     for save_attempts in range(1, 4):
-        menu_name = activate_editor_control(("Main Menu", "主菜单"), "main-menu")
         event(
-            "qmp-click",
-            request="chinese-editor-save-menu-row",
-            target="Save",
-            anchor="fixed-1280x800-framebuffer",
-            x_px=852,
-            y_px=364,
-            button="left",
-            framebuffer=[1280, 800],
+            "qmp-key",
+            request="chinese-editor-save",
+            key="ctrl-s",
             attempt=save_attempts,
         )
         deadline = time.monotonic() + 10
@@ -833,7 +788,6 @@ def verify_chinese_editor(evidence: Path) -> None:
         application=application,
         expected=expected,
         observed=observed,
-        menu_accessible_name=menu_name,
         save_accessible_name=save_name,
         character_count=len(observed),
         utf8_sha256=hashlib.sha256(saved).hexdigest(),

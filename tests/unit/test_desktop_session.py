@@ -765,20 +765,9 @@ class DesktopSessionOracleTests(FeatureOracleCase):
         passing = self._events(
             *unicode_input,
             {
-                "event": "text-editor-action",
-                "purpose": "main-menu",
-                "accessible_name": "主菜单",
-                "actions": ["click"],
-            },
-            {
-                "event": "qmp-click",
-                "request": "chinese-editor-save-menu-row",
-                "target": "Save",
-                "anchor": "fixed-1280x800-framebuffer",
-                "x_px": 852,
-                "y_px": 364,
-                "button": "left",
-                "framebuffer": [1280, 800],
+                "event": "qmp-key",
+                "request": "chinese-editor-save",
+                "key": "ctrl-s",
                 "attempt": 1,
             },
             {
@@ -787,8 +776,7 @@ class DesktopSessionOracleTests(FeatureOracleCase):
                 "application": "文本编辑器",
                 "expected": expected,
                 "observed": expected,
-                "menu_accessible_name": "主菜单",
-                "save_accessible_name": "Save menu row",
+                "save_accessible_name": "Ctrl+S",
                 "character_count": len(expected),
                 "utf8_sha256": hashlib.sha256(
                     (expected + "\n").encode("utf-8")
@@ -808,9 +796,9 @@ class DesktopSessionOracleTests(FeatureOracleCase):
                     1,
                 )
             )
-        with self.assertRaisesRegex(TestFailure, "Save menu row"):
+        with self.assertRaisesRegex(TestFailure, "Ctrl.S"):
             _validate_chinese_editor_events(
-                passing.replace('"target": "Save"', '"target": "Save As"')
+                passing.replace('"key": "ctrl-s"', '"key": "ctrl-o"')
             )
         with self.assertRaisesRegex(TestFailure, "Unicode text"):
             _validate_chinese_editor_events(

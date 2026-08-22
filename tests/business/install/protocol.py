@@ -29,6 +29,7 @@ _SUPPORTED_GUEST_QMP_KEYS = frozenset(
         "alt-tab",
         "alt-f4",
         "ctrl-shift-u",
+        "ctrl-s",
         "meta_l-tab",
         "meta_l-d",
         "meta_l-i",

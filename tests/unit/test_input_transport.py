@@ -500,11 +500,12 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
         self.assertIn("shift-tab", _SUPPORTED_GUEST_QMP_KEYS)
         self.assertTrue(_guest_qmp_key_supported("shift-tab"))
 
-    def test_text_editor_unicode_input_is_a_narrowly_supported_host_key(self):
+    def test_text_editor_input_and_save_use_narrowly_supported_host_keys(self):
         self.assertIn("ctrl-shift-u", _SUPPORTED_GUEST_QMP_KEYS)
         self.assertTrue(_guest_qmp_key_supported("ctrl-shift-u"))
+        self.assertIn("ctrl-s", _SUPPORTED_GUEST_QMP_KEYS)
+        self.assertTrue(_guest_qmp_key_supported("ctrl-s"))
         self.assertFalse(_guest_qmp_key_supported("s"))
-        self.assertFalse(_guest_qmp_key_supported("ctrl-s"))
         self.assertFalse(_guest_qmp_key_supported("ctrl-shift-s"))
 
     def test_arcmenu_context_targets_result_before_keyboard_menu_navigation(self):
@@ -1545,5 +1546,4 @@ class VisualOracleTests(unittest.TestCase):
             frame_path = root / "frame.ppm"
             Image.new("RGB", (640, 480), "black").save(frame_path)
             self.assertFalse(plymouth_match(frame_path, watermark_path)["matched"])
-
 
