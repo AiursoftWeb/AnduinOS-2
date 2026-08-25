@@ -86,8 +86,7 @@ and generated evidence.
 ## Installer and live environment
 
 AnduinOS uses `anduinos-installer-beta`, its native declarative installer.
-Casper provides the live environment. The legacy Ubiquity integration stack is
-retired and is not included, built, or maintained by AnduinOS.
+Casper provides the live environment.
 
 ## Documentation and support
 
