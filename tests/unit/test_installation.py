@@ -248,6 +248,11 @@ class BootContractTests(unittest.TestCase):
             if "initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)" in item.args[0]
         )
         self.assertIn("initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)", script)
+        self.assertIn(
+            "dpkg-query -S /usr/sbin/update-initramfs | "
+            "grep -Fxq 'dracut: /usr/sbin/update-initramfs'",
+            script,
+        )
         for forbidden_path in (
             "scripts/casper",
             "scripts/casper-bottom",
@@ -255,6 +260,20 @@ class BootContractTests(unittest.TestCase):
             "usr/share/initramfs-tools-core",
         ):
             self.assertIn(forbidden_path, script)
+        for moved_assertion in (
+            "var/lib/dracut/hooks/pre-pivot/90-anduinos-live-prepare.sh",
+            "usr/sbin/create-overlay.upstream",
+            "usr/sbin/dmsquash-live-root",
+            'parted --script --fix "$block_device" print',
+            "LABEL=ANDUINOS-PERSIST",
+            "spice-vdagent",
+            "openssh-server",
+            "anduinos-installer-beta",
+            "systemctl is-enabled ssh.service",
+            "systemctl is-enabled ssh.socket",
+            "ssh_host_*_key",
+        ):
+            self.assertIn(moved_assertion, script)
 
     def test_gdm_login_waits_for_wayland_after_user_manager_becomes_active(self):
         clock = [0.0]

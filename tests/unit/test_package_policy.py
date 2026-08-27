@@ -207,6 +207,20 @@ class ImagePackagePolicyTests(unittest.TestCase):
     def test_process_cleanup_mod_is_gone(self):
         self.assertFalse((ROOT.parent / "mods/78-ensure-no-junk").exists())
 
+    def test_cleanup_mod_changes_state_without_rechecking_it(self):
+        cleanup = (ROOT.parent / "mods/85-cleanup-mod/install.sh").read_text()
+        self.assertIn("systemctl disable ssh.service ssh.socket", cleanup)
+        self.assertIn("ssh_host_*_key", cleanup)
+        self.assertIn('judge "Disable Live Secure Shell listeners"', cleanup)
+        self.assertIn('judge "Remove build-time SSH host identity"', cleanup)
+        for test_logic in (
+            "dpkg-query",
+            "dpkg --compare-versions",
+            "systemctl is-enabled",
+            "SSH host identity remains after cleanup",
+        ):
+            self.assertNotIn(test_logic, cleanup)
+
 
 if __name__ == "__main__":
     unittest.main()

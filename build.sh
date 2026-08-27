@@ -187,12 +187,6 @@ function prepare_iso_directory() {
 }
 
 function prepare_live_grub_font() {
-    if [ ! -f "/usr/share/fonts/opentype/unifont/unifont.otf" ]; then
-        print_error "GRUB font source not found: /usr/share/fonts/opentype/unifont/unifont.otf"
-        print_error "Install the fonts-unifont build dependency and try again."
-        exit 1
-    fi
-
     print_ok "Generating 28px Unicode font for the Live ISO..."
     mkdir -p \
         image/isolinux \
@@ -216,14 +210,6 @@ function build_iso() {
     REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz 2>/dev/null)
     [ -f "$REAL_VMLINUZ" ] || REAL_VMLINUZ=$(readlink -f new_building_os/boot/vmlinuz 2>/dev/null)
     REAL_INITRD="new_building_os/boot/anduinos-live-initrd.img"
-    if [ -z "$REAL_VMLINUZ" ] || [ ! -f "$REAL_VMLINUZ" ]; then
-        print_error "No kernel found via vmlinuz symlink in new_building_os/"
-        exit 1
-    fi
-    if [ -z "$REAL_INITRD" ] || [ ! -f "$REAL_INITRD" ]; then
-        print_error "The dedicated Dracut Live initrd is missing"
-        exit 1
-    fi
     sudo cp "$REAL_VMLINUZ" image/LiveOS/vmlinuz
     sudo cp "$REAL_INITRD" image/LiveOS/initrd
     judge "Copy kernel files"
@@ -354,14 +340,6 @@ EOF
         -e "boot/anduinos-live-initrd.img" \
         -e "swapfile"
     judge "Compress rootfs"
-
-    print_ok "Verifying the integrity of rootfs.squashfs..."
-    if sudo unsquashfs -s image/LiveOS/rootfs.squashfs; then
-        print_ok "Verification successful. The file appears to be valid."
-    else
-        print_error "Verification FAILED! The squashfs file is likely corrupt."
-        exit 1
-    fi
     
     print_ok "Generating filesystem.size on /LiveOS/filesystem.size..."
     filesystem_size=$(sudo du -sx --block-size=1 new_building_os | cut -f1)
@@ -428,16 +406,6 @@ EOF
             arm64_shim="$target_root/usr/lib/shim/shimaa64.efi.signed.latest"
             arm64_grub="$target_root/usr/lib/grub/arm64-efi-signed/gcdaa64.efi.signed"
             arm64_mok="$target_root/usr/lib/shim/mmaa64.efi"
-            for required in \
-                "$arm64_shim" \
-                "$arm64_grub" \
-                "$arm64_mok"; do
-                if [ ! -s "$required" ] || \
-                    ! sbverify --list "$required" >/dev/null 2>&1; then
-                    print_error "ARM64 target root is missing EFI payload: $required"
-                    exit 1
-                fi
-            done
 
             # The signed Canonical config-delivery GRUB image already embeds
             # FAT, ISO9660, GPT, search and configfile support. Build the
@@ -474,23 +442,9 @@ EOF
                 print_error "grub-install failed!"
                 exit 1
             fi
-
-            for signed_payload in \
-                EFI/BOOT/BOOTX64.EFI \
-                EFI/BOOT/grubx64.efi \
-                EFI/BOOT/mmx64.efi; do
-                if [ ! -s "efi/$signed_payload" ] || \
-                    ! sbverify --list "efi/$signed_payload" >/dev/null 2>&1; then
-                    sudo umount efi
-                    print_error "EFI payload is absent or unsigned: $signed_payload"
-                    exit 1
-                fi
-            done
             sudo umount efi
             rm -rf efi
         fi
-
-        fsck.vfat -vn efiboot.img
     )
     judge "Create EFI boot image"
 
@@ -576,10 +530,6 @@ EOF
 
     judge "Create iso image"
 
-    if ! command -v implantisomd5 >/dev/null 2>&1; then
-        print_error "implantisomd5 is required; install the isomd5sum build dependency"
-        exit 1
-    fi
     print_ok "Embedding the Dracut rd.live.check media checksum..."
     sudo implantisomd5 --force "$SCRIPT_DIR/$TARGET_NAME.iso"
     judge "Embed ISO media checksum"

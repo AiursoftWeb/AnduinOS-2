@@ -9,13 +9,15 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             ROOT.parent
             / "mods/84-spice-vdagent-shutdown/install.sh"
         ).read_text(encoding="utf-8")
-        self.assertIn("dpkg-query -W", script)
         self.assertIn("spice-vdagent", script)
         self.assertIn(
             "/etc/systemd/system/spice-vdagentd.service.d",
             script,
         )
         self.assertIn("TimeoutStopSec=15s", script)
+        self.assertIn('judge "Bound SPICE guest-agent shutdown latency"', script)
+        self.assertNotIn("dpkg-query", script)
+        self.assertNotIn("grep", script)
         self.assertNotIn("/usr/lib/systemd/system/spice-vdagentd.service <<", script)
 
     def test_ordinary_reboot_oracle_rejects_a_reused_boot_id(self):

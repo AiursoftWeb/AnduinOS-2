@@ -230,6 +230,7 @@ modules=$(lsinitrd -m /cdrom/LiveOS/initrd)
 for module in dmsquash-live dmsquash-live-autooverlay overlayfs anduinos-live-layers; do
     printf '%s\n' "$modules" | grep -Eq "^[[:space:]]*$module[[:space:]]*$"
 done
+dpkg-query -S /usr/sbin/update-initramfs | grep -Fxq 'dracut: /usr/sbin/update-initramfs'
 initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)
 for forbidden_path in \
     scripts/casper \
@@ -238,6 +239,24 @@ for forbidden_path in \
     usr/share/initramfs-tools-core; do
     ! printf '%s\n' "$initrd_listing" | grep -Fq "$forbidden_path"
 done
+for required_member in \
+    var/lib/dracut/hooks/pre-pivot/90-anduinos-live-prepare.sh \
+    usr/sbin/create-overlay \
+    usr/sbin/create-overlay.upstream \
+    usr/sbin/dmsquash-live-root; do
+    printf '%s\n' "$initrd_listing" | grep -Fq "$required_member"
+done
+overlay_wrapper=$(lsinitrd -f usr/sbin/create-overlay /cdrom/LiveOS/initrd)
+printf '%s\n' "$overlay_wrapper" | grep -Fq 'parted --script --fix "$block_device" print'
+printf '%s\n' "$overlay_wrapper" | grep -Fq 'LABEL=ANDUINOS-PERSIST'
+dpkg-query -W -f='${db:Status-Abbrev}' spice-vdagent | grep -q '^ii '
+dpkg-query -W -f='${db:Status-Abbrev}' openssh-server | grep -q '^ii '
+installer_version=$(dpkg-query -W -f='${Version}' anduinos-installer-beta)
+dpkg --compare-versions "$installer_version" ge '2.0.1-66'
+test "$(systemctl is-enabled ssh.service 2>/dev/null || true)" = disabled
+test "$(systemctl is-enabled ssh.socket 2>/dev/null || true)" = disabled
+test -z "$(find /etc/ssh -maxdepth 1 \
+    \( -name 'ssh_host_*_key' -o -name 'ssh_host_*_key.pub' \) -print -quit)"
 printf 'dracut-live-contract=ok\n'
 """
     _record(console, script, evidence / "live-environment.txt")

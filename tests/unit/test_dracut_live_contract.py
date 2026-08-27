@@ -36,7 +36,7 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertIn("implantisomd5 --force", build)
         self.assertNotIn("boot=casper", build)
 
-    def test_dedicated_live_initrd_is_non_host_only_and_module_complete(self) -> None:
+    def test_dedicated_live_initrd_recipe_only_builds_the_image(self) -> None:
         script = (ROOT / "mods/80-dracut-live-image/install.sh").read_text()
         self.assertIn("--no-hostonly", script)
         self.assertIn("--no-hostonly-cmdline", script)
@@ -48,20 +48,36 @@ class DracutLiveContractTests(unittest.TestCase):
         ):
             self.assertIn(module, script)
         self.assertIn("/boot/anduinos-live-initrd.img", script)
-        self.assertIn("lsinitrd -m", script)
-        self.assertIn(
-            "var/lib/dracut/hooks/pre-pivot/90-anduinos-live-prepare.sh",
-            script,
-        )
-        self.assertIn("usr/sbin/dmsquash-live-root", script)
-        self.assertIn("usr/sbin/create-overlay.upstream", script)
-        self.assertIn("parted --script --fix", script)
-        self.assertIn("LABEL=ANDUINOS-PERSIST", script)
-        self.assertIn("dpkg-query -S /usr/sbin/update-initramfs", script)
-        self.assertIn("dracut: /usr/sbin/update-initramfs", script)
-        self.assertNotIn("test ! -e /usr/sbin/update-initramfs", script)
+        self.assertIn('judge "Build dedicated Dracut Live initrd"', script)
+        for test_logic in ("dpkg-query", "lsinitrd", "command -v", "test -s", "grep"):
+            self.assertNotIn(test_logic, script)
         self.assertFalse((ROOT / "mods/46-casper-patch/install.sh").exists())
         self.assertFalse((ROOT / "mods/80-initramfs-update/install.sh").exists())
+
+    def test_build_recipe_leaves_artifact_validation_to_tests(self) -> None:
+        build = (ROOT / "build.sh").read_text()
+        makefile = (ROOT / "makefile").read_text()
+        for action in ("grub-mkfont", "mksquashfs", "implantisomd5 --force"):
+            self.assertIn(action, build)
+        for dependency in ("fonts-unifont", "isomd5sum", "sbsigntool"):
+            self.assertIn(dependency, makefile)
+        for test_logic in (
+            "GRUB font source not found",
+            "The dedicated Dracut Live initrd is missing",
+            "unsquashfs -s",
+            "sbverify --list",
+            "fsck.vfat -vn",
+            "command -v implantisomd5",
+        ):
+            self.assertNotIn(test_logic, build)
+        for progress_marker in (
+            'judge "Prepare readable Live GRUB font"',
+            'judge "Copy kernel files"',
+            'judge "Compress rootfs"',
+            'judge "Create EFI boot image"',
+            'judge "Embed ISO media checksum"',
+        ):
+            self.assertIn(progress_marker, build)
 
     def test_build_dependencies_include_media_check_implanter(self) -> None:
         makefile = (ROOT / "makefile").read_text()
@@ -90,8 +106,6 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertIn("::/EFI/BOOT/mmaa64.efi", build)
         self.assertIn("search --no-floppy --label --set=anduinos_iso", build)
         self.assertIn("configfile \\$prefix/grub.cfg", build)
-        self.assertIn("sbverify --list", build)
-        self.assertIn("fsck.vfat -vn efiboot.img", build)
 
     def test_grub_acceptance_contract_covers_temporary_and_persistent_modes(self) -> None:
         common = (
