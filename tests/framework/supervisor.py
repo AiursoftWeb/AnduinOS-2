@@ -265,6 +265,7 @@ def _cleanup_persistent_disks(root: Path, preexisting: bool) -> None:
         if child.is_symlink() or not child.is_dir():
             continue
         _unlink_exact(child / "target.qcow2")
+        _unlink_exact(child / "live-media.raw")
     overlays = root / "feature-overlays"
     if overlays.is_dir() and not overlays.is_symlink():
         for suite in overlays.iterdir():
@@ -284,7 +285,7 @@ def _cleanup_persistent_disks(root: Path, preexisting: bool) -> None:
 def _unlink_exact(path: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
-    if path.name not in {"target.qcow2", "overlay.qcow2"}:
+    if path.name not in {"target.qcow2", "overlay.qcow2", "live-media.raw"}:
         raise RuntimeError(f"refusing unexpected disk cleanup target: {path}")
     path.unlink()
 

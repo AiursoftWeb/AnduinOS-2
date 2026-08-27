@@ -355,15 +355,15 @@ def install(config: dict[str, object], evidence: Path) -> None:
                 is_action = item.is_action() and action_count(item) > 0
             except Exception:
                 is_action = False
-            if not is_action or role(item) not in {"toggle button", "button", "table cell"}:
+            if not is_action or role(item) not in {"toggle button", "button"}:
                 continue
             descendant = next(
                 (
                     candidate
                     for candidate in walk(item, maximum=200)
-                    if any(
-                        path in name(candidate)
-                        for path in ("/dev/vda", "/dev/sda", "/dev/nvme")
+                    if re.match(
+                        r"^/dev/(?:vda|nvme\d+n\d+)\s+·",
+                        name(candidate),
                     )
                 ),
                 None,
@@ -379,11 +379,13 @@ def install(config: dict[str, object], evidence: Path) -> None:
         raise UiFailure("No actionable install target disk appeared")
     if not perform_action(disk_target, 0):
         raise UiFailure("Could not select the target disk")
+    find("next", timeout=30, require_enabled=True)
     event(
         "disk",
         accessible_name=name(disk_node),
         target_role=role(disk_target),
         target_name=name(disk_target),
+        selection_method="atspi-action",
     )
     click("next")
 

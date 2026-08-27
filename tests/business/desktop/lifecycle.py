@@ -413,7 +413,7 @@ class LifecycleChecks:
             "initrd=$(readlink -f /boot/initrd.img)\n"
             "test -s \"$kernel\"\n"
             "test -s \"$initrd\"\n"
-            "lsinitramfs \"$initrd\" >/dev/null\n"
+            "lsinitrd \"$initrd\" >/dev/null\n"
             "printf 'boot-artifacts=ok\\n'\n"
             "EOF\n"
             "install -d -m 0755 /usr/local/lib/anduinos-acceptance\n"
@@ -623,6 +623,14 @@ class LifecycleChecks:
         deadline = time.monotonic() + timeout
         last = ""
         while time.monotonic() < deadline:
+            process = getattr(vm, "process", None)
+            if process is not None:
+                returncode = process.poll()
+                if returncode is not None:
+                    raise TestFailure(
+                        "QEMU exited while waiting for SSH control after boot "
+                        f"(exit code {returncode})"
+                    )
             remaining = deadline - time.monotonic()
             attempt_timeout = max(1.0, min(15.0, remaining))
             try:

@@ -57,6 +57,7 @@ def inspect_capacity(
     artifact_path: Path,
     disk_gib: int,
     reserve_gib: int,
+    additional_bytes: int = 0,
 ) -> StorageCapacity:
     """Measure a persistent filesystem that may contain the whole qcow2."""
 
@@ -67,7 +68,7 @@ def inspect_capacity(
         free_bytes=usage.free,
         # A sparse qcow2 is allowed to grow to the entire advertised guest
         # disk. Budget against that upper bound, not yesterday's typical use.
-        required_bytes=(disk_gib + reserve_gib) * GIB,
+        required_bytes=(disk_gib + reserve_gib) * GIB + additional_bytes,
     )
 
 
@@ -75,8 +76,16 @@ def assert_capacity(
     artifact_path: Path,
     disk_gib: int,
     reserve_gib: int,
+    additional_bytes: int = 0,
 ) -> StorageCapacity:
-    capacity = inspect_capacity(artifact_path, disk_gib, reserve_gib)
+    if additional_bytes < 0:
+        raise ConfigurationError("Additional disk budget cannot be negative")
+    capacity = inspect_capacity(
+        artifact_path,
+        disk_gib,
+        reserve_gib,
+        additional_bytes,
+    )
     if capacity.free_bytes < capacity.required_bytes:
         raise ConfigurationError(
             "Refusing to start a disposable VM: "
@@ -98,6 +107,7 @@ def select_disk_storage(
     mode: str = "auto",
     ramdisk_threshold_gib: int = DEFAULT_RAMDISK_THRESHOLD_GIB,
     retain_disk: bool = False,
+    additional_bytes: int = 0,
 ) -> DiskStorage:
     """Choose tmpfs when it is both useful and safe, otherwise use artifacts."""
 
@@ -105,6 +115,8 @@ def select_disk_storage(
         raise ConfigurationError(f"Unknown disk backend: {mode}")
     if ramdisk_threshold_gib < 1:
         raise ConfigurationError("RAM-disk threshold must be at least 1 GiB")
+    if additional_bytes < 0:
+        raise ConfigurationError("Additional disk budget cannot be negative")
     persistent = DiskStorage(
         root=artifacts_root,
         backend="filesystem",
@@ -158,8 +170,13 @@ def select_disk_storage(
     safe = [
         item
         for item in candidates
-        if item[1] >= minimum
-        and available >= item[2] + guest + host_reserve + selection_headroom
+        if item[1] >= minimum + additional_bytes
+        and available
+        >= item[2]
+        + additional_bytes
+        + guest
+        + host_reserve
+        + selection_headroom
     ]
     if not safe:
         details = (
@@ -199,11 +216,20 @@ def assert_disk_storage_ready(
     disk_gib: int,
     filesystem_reserve_gib: int,
     memory_mib: int,
+    additional_bytes: int = 0,
 ) -> StorageCapacity:
     """Revalidate the selected backend before the run and every scenario."""
 
+    if additional_bytes < 0:
+        raise ConfigurationError("Additional disk budget cannot be negative")
+
     if not storage.is_ramdisk:
-        return assert_capacity(storage.root, disk_gib, filesystem_reserve_gib)
+        return assert_capacity(
+            storage.root,
+            disk_gib,
+            filesystem_reserve_gib,
+            additional_bytes,
+        )
 
     mount = _existing_parent(storage.root)
     if _filesystem_type(mount) != "tmpfs":
@@ -218,10 +244,14 @@ def assert_disk_storage_ready(
     qcow_limit = storage.qcow_limit_bytes
     if qcow_limit is None:
         raise ConfigurationError("RAM-disk workspace has no enforced qcow2 limit")
+    required_storage = min(minimum, qcow_limit) + additional_bytes
     required_memory = (
-        qcow_limit + memory_mib * MIB + RAMDISK_HOST_RESERVE_GIB * GIB
+        qcow_limit
+        + additional_bytes
+        + memory_mib * MIB
+        + RAMDISK_HOST_RESERVE_GIB * GIB
     )
-    if free < min(minimum, qcow_limit) or available < required_memory:
+    if free < required_storage or available < required_memory:
         raise ConfigurationError(
             "RAM-disk safety conditions changed before QEMU start: "
             f"tmpfs has {free / GIB:.1f} GiB free and MemAvailable is "
@@ -229,7 +259,7 @@ def assert_disk_storage_ready(
             f"{qcow_limit / GIB:.1f} GiB qcow2 budget plus QEMU memory and "
             "the host reserve are required"
         )
-    return StorageCapacity(mount, free, qcow_limit)
+    return StorageCapacity(mount, free, qcow_limit + additional_bytes)
 
 
 def prepare_disk_storage(storage: DiskStorage) -> None:

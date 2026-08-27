@@ -23,6 +23,9 @@ from .qmp import QmpClient
 from .serial import SerialConsole
 
 
+PERSISTENT_LIVE_FREE_SPACE_GIB = 4
+
+
 @dataclass(frozen=True)
 class QemuConfig:
     architecture: Architecture
@@ -41,6 +44,7 @@ class QemuConfig:
     acceleration: str
     file_size_limit_bytes: int | None = None
     backing_disk: Path | None = None
+    live_media: Path | None = None
 
 
 class QemuVm:
@@ -51,6 +55,7 @@ class QemuVm:
         self.serial: SerialConsole | None = None
         self._runtime: tempfile.TemporaryDirectory[str] | None = None
         self._log = None
+        self._live_media_attached = False
 
     @property
     def spice_socket(self) -> Path:
@@ -61,6 +66,10 @@ class QemuVm:
     @property
     def running(self) -> bool:
         return self.process is not None and self.process.poll() is None
+
+    @property
+    def live_media_attached(self) -> bool:
+        return self._live_media_attached
 
     def create_disk(self) -> None:
         if self.config.disk.exists():
@@ -85,6 +94,34 @@ class QemuVm:
             command.extend(("-F", "qcow2", "-b", str(backing)))
         command.extend((str(self.config.disk), f"{self.config.disk_gib}G"))
         _run_checked(command)
+
+    def create_live_media(self) -> None:
+        """Copy the ISO to a writable, extended USB-like hybrid image."""
+
+        destination = self.config.live_media
+        if destination is None:
+            return
+        if destination.name != "live-media.raw" or destination.is_symlink():
+            raise ConfigurationError(
+                f"Refusing unexpected persistent Live-media target: {destination}"
+            )
+        if destination.exists():
+            raise ConfigurationError(
+                f"Refusing to reuse persistent Live media: {destination}"
+            )
+        source = self.config.iso.resolve(strict=True)
+        if not source.is_file() or source.is_symlink():
+            raise ConfigurationError(f"ISO is not a regular file: {source}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            shutil.copyfile(source, destination)
+            with destination.open("r+b") as stream:
+                stream.truncate(
+                    source.stat().st_size + PERSISTENT_LIVE_FREE_SPACE_GIB * 1024**3
+                )
+        except BaseException:
+            destination.unlink(missing_ok=True)
+            raise
 
     def command(self, *, attach_iso: bool) -> list[str]:
         cfg = self.config
@@ -185,12 +222,26 @@ class QemuVm:
                 f"if=pflash,format=raw,file={cfg.variables}",
             ]
         if attach_iso:
-            command += [
-                "-drive",
-                f"file={cfg.iso},if=none,id=cdrom,format=raw,readonly=on",
-                "-device",
-                "scsi-cd,bus=scsi0.0,drive=cdrom,bootindex=1",
-            ]
+            if cfg.live_media is None:
+                command += [
+                    "-drive",
+                    f"file={cfg.iso},if=none,id=cdrom,format=raw,readonly=on",
+                    "-device",
+                    "scsi-cd,bus=scsi0.0,drive=cdrom,bootindex=1",
+                ]
+            else:
+                command += [
+                    "-drive",
+                    (
+                        f"file={cfg.live_media},if=none,id=live-media,"
+                        "format=raw,cache=writeback"
+                    ),
+                    "-device",
+                    (
+                        "scsi-hd,bus=scsi0.0,drive=live-media,"
+                        "serial=ANDUINOS-TEST-LIVE,bootindex=1"
+                    ),
+                ]
         return command
 
     def start(self, *, attach_iso: bool, phase: str | None = None) -> None:
@@ -220,6 +271,7 @@ class QemuVm:
             stderr=subprocess.STDOUT,
             preexec_fn=parent_death_preexec(limiter),
         )
+        self._live_media_attached = attach_iso and self.config.live_media is not None
         self.qmp = QmpClient(qmp_path, timeout=30)
         self.qmp.connect()
         if self.config.network is not Network.ONLINE:
@@ -303,6 +355,7 @@ class QemuVm:
             if process.poll() is None:
                 raise ProtocolError("QEMU remained alive after SIGKILL")
             self.process = None
+        self._live_media_attached = False
 
         serial = self.serial
         self.serial = None

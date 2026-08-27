@@ -14,21 +14,20 @@ class InstallationPhases:
     ) -> InstalledBootFiles | None:
         with self._check(scenario, "regional.grub-contract"):
             live_entry = self._assert_grub_regional_contract(artifacts)
+        persistent = scenario.live_mode is LiveMode.PERSISTENT
         with self._check(scenario, "live-boot"):
-            self.status(scenario.id, "Booting original ISO")
-            vm.start(attach_iso=True)
-            assert vm.qmp is not None and vm.serial is not None
-            boot_iso_with_debug_shell(
-                vm.qmp,
-                vm.serial,
-                self.architecture,
-                firmware_delay=self.options.firmware_delay_seconds,
-                menu_entry_index=self.inspection.live_entries.index(live_entry),
-                kernel_arguments=live_entry.kernel_arguments,
-                spice_socket=vm.spice_socket,
+            self.status(
+                scenario.id,
+                "Booting writable persistent Live media"
+                if persistent
+                else "Booting original read-only ISO",
             )
-            vm.serial.timeout = self.options.command_timeout_seconds
-            vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+            self._boot_live_session(
+                vm,
+                live_entry,
+                persistent=persistent,
+                phase=("live-persistent-first" if persistent else "live-temporary"),
+            )
             wifi_state = None
             if wifi_lab is not None:
                 self.status(scenario.id, "Creating isolated in-guest WPA2 lab")
@@ -46,7 +45,49 @@ class InstallationPhases:
                 session_timeout_seconds=self.options.boot_timeout_seconds,
                 check_region=False,
             )
-            vm.screenshot("live-desktop")
+            vm.screenshot(
+                "live-persistent-first" if persistent else "live-desktop"
+            )
+        with self._check(scenario, "live.identity-contract"):
+            self.status(
+                scenario.id,
+                "Checking the exact Live account and automatic-login contract",
+            )
+            assert_live_identity(
+                vm.serial,
+                artifacts,
+                session_timeout_seconds=self.options.boot_timeout_seconds,
+            )
+        with self._check(
+            scenario,
+            "live.persistent-overlay" if persistent else "live.temporary-overlay",
+        ):
+            if persistent:
+                self._create_persistent_live_sentinel(vm, artifacts)
+                _power_off(vm)
+                self.status(
+                    scenario.id,
+                    "Rebooting the same Live media to prove durable overlay state",
+                )
+                self._boot_live_session(
+                    vm,
+                    live_entry,
+                    persistent=True,
+                    phase="live-persistent-second",
+                )
+                assert_live_environment(
+                    vm.serial,
+                    scenario,
+                    artifacts,
+                    self.defaults.live_locale,
+                    self.defaults.live_timezone,
+                    session_timeout_seconds=self.options.boot_timeout_seconds,
+                    check_region=False,
+                )
+                self._assert_persistent_live_sentinel(vm, artifacts)
+                vm.screenshot("live-persistent-second")
+            else:
+                self._assert_temporary_live_overlay(vm, artifacts)
         with self._check(scenario, "packages.live-image-junk-absent"):
             self.status(
                 scenario.id,
@@ -80,6 +121,127 @@ class InstallationPhases:
         _power_off(vm)
         self.status(scenario.id, "Installation complete; ISO detached")
         return boot_files
+
+    def _boot_live_session(
+        self,
+        vm: QemuVm,
+        regional_entry,
+        *,
+        persistent: bool,
+        phase: str,
+    ) -> None:
+        entry = self.inspection.persistent_entry if persistent else regional_entry
+        extra_arguments = (
+            (
+                f"locale={self.defaults.live_locale}",
+                f"timezone={self.defaults.live_timezone}",
+                f"systemd.timezone={self.defaults.live_timezone}",
+            )
+            if persistent
+            else ()
+        )
+        vm.start(attach_iso=True, phase=phase)
+        assert vm.qmp is not None and vm.serial is not None
+        boot_iso_with_debug_shell(
+            vm.qmp,
+            vm.serial,
+            self.architecture,
+            firmware_delay=self.options.firmware_delay_seconds,
+            menu_entry_index=(
+                1
+                if persistent
+                else self.inspection.live_entries.index(regional_entry)
+            ),
+            menu_path=((1, 1) if persistent else None),
+            kernel_arguments=entry.kernel_arguments,
+            extra_kernel_arguments=extra_arguments,
+            spice_socket=vm.spice_socket,
+        )
+        vm.serial.timeout = self.options.command_timeout_seconds
+        vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+
+    def _assert_temporary_live_overlay(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        result = vm.serial.run(
+            r"""
+set -euo pipefail
+test ! -e /dev/disk/by-label/ANDUINOS-PERSIST
+root_options=$(findmnt -n -o OPTIONS /)
+upperdir=$(printf '%s\n' "$root_options" | sed -n 's/.*upperdir=\([^,]*\).*/\1/p')
+test -n "$upperdir"
+upperdir=$(readlink -f "$upperdir")
+upper_fstype=$(findmnt -n -T "$upperdir" -o FSTYPE)
+printf 'mode=temporary\nroot-options=%s\nupperdir=%s\nupper-fstype=%s\n' \
+    "$root_options" "$upperdir" "$upper_fstype"
+test "$upper_fstype" = tmpfs
+"""
+        )
+        (artifacts / "live-temporary-overlay.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+
+    def _create_persistent_live_sentinel(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        result = vm.serial.run(
+            r"""
+set -euo pipefail
+device=$(readlink -f /dev/disk/by-label/ANDUINOS-PERSIST)
+test -b "$device"
+test "$(blkid -s TYPE -o value "$device")" = ext4
+root_options=$(findmnt -n -o OPTIONS /)
+upperdir=$(printf '%s\n' "$root_options" | sed -n 's/.*upperdir=\([^,]*\).*/\1/p')
+test -n "$upperdir"
+upperdir=$(readlink -f "$upperdir")
+upper_source=$(findmnt -n -T "$upperdir" -o SOURCE)
+upper_source=${upper_source%%\[*}
+test "$(blkid -s LABEL -o value "$upper_source")" = ANDUINOS-PERSIST
+test ! -e /var/lib/anduinos-acceptance-live-persistence
+printf '%s\n' 'anduinos-persistent-live-v1' \
+    > /var/lib/anduinos-acceptance-live-persistence
+sync
+printf 'mode=persistent-first-boot\ndevice=%s\nupperdir=%s\nupper-source=%s\n' \
+    "$device" "$upperdir" "$upper_source"
+"""
+        )
+        (artifacts / "live-persistent-first-boot.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+
+    def _assert_persistent_live_sentinel(
+        self,
+        vm: QemuVm,
+        artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        result = vm.serial.run(
+            r"""
+set -euo pipefail
+device=$(readlink -f /dev/disk/by-label/ANDUINOS-PERSIST)
+test -b "$device"
+test "$(blkid -s TYPE -o value "$device")" = ext4
+grep -Fxq 'anduinos-persistent-live-v1' \
+    /var/lib/anduinos-acceptance-live-persistence
+root_options=$(findmnt -n -o OPTIONS /)
+upperdir=$(printf '%s\n' "$root_options" | sed -n 's/.*upperdir=\([^,]*\).*/\1/p')
+upperdir=$(readlink -f "$upperdir")
+upper_source=$(findmnt -n -T "$upperdir" -o SOURCE)
+upper_source=${upper_source%%\[*}
+test "$(blkid -s LABEL -o value "$upper_source")" = ANDUINOS-PERSIST
+printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\nupper-source=%s\n' \
+    "$device" "$upperdir" "$upper_source"
+"""
+        )
+        (artifacts / "live-persistent-second-boot.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
 
     def _run_installer_driver(
         self,

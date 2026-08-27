@@ -26,7 +26,7 @@ Installation instructions and system requirements are available in the
 
 This repository contains the scripts that assemble the AnduinOS live and
 installation ISO. The build starts from a minimal Ubuntu system, applies the
-ordered modifications under `mods/`, creates the Casper filesystem, and
+ordered modifications under `mods/`, creates one Dracut Live SquashFS, and
 produces the bootable image.
 
 The image supports:
@@ -34,6 +34,7 @@ The image supports:
 - amd64 systems using BIOS or UEFI;
 - arm64 systems using UEFI;
 - Secure Boot through signed GRUB and shim packages;
+- temporary Try mode and Dracut-backed persistent USB Live mode;
 - the AnduinOS desktop and native declarative installer;
 - automated installation and desktop acceptance testing under QEMU.
 
@@ -85,9 +86,10 @@ and generated evidence.
 
 ## Installer and live environment
 
-AnduinOS uses `anduinos-installer-beta`, its native declarative installer.
-Casper provides the live environment. The legacy Ubiquity integration stack is
-retired and is not included, built, or maintained by AnduinOS.
+AnduinOS uses `anduinos-installer-beta`, its native declarative installer, and
+`anduinos-live-layers` on a non-host-only Dracut image for the live environment.
+The legacy Casper, Ubiquity, and initramfs-tools stacks are retired and are not
+included, built, or maintained by AnduinOS.
 
 ## Documentation and support
 

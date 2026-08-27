@@ -265,29 +265,13 @@ def _validate_installed_region_ui_events(output: str) -> None:
             "Installed GNOME region probe did not emit one exact UI observation"
         )
     value = values[0]
-    if value.get("desktop_labels") != ["主目录", "回收站"]:
+    if value.get("application") != "gnome-shell" or value.get("markers") != [
+        {"role": "menu", "name": "系统"},
+        {"role": "toggle button", "name": "显示应用"},
+    ]:
         raise TestFailure(
-            "Installed GNOME desktop is not visibly localized to Simplified Chinese"
+            "Installed GNOME Shell is not visibly localized to Simplified Chinese"
         )
-    frame = value.get("desktop_frame")
-    if (
-        not isinstance(frame, dict)
-        or frame.get("application") != "gjs"
-        or frame.get("role") != "frame"
-        or not str(frame.get("name", "")).startswith("Desktop Icons")
-    ):
-        raise TestFailure(
-            "Installed region evidence did not come from the real DING desktop"
-        )
-    bounds = frame.get("bounds")
-    if (
-        not isinstance(bounds, list)
-        or len(bounds) != 4
-        or any(isinstance(item, bool) or not isinstance(item, int) for item in bounds)
-        or bounds[2] < 640
-        or bounds[3] < 400
-    ):
-        raise TestFailure("Installed region evidence has no usable desktop bounds")
 
 
 __all__ = tuple(name for name in globals() if not name.startswith("__"))

@@ -34,11 +34,18 @@ declared desktop check without an implementation is a unit-test failure. The
 runner also fails unless every selected installation and suite produces a
 verdict.
 
+The installation matrix boots temporary Live overlays on the original
+read-only ISO. One amd64/arm64 scenario additionally boots a writable hybrid
+copy through the real Dracut persistent menu entry, writes a sentinel, powers
+off, and boots the same media again before installation. Persistence is not
+credited from GRUB text inspection alone.
+
 ## Results
 
 Each run writes a new directory under `test-results/` containing `summary.json`,
 `junit.xml`, screenshots, serial logs, installer output, journal evidence, and
 per-check diagnostics. Disposable virtual disks and overlays are deleted after
-the run, including after interruption. Keep the result directory when filing a
-failure; its evidence identifies whether the product, host prerequisites, or an
-external service caused the failure.
+the run, including the expanded writable Live-media copy and including after
+interruption. Keep the result directory when filing a failure; its evidence
+identifies whether the product, host prerequisites, or an external service
+caused the failure.

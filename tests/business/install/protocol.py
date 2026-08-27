@@ -14,7 +14,7 @@ def _is_gnome_extension_entry(entry) -> bool:
 def _scenario_json(scenario: Scenario) -> dict[str, object]:
     value = asdict(scenario)
     value["architectures"] = [item.value for item in scenario.architectures]
-    for key in ("firmware", "network", "filesystem", "ssh"):
+    for key in ("firmware", "network", "filesystem", "live_mode", "ssh"):
         value[key] = value[key].value
     return value
 

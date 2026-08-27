@@ -51,8 +51,10 @@ def boot_iso_with_debug_shell(
     architecture: Architecture,
     *,
     firmware_delay: float,
-    menu_entry_index: int,
+    menu_entry_index: int = 0,
+    menu_path: tuple[int, int] | None = None,
     kernel_arguments: tuple[str, ...] = (),
+    extra_kernel_arguments: tuple[str, ...] = (),
     spice_socket: Path | None = None,
 ) -> None:
     """Edit and boot the ISO's real locale menuentry.
@@ -64,17 +66,35 @@ def boot_iso_with_debug_shell(
     the GPU stays present for GNOME.
     """
 
-    if not 0 <= menu_entry_index < 28:
-        raise ProtocolError(f"Unsafe ISO GRUB menu index: {menu_entry_index}")
+    if menu_path is None:
+        menu_path = (0, menu_entry_index)
+    top_index, child_index = menu_path
+    if not (
+        (top_index == 0 and 0 <= child_index < 28)
+        or (top_index == 1 and 0 <= child_index < 3)
+    ):
+        raise ProtocolError(f"Unsafe ISO GRUB menu path: {menu_path}")
+    suffix = (
+        (" " + " ".join(extra_kernel_arguments))
+        if extra_kernel_arguments
+        else ""
+    ) + debug_kernel_arguments(architecture)
     if uses_graphical_grub_synchronization(architecture):
         time.sleep(firmware_delay)
         editor = _GraphicalGrubMenuEditor(qmp)
         try:
             editor.wait_for_top_menu(timeout=30)
             editor.cancel_timeout()
-            editor.enter_language_submenu()
-            for _ in range(menu_entry_index):
-                editor.move_selection_down()
+            if top_index == 0:
+                editor.enter_language_submenu()
+            else:
+                for _ in range(top_index):
+                    editor.move_top_selection_down()
+                editor.enter_advanced_submenu()
+            for _ in range(child_index):
+                editor.move_selection_down(
+                    minimum_visible_unselected_entries=(8 if top_index == 0 else 0)
+                )
             editor.open_editor()
             # Each ISO locale entry has setparams, a blank row, gfxpayload,
             # linux and initrd. Three Down presses place the cursor on linux;
@@ -82,7 +102,7 @@ def boot_iso_with_debug_shell(
             for _ in range(3):
                 editor.move_editor_cursor_down()
             editor.move_editor_cursor_to_end()
-            editor.type_text_verified(debug_kernel_arguments(architecture))
+            editor.type_text_verified(suffix)
             qmp.send_key("f10", hold_ms=150)
         finally:
             editor.close()
@@ -94,12 +114,19 @@ def boot_iso_with_debug_shell(
         item for item in kernel_arguments if item not in {"quiet", "splash", "---"}
     )
     if not arguments:
-        arguments = ("boot=casper", "nopersistent")
+        arguments = (
+            "root=live:CDLABEL=anduinos",
+            "rd.live.dir=LiveOS",
+            "rd.live.squashimg=rootfs.squashfs",
+            "rd.overlay",
+            "rd.anduinos.live=1",
+        )
+    arguments += extra_kernel_arguments
     commands = (
-        "linux /casper/vmlinuz "
+        "linux /LiveOS/vmlinuz "
         + " ".join(arguments)
         + debug_kernel_arguments(architecture),
-        "initrd /casper/initrd",
+        "initrd /LiveOS/initrd",
     )
     started = time.monotonic()
     console.wait_for_text("BdsDxe: starting Boot", timeout=120)
@@ -344,6 +371,20 @@ class _GraphicalGrubMenuEditor:
             time.sleep(0.1)
         raise ProtocolError("GRUB did not enter the language submenu")
 
+    def enter_advanced_submenu(self) -> None:
+        if self.current_frame is None:
+            raise ProtocolError("Graphical GRUB menu was not synchronized")
+        self.qmp.send_key("ret")
+        deadline = time.monotonic() + 30
+        while time.monotonic() < deadline:
+            frame = self.capture()
+            layout = grub_menu_layout(frame)
+            if layout is not None and layout.visible_unselected_entries == 2:
+                self.current_frame = frame
+                return
+            time.sleep(0.1)
+        raise ProtocolError("GRUB did not enter the advanced submenu")
+
     def cancel_timeout(self) -> None:
         """Cancel GRUB's countdown and restore the first top-level entry."""
 
@@ -383,7 +424,23 @@ class _GraphicalGrubMenuEditor:
             time.sleep(0.1)
         raise ProtocolError(error)
 
-    def move_selection_down(self) -> None:
+    def move_top_selection_down(self) -> None:
+        if self.current_frame is None:
+            raise ProtocolError("Graphical GRUB menu was not synchronized")
+        previous = grub_menu_layout(self.current_frame)
+        if previous is None or previous.visible_unselected_entries > 6:
+            raise ProtocolError("Current framebuffer is not the top GRUB menu")
+        self.qmp.send_key("down")
+        self._wait_for_top_menu_highlight(
+            lambda layout: layout.highlight_center != previous.highlight_center,
+            "GRUB top-level selection did not move",
+        )
+
+    def move_selection_down(
+        self,
+        *,
+        minimum_visible_unselected_entries: int = 8,
+    ) -> None:
         if self.current_frame is None:
             raise ProtocolError("Graphical GRUB submenu was not synchronized")
         previous = grub_menu_layout(self.current_frame)
@@ -396,13 +453,14 @@ class _GraphicalGrubMenuEditor:
             layout = grub_menu_layout(frame)
             if (
                 layout is not None
-                and layout.visible_unselected_entries >= 8
+                and layout.visible_unselected_entries
+                >= minimum_visible_unselected_entries
                 and layout.highlight_center != previous.highlight_center
             ):
                 self.current_frame = frame
                 return
             time.sleep(0.1)
-        raise ProtocolError("GRUB language selection did not move")
+        raise ProtocolError("GRUB submenu selection did not move")
 
     def open_editor(self) -> None:
         if self.current_frame is None:
@@ -466,12 +524,24 @@ class _GraphicalGrubMenuEditor:
                 raise ProtocolError("GRUB editor cursor was not visible before Down")
         previous_y = self._editor_cursor_y
         assert previous_y is not None
+        before = self.current_frame
         self.qmp.send_key("down")
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             frame = self.capture()
             current_y = grub_editor_left_cursor_y(frame)
-            if current_y is not None and current_y >= previous_y + 8:
+            # A wrapped kernel argument can contain a unique underline-like
+            # glyph stroke in the left command column.  If the real blinking
+            # cursor was absent from the baseline frame, that later stroke can
+            # become the static oracle's best candidate and have a greater Y
+            # coordinate than the real cursor after Down.  Direction is not a
+            # reliable property of two independently observed candidates;
+            # require an actual position change plus a framebuffer repaint.
+            if (
+                current_y is not None
+                and current_y != previous_y
+                and grub_frame_difference(before, frame) >= 8
+            ):
                 self.current_frame = frame
                 self._editor_cursor_y = current_y
                 return
@@ -484,13 +554,20 @@ class _GraphicalGrubMenuEditor:
         if self.current_frame is None or self._editor_cursor_y is None:
             raise ProtocolError("GRUB editor cursor is not synchronized")
         before = self.current_frame
+        previous_y = self._editor_cursor_y
         self.qmp.send_key("end")
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             frame = self.capture()
+            observed_left_y = grub_editor_left_cursor_y(frame)
             if (
                 grub_editor_layout(frame) is not None
-                and grub_editor_left_cursor_y(frame) is None
+                # Wrapped kernel arguments start again in GRUB's left command
+                # column.  A unique stroke in that text can resemble the
+                # underline cursor, so require the cursor to leave its exact
+                # pre-End row instead of requiring the entire column to have
+                # no cursor-like strokes at all.
+                and observed_left_y != previous_y
                 and grub_frame_difference(before, frame) >= 8
             ):
                 self.current_frame = frame

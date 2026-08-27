@@ -182,7 +182,7 @@ function umount_folders() {
 function prepare_iso_directory() {
     print_ok "Creating image directory..."
     sudo rm -rf image
-    mkdir -p image/{casper,isolinux,.disk}
+    mkdir -p image/{LiveOS,isolinux,.disk}
     judge "Create image directory"
 }
 
@@ -209,29 +209,23 @@ function prepare_live_grub_font() {
 function build_iso() {
     print_ok "Building ISO image..."
 
-    # copy kernel files
-    print_ok "Copying kernel files as /casper/vmlinuz, /casper/initrd and /casper/initrd.gz..."
+    # Copy the kernel and the separately-built non-host-only Live initrd.
+    print_ok "Copying the Dracut Live boot artifacts to /LiveOS..."
     # Resolve the distro-maintained symlinks — they always point to the
     # current kernel, so we never pick a stale one left behind by apt.
     REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz 2>/dev/null)
     [ -f "$REAL_VMLINUZ" ] || REAL_VMLINUZ=$(readlink -f new_building_os/boot/vmlinuz 2>/dev/null)
-    REAL_INITRD=$(readlink -f new_building_os/initrd.img 2>/dev/null)
-    [ -f "$REAL_INITRD" ] || REAL_INITRD=$(readlink -f new_building_os/boot/initrd.img 2>/dev/null)
+    REAL_INITRD="new_building_os/boot/anduinos-live-initrd.img"
     if [ -z "$REAL_VMLINUZ" ] || [ ! -f "$REAL_VMLINUZ" ]; then
         print_error "No kernel found via vmlinuz symlink in new_building_os/"
         exit 1
     fi
     if [ -z "$REAL_INITRD" ] || [ ! -f "$REAL_INITRD" ]; then
-        print_error "No initramfs found via initrd.img symlink in new_building_os/"
+        print_error "The dedicated Dracut Live initrd is missing"
         exit 1
     fi
-    sudo cp "$REAL_VMLINUZ" image/casper/vmlinuz
-    # Keep both names for remix compatibility:
-    # - Legacy BIOS core.img may embed "/casper/initrd"
-    # - Some remix tools (e.g. Cubic) may rewrite text grub.cfg to "/casper/initrd.gz"
-    # Having both avoids boot mismatch between BIOS and UEFI paths.
-    sudo cp "$REAL_INITRD" image/casper/initrd
-    sudo cp "$REAL_INITRD" image/casper/initrd.gz
+    sudo cp "$REAL_VMLINUZ" image/LiveOS/vmlinuz
+    sudo cp "$REAL_INITRD" image/LiveOS/initrd
     judge "Copy kernel files"
 
     print_ok "Generating grub.cfg..."
@@ -239,9 +233,9 @@ function build_iso() {
     cp "$SCRIPT_DIR/args.sh" "image/$TARGET_NAME"
     judge "Copy build args to disk"
 
-    # Configurations are set up in new_building_os/usr/share/initramfs-tools/scripts/casper-bottom/25configure_init
     TRY_TEXT="Try or Install $TARGET_BUSINESS_NAME"
     TOGO_TEXT="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
+    LIVE_BOOT_ARGS="root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
 
     # Build locale submenu entries for Try mode.
     # Each entry also derives a best-guess timezone so the live session
@@ -287,8 +281,8 @@ function build_iso() {
         _TRY_LOCALE_ENTRIES="$_TRY_LOCALE_ENTRIES
     menuentry \"$_label\" {
         set gfxpayload=auto
-        linux   /casper/vmlinuz boot=casper locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} nopersistent quiet splash ---
-        initrd  /casper/initrd
+        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} quiet splash ---
+        initrd  /LiveOS/initrd
     }"
     done <<< "$SUPPORTED_LOCALES"
 
@@ -316,18 +310,18 @@ $_TRY_LOCALE_ENTRIES
 submenu "Advanced Options..." {
     menuentry "$TRY_TEXT (Safe Graphics)" {
         set gfxpayload=auto
-        linux   /casper/vmlinuz boot=casper nopersistent nomodeset ---
-        initrd  /casper/initrd
+        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS nomodeset ---
+        initrd  /LiveOS/initrd
     }
     menuentry "$TOGO_TEXT" {
         set gfxpayload=auto
-        linux   /casper/vmlinuz boot=casper persistent quiet splash ---
-        initrd  /casper/initrd
+        linux   /LiveOS/vmlinuz root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
+        initrd  /LiveOS/initrd
     }
     menuentry "Check installation media for defects (Integrity Check)" {
         set gfxpayload=auto
-        linux   /casper/vmlinuz boot=casper integrity-check quiet splash ---
-        initrd  /casper/initrd
+        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS rd.live.check=1 quiet splash ---
+        initrd  /LiveOS/initrd
     }
 }
 
@@ -345,32 +339,33 @@ EOF
 
     # generate manifest
     print_ok "Generating manifest for filesystem..."
-    sudo chroot new_building_os dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee image/casper/filesystem.manifest >/dev/null 2>&1
+    sudo chroot new_building_os dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee image/LiveOS/filesystem.manifest >/dev/null 2>&1
     judge "Generate manifest for filesystem"
     judge "Generate manifest for filesystem-desktop"
 
-    print_ok "Compressing rootfs as squashfs on /casper/filesystem.squashfs..."
-    sudo mksquashfs new_building_os image/casper/filesystem.squashfs \
+    print_ok "Compressing the single root filesystem as /LiveOS/rootfs.squashfs..."
+    sudo mksquashfs new_building_os image/LiveOS/rootfs.squashfs \
         -noappend -no-duplicates -no-recovery \
         -wildcards -b 1M \
         -comp zstd -Xcompression-level 19 \
         -e "var/cache/apt/archives/*" \
         -e "tmp/*" \
         -e "tmp/.*" \
+        -e "boot/anduinos-live-initrd.img" \
         -e "swapfile"
     judge "Compress rootfs"
 
-    print_ok "Verifying the integrity of filesystem.squashfs..."
-    if sudo unsquashfs -s image/casper/filesystem.squashfs; then
+    print_ok "Verifying the integrity of rootfs.squashfs..."
+    if sudo unsquashfs -s image/LiveOS/rootfs.squashfs; then
         print_ok "Verification successful. The file appears to be valid."
     else
         print_error "Verification FAILED! The squashfs file is likely corrupt."
         exit 1
     fi
     
-    print_ok "Generating filesystem.size on /casper/filesystem.size..."
+    print_ok "Generating filesystem.size on /LiveOS/filesystem.size..."
     filesystem_size=$(sudo du -sx --block-size=1 new_building_os | cut -f1)
-    printf '%s\n' "$filesystem_size" > image/casper/filesystem.size
+    printf '%s\n' "$filesystem_size" > image/LiveOS/filesystem.size
     judge "Generate filesystem.size"
 
     print_ok "Generating README.diskdefines..."
@@ -424,20 +419,78 @@ EOF
     pushd image
     print_ok "Creating EFI boot image on /isolinux/efiboot.img..."
     (
-        cd isolinux && \
-        dd if=/dev/zero of=efiboot.img bs=1M count=10 && \
-        sudo mkfs.vfat efiboot.img && \
-        mkdir efi && \
-        sudo mount efiboot.img efi
+        cd isolinux
+        dd if=/dev/zero of=efiboot.img bs=1M count=10
+        mkfs.vfat efiboot.img
 
-        if ! sudo grub-install --target="$GRUB_EFI_TARGET" --efi-directory=efi --boot-directory=boot --uefi-secure-boot --removable --no-nvram; then
+        if [ "$TARGET_ARCH" = arm64 ]; then
+            target_root="$SCRIPT_DIR/new_building_os"
+            arm64_shim="$target_root/usr/lib/shim/shimaa64.efi.signed.latest"
+            arm64_grub="$target_root/usr/lib/grub/arm64-efi-signed/gcdaa64.efi.signed"
+            arm64_mok="$target_root/usr/lib/shim/mmaa64.efi"
+            for required in \
+                "$arm64_shim" \
+                "$arm64_grub" \
+                "$arm64_mok"; do
+                if [ ! -s "$required" ] || \
+                    ! sbverify --list "$required" >/dev/null 2>&1; then
+                    print_error "ARM64 target root is missing EFI payload: $required"
+                    exit 1
+                fi
+            done
+
+            # The signed Canonical config-delivery GRUB image already embeds
+            # FAT, ISO9660, GPT, search and configfile support. Build the
+            # removable-media ESP directly from the completed ARM64 target;
+            # this avoids installing a foreign shim package that conflicts
+            # with an amd64 build host's own bootloader.
+            cat > arm64-grub.cfg <<EOF
+search --no-floppy --label --set=anduinos_iso $TARGET_NAME
+set prefix=(\$anduinos_iso)/boot/grub
+configfile \$prefix/grub.cfg
+EOF
+            printf 'shimaa64.efi,%s,,This is the boot entry for %s\n' \
+                "$TARGET_BUSINESS_NAME" "$TARGET_BUSINESS_NAME" \
+                | iconv -f UTF-8 -t UTF-16LE > BOOTAA64.CSV
+
+            mmd -i efiboot.img ::/EFI ::/EFI/BOOT
+            mcopy -i efiboot.img "$arm64_shim" ::/EFI/BOOT/BOOTAA64.EFI
+            mcopy -i efiboot.img "$arm64_grub" ::/EFI/BOOT/grubaa64.efi
+            mcopy -i efiboot.img "$arm64_mok" ::/EFI/BOOT/mmaa64.efi
+            mcopy -i efiboot.img BOOTAA64.CSV ::/EFI/BOOT/BOOTAA64.CSV
+            mcopy -i efiboot.img arm64-grub.cfg ::/EFI/BOOT/grub.cfg
+            rm -f BOOTAA64.CSV arm64-grub.cfg
+        else
+            mkdir efi boot
+            sudo mount efiboot.img efi
+            if ! sudo grub-install \
+                --target="$GRUB_EFI_TARGET" \
+                --efi-directory=efi \
+                --boot-directory=boot \
+                --uefi-secure-boot \
+                --removable \
+                --no-nvram; then
+                sudo umount efi
+                print_error "grub-install failed!"
+                exit 1
+            fi
+
+            for signed_payload in \
+                EFI/BOOT/BOOTX64.EFI \
+                EFI/BOOT/grubx64.efi \
+                EFI/BOOT/mmx64.efi; do
+                if [ ! -s "efi/$signed_payload" ] || \
+                    ! sbverify --list "efi/$signed_payload" >/dev/null 2>&1; then
+                    sudo umount efi
+                    print_error "EFI payload is absent or unsigned: $signed_payload"
+                    exit 1
+                fi
+            done
             sudo umount efi
-            print_error "grub-install failed!"
-            exit 1
+            rm -rf efi
         fi
 
-        sudo umount efi && \
-        rm -rf efi
+        fsck.vfat -vn efiboot.img
     )
     judge "Create EFI boot image"
 
@@ -480,6 +533,7 @@ EOF
             -iso-level 3 \
             -full-iso9660-filenames \
             -volid "$TARGET_NAME" \
+            -partition_offset 16 \
             -eltorito-boot boot/grub/bios.img \
                 -no-emul-boot \
                 -boot-load-size 4 \
@@ -507,6 +561,7 @@ EOF
             -iso-level 3 \
             -full-iso9660-filenames \
             -volid "$TARGET_NAME" \
+            -partition_offset 16 \
             -e EFI/efiboot.img \
             -no-emul-boot \
             -append_partition 2 0xef isolinux/efiboot.img \
@@ -520,6 +575,14 @@ EOF
     fi
 
     judge "Create iso image"
+
+    if ! command -v implantisomd5 >/dev/null 2>&1; then
+        print_error "implantisomd5 is required; install the isomd5sum build dependency"
+        exit 1
+    fi
+    print_ok "Embedding the Dracut rd.live.check media checksum..."
+    sudo implantisomd5 --force "$SCRIPT_DIR/$TARGET_NAME.iso"
+    judge "Embed ISO media checksum"
 
     print_ok "Moving iso image to $SCRIPT_DIR/dist/$TARGET_BUSINESS_NAME-$TARGET_BUILD_VERSION-$DATE.iso..."
     mkdir -p "$SCRIPT_DIR/dist"

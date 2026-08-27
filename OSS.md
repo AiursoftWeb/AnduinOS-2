@@ -25,7 +25,6 @@ This document lists the open source projects that AnduinOS incorporates, derives
 | **systemd** | [github.com/systemd/systemd](https://github.com/systemd/systemd) | LGPL-2.1-or-later |
 | **dracut** | [github.com/dracutdevs/dracut](https://github.com/dracutdevs/dracut) | GPL-2.0-or-later |
 | **BusyBox** | [busybox.net](https://busybox.net/) | GPL-2.0-only |
-| **initramfs-tools** | [salsa.debian.org/kernel-team/initramfs-tools](https://salsa.debian.org/kernel-team/initramfs-tools) | GPL-2.0-or-later |
 | **efibootmgr** | [github.com/rhboot/efibootmgr](https://github.com/rhboot/efibootmgr) | GPL-2.0-or-later |
 
 ---
@@ -391,8 +390,7 @@ These tools are used during the package build process and are not shipped in the
 
 | Project | Homepage / Repository | License |
 |---------|----------------------|---------|
-| **Ubiquity** (Ubuntu Installer) | [launchpad.net/ubiquity](https://launchpad.net/ubiquity) | GPL-2.0-or-later |
-| **Casper** (Live System) | [launchpad.net/ubuntu/+source/casper](https://launchpad.net/ubuntu/+source/casper) | GPL-2.0-or-later |
+| **AnduinOS Native Installer and Live Layers** | [github.com/AiursoftWeb/AnduinOS-Packages](https://github.com/AiursoftWeb/AnduinOS-Packages) | GPL-3.0-or-later |
 
 ---
 
@@ -575,6 +573,7 @@ anduinos-desktop 2.0.2-1+resolute
 anduinos-desktop-apps 2.0.2-1+resolute
 anduinos-desktop-core 2.0.2-1+resolute
 anduinos-driver-center 2.0.2-1+resolute
+anduinos-dracut-migration 2.0.2-1+resolute
 anduinos-exe-runner 2.0.2-1+resolute
 anduinos-fluent-gtk-theme 2.0.2-1+resolute
 anduinos-fluent-icon-theme 2.0.2-1+resolute
@@ -585,6 +584,7 @@ anduinos-gnome-shell-locale 2.0.2-1+resolute
 anduinos-grub-style 2.0.2-1+resolute
 anduinos-installer-beta 2.0.2-2+resolute
 anduinos-kernel-parameters 2.0.2-1+resolute
+anduinos-live-layers 2.0.2-1+resolute
 anduinos-live-settings 2.0.2-1+resolute
 anduinos-mimeapps 2.0.2-1+resolute
 anduinos-no-snapd 2.0.2-1+resolute
@@ -636,11 +636,9 @@ bsdextrautils 2.41.3-3ubuntu2
 bsdutils 1:2.41.3-3ubuntu2
 btrfs-progs 6.17.1-1build1
 bubblewrap 0.11.1-1ubuntu0.1
-busybox-initramfs 1:1.37.0-7ubuntu1
 busybox-static 1:1.37.0-7ubuntu1
 bzip2 1.0.8-6build2
 ca-certificates 20260601~26.04.1
-casper 26.04.2
 celluloid 0.29-3
 cifs-utils 2:7.4-1ubuntu0.26.04.3
 colord 1.4.8-3
@@ -700,6 +698,8 @@ dnsmasq-base 2.92-1ubuntu0.4
 docbook-xml 4.5-13build1
 dosfstools 4.2-1.2build1
 dpkg 1.23.7ubuntu1
+dracut 110-11
+dracut-core 110-11
 dracut-install 110-11
 e2fsprogs 1.47.2-3ubuntu4
 eatmydata 131-2build1
@@ -719,7 +719,6 @@ ffmpegthumbnailer 2.3.0-1
 fido2-tools 1.16.0-2build1
 file 1:5.46-5build2
 file-roller 44.6-3
-finalrd 9build2
 findutils 4.10.0-3build2
 firefox-anduinos 1:2.0.2+154.0~build1-1+resolute
 firmware-sof-anduinos 2.0.2-1+resolute-addon
@@ -938,9 +937,6 @@ iio-sensor-proxy 3.8-1
 im-config 0.62
 init 1.69
 init-system-helpers 1.69
-initramfs-tools 0.151ubuntu1
-initramfs-tools-bin 0.151ubuntu1
-initramfs-tools-core 0.151ubuntu1
 intel-microcode 3.20260210.1ubuntu2
 ipp-usb 0.9.31-1
 iproute2 6.19.0-1ubuntu1.1

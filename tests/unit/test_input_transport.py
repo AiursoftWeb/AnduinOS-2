@@ -622,6 +622,38 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
         with self.assertRaisesRegex(ProtocolError, "guest agent"):
             client._require_agent()
 
+    def test_spice_pointer_mapping_settles_then_revalidates_readiness(self):
+        client = SpiceInputClient.__new__(SpiceInputClient)
+        client._main = Mock()
+        client._main.get_property.side_effect = lambda name: {
+            "mouse-mode": 2,
+            "agent-connected": True,
+        }[name]
+        client._run_for = Mock()
+
+        client._settle_pointer_mapping()
+
+        client._run_for.assert_called_once_with(1.0)
+        self.assertEqual(
+            [call("agent-connected"), call("mouse-mode")],
+            client._main.get_property.call_args_list,
+        )
+
+    def test_spice_pointer_mapping_rejects_agent_loss_during_settle(self):
+        client = SpiceInputClient.__new__(SpiceInputClient)
+        client._main = Mock()
+        client._main.get_property.side_effect = lambda name: {
+            "mouse-mode": 2,
+            "agent-connected": False,
+        }[name]
+        client._run_for = Mock()
+
+        with self.assertRaisesRegex(ProtocolError, "guest agent"):
+            client._settle_pointer_mapping()
+
+        client._run_for.assert_called_once_with(1.0)
+        client._main.get_property.assert_called_once_with("agent-connected")
+
     def test_spice_boot_keyboard_uses_strict_set1_scancodes_without_agent(self):
         client = SpiceInputClient.__new__(SpiceInputClient)
         client._inputs = Mock()
@@ -962,12 +994,12 @@ class SerialTransportTests(unittest.TestCase):
             console._log = transcript.open("ab", buffering=0)
             try:
                 console.send_bootloader_line(
-                    "linux /casper/vmlinuz locale=zh_CN.UTF-8 "
+                    "linux /LiveOS/vmlinuz locale=zh_CN.UTF-8 "
                     "console=ttyAMA0,115200 "
                     "systemd.mask=serial-getty@ttyAMA0.service"
                 )
                 self.assertEqual(
-                    b"linux /casper/vmlinuz locale=zh_CN.UTF-8 "
+                    b"linux /LiveOS/vmlinuz locale=zh_CN.UTF-8 "
                     b"console=ttyAMA0,115200 "
                     b"systemd.mask=serial-getty@ttyAMA0.service\n",
                     writer.recv(4096),
@@ -1103,9 +1135,11 @@ class SerialTransportTests(unittest.TestCase):
             source.write_bytes(b"X" * (1024 * 1024))
             console = _UploadCaptureConsole()
             console.upload(source, "/tmp/fixture.AppImage", 0o755)
-        self.assertGreater(len(console.scripts), 20)
-        self.assertLess(max(map(len, console.scripts)), 70000)
-        self.assertTrue(console.scripts[0].startswith(": > "))
+        self.assertGreater(len(console.scripts), 1000)
+        self.assertLess(max(map(len, console.scripts)), 3000)
+        self.assertIn(": > ", console.scripts[0])
+        self.assertIn("if [ \"$current\" -eq \"$next\" ]", console.scripts[1])
+        self.assertIn("sha256sum", console.scripts[1])
         self.assertIn("chmod 755", console.scripts[-1])
         self.assertIn("mv ", console.scripts[-1])
 
@@ -1276,6 +1310,7 @@ class VisualOracleTests(unittest.TestCase):
                 "framework.grub.grub_editor_left_cursor_y",
                 side_effect=[None] * 12 + [112],
             ),
+            patch("framework.grub.grub_frame_difference", return_value=24),
         ):
             editor.move_editor_cursor_down()
 
@@ -1301,11 +1336,33 @@ class VisualOracleTests(unittest.TestCase):
                 "framework.grub.grub_editor_left_cursor_y",
                 side_effect=[None, 80, 112],
             ),
+            patch("framework.grub.grub_frame_difference", return_value=24),
         ):
             editor.move_editor_cursor_down()
 
         editor.qmp.send_key.assert_called_once_with("down")
         self.assertEqual(112, editor._editor_cursor_y)
+
+    def test_grub_editor_down_accepts_real_cursor_above_false_static_baseline(self):
+        editor = object.__new__(_GraphicalGrubMenuEditor)
+        editor.qmp = Mock()
+        editor.current_frame = Path("false-static-baseline.ppm")
+        editor._editor_cursor_y = 184
+        editor.capture = Mock(return_value=Path("real-cursor-113.ppm"))
+        ticks = iter(range(100))
+
+        with (
+            patch("framework.grub.time.monotonic", side_effect=lambda: next(ticks)),
+            patch("framework.grub.time.sleep"),
+            patch("framework.grub.grub_editor_layout", return_value=SimpleNamespace()),
+            patch("framework.grub.grub_editor_left_cursor_y", return_value=113),
+            patch("framework.grub.grub_frame_difference", return_value=24),
+        ):
+            editor.move_editor_cursor_down()
+
+        editor.qmp.send_key.assert_called_once_with("down")
+        self.assertEqual(113, editor._editor_cursor_y)
+        self.assertEqual(Path("real-cursor-113.ppm"), editor.current_frame)
 
     def test_grub_editor_end_waits_for_left_cursor_to_disappear(self):
         editor = object.__new__(_GraphicalGrubMenuEditor)
@@ -1336,6 +1393,40 @@ class VisualOracleTests(unittest.TestCase):
         editor.qmp.send_key.assert_called_once_with("end")
         self.assertIsNone(editor._editor_cursor_y)
         self.assertEqual(Path("cursor-end.ppm"), editor.current_frame)
+
+    def test_grub_editor_end_ignores_cursor_like_stroke_on_wrapped_row(self):
+        editor = object.__new__(_GraphicalGrubMenuEditor)
+        editor.qmp = Mock()
+        editor.current_frame = Path("cursor-left.ppm")
+        editor._editor_cursor_y = 151
+        editor.capture = Mock(return_value=Path("cursor-end-wrapped.ppm"))
+        ticks = iter(range(100))
+
+        with (
+            patch("framework.grub.time.monotonic", side_effect=lambda: next(ticks)),
+            patch("framework.grub.time.sleep"),
+            patch("framework.grub.grub_editor_layout", return_value=SimpleNamespace()),
+            patch("framework.grub.grub_editor_left_cursor_y", return_value=184),
+            patch("framework.grub.grub_frame_difference", return_value=24),
+        ):
+            editor.move_editor_cursor_to_end()
+
+        editor.qmp.send_key.assert_called_once_with("end")
+        self.assertIsNone(editor._editor_cursor_y)
+        self.assertEqual(Path("cursor-end-wrapped.ppm"), editor.current_frame)
+
+    def test_installer_disk_selection_excludes_live_media_partitions(self):
+        source = (ROOT / "assertions/guest/ui/installer.py").read_text(
+            encoding="utf-8"
+        )
+        body = source.split('wait_page("disk", 120)', 1)[1].split(
+            'wait_page("strategy")', 1
+        )[0]
+        self.assertIn(r"^/dev/(?:vda|nvme\d+n\d+)\s+·", body)
+        self.assertNotIn('"/dev/sda"', body)
+        self.assertIn('role(item) not in {"toggle button", "button"}', body)
+        self.assertNotIn('"table cell"', body)
+        self.assertIn('selection_method="atspi-action"', body)
 
     def test_grub_verified_typing_waits_for_every_character_repaint(self):
         editor = object.__new__(_GraphicalGrubMenuEditor)
@@ -1374,8 +1465,8 @@ class VisualOracleTests(unittest.TestCase):
             draw.rectangle((12, 67, 1267, 675), outline=(190, 190, 190), width=2)
             draw.text((14, 82), "setparams 'Simplified Chinese'", fill="white")
             draw.text((80, 120), "set gfxpayload=auto", fill="white")
-            draw.text((80, 140), "linux /casper/vmlinuz", fill="white")
-            draw.text((80, 160), "initrd /casper/initrd", fill="white")
+            draw.text((80, 140), "linux /LiveOS/vmlinuz", fill="white")
+            draw.text((80, 160), "initrd /LiveOS/initrd", fill="white")
             image.save(frame)
             image_without_cursor = Image.new("RGB", (1280, 800), "black")
             ImageDraw.Draw(image_without_cursor).rectangle(
@@ -1405,7 +1496,7 @@ class VisualOracleTests(unittest.TestCase):
             wrapped_draw = ImageDraw.Draw(wrapped_image)
             wrapped_draw.text(
                 (80, 180),
-                "timezone=Asia/Shanghai nopersistent quiet splash ---",
+                "timezone=Asia/Shanghai rd.overlay quiet splash ---",
                 fill="white",
             )
             wrapped_image.save(wrapped)
@@ -1546,4 +1637,3 @@ class VisualOracleTests(unittest.TestCase):
             frame_path = root / "frame.ppm"
             Image.new("RGB", (640, 480), "black").save(frame_path)
             self.assertFalse(plymouth_match(frame_path, watermark_path)["matched"])
-

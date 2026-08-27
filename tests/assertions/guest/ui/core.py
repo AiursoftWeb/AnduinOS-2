@@ -263,6 +263,27 @@ def visible_nodes():
     return tuple(item for item in walk(desktop()) if showing(item))
 
 
+def visible_application_nodes(application_name: str):
+    """Return visible nodes from one real AT-SPI application only.
+
+    First boot can expose GNOME Shell, OOBE, and desktop extensions at the
+    same time.  A temporarily incomplete cache in one application must not
+    prevent a contract about another application from being observed.
+    """
+
+    roots = [
+        item
+        for item in children(desktop())
+        if name(item) == application_name
+    ]
+    return tuple(
+        item
+        for root in roots
+        for item in walk(root)
+        if showing(item)
+    )
+
+
 def find(
     key: str,
     *,

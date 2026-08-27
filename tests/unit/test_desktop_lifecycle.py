@@ -4,6 +4,20 @@ from unit.support import *  # noqa: F403
 
 
 class DesktopLifecycleOracleTests(FeatureOracleCase):
+    def test_spice_guest_agent_cannot_stall_reboot_for_the_vendor_timeout(self):
+        script = (
+            ROOT.parent
+            / "mods/84-spice-vdagent-shutdown/install.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn("dpkg-query -W", script)
+        self.assertIn("spice-vdagent", script)
+        self.assertIn(
+            "/etc/systemd/system/spice-vdagentd.service.d",
+            script,
+        )
+        self.assertIn("TimeoutStopSec=15s", script)
+        self.assertNotIn("/usr/lib/systemd/system/spice-vdagentd.service <<", script)
+
     def test_ordinary_reboot_oracle_rejects_a_reused_boot_id(self):
         _validate_distinct_boot_ids("first", "second")
         with self.assertRaisesRegex(TestFailure, "distinct boot ID"):
@@ -370,6 +384,16 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         self.assertTrue(
             all(call.kwargs["timeout"] <= 15 for call in runner._ssh.call_args_list)
         )
+
+    def test_ssh_eventually_fails_immediately_when_qemu_has_exited(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        runner._ssh = Mock(side_effect=AssertionError("SSH must not be attempted"))
+        vm = SimpleNamespace(process=SimpleNamespace(poll=lambda: 0))
+
+        with self.assertRaisesRegex(TestFailure, "QEMU exited.*exit code 0"):
+            runner._ssh_eventually(vm, Path("control-key"), "true", timeout=1200)
+
+        runner._ssh.assert_not_called()
 
     def test_stalled_btrfs_power_transition_retains_diagnostics(self):
         class Clock:

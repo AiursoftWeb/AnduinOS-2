@@ -18,12 +18,13 @@ from framework.feature_model import FeatureSuiteRegistry
 from .desktop import FeatureSuiteResult, FeatureSuiteRunner
 from framework.firmware import FirmwareOverrides, resolve_firmware
 from framework.iso import inspect_iso
-from framework.model import Architecture, TestMatrix
-from framework.qemu import resolve_qemu
+from framework.model import Architecture, LiveMode, TestMatrix
+from framework.qemu import PERSISTENT_LIVE_FREE_SPACE_GIB, resolve_qemu
 from framework.reporting import write_junit_report
 from .install import RunnerOptions, ScenarioRunner, scenario_check_ids
 from framework.storage import (
     DEFAULT_RAMDISK_THRESHOLD_GIB,
+    GIB,
     assert_disk_storage_ready,
     cleanup_disk_storage,
     prepare_disk_storage,
@@ -54,12 +55,26 @@ def main(argv: list[str] | None = None) -> int:
             uefi_vars_secure_boot=args.secure_boot_vars,
         )
         _preflight(architecture, selected, overrides, suites)
-        options = _options(args, matrix)
+        persistent_live_bytes = (
+            inspection.path.stat().st_size
+            + PERSISTENT_LIVE_FREE_SPACE_GIB * GIB
+            if any(
+                scenario.live_mode is LiveMode.PERSISTENT
+                for scenario in selected
+            )
+            else 0
+        )
+        options = _options(
+            args,
+            matrix,
+            additional_disk_bytes=persistent_live_bytes,
+        )
         assert_disk_storage_ready(
             options.disk_storage,
             disk_gib=options.disk_gib,
             filesystem_reserve_gib=options.free_space_reserve_gib,
             memory_mib=options.memory_mib,
+            additional_bytes=persistent_live_bytes,
         )
         options.artifacts_root.mkdir(parents=True, exist_ok=False)
         prepare_disk_storage(options.disk_storage)
@@ -277,7 +292,12 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _options(args, matrix: TestMatrix) -> RunnerOptions:
+def _options(
+    args,
+    matrix: TestMatrix,
+    *,
+    additional_disk_bytes: int = 0,
+) -> RunnerOptions:
     defaults = matrix.defaults
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     artifacts = (
@@ -313,6 +333,7 @@ def _options(args, matrix: TestMatrix) -> RunnerOptions:
         mode=args.disk_backend,
         ramdisk_threshold_gib=args.ramdisk_threshold,
         retain_disk=False,
+        additional_bytes=additional_disk_bytes,
     )
     return RunnerOptions(
         artifacts_root=artifacts,

@@ -49,12 +49,50 @@ home=$(getent passwd "$user" | cut -d: -f6)
 wayland=$(find "$runtime" -maxdepth 1 -type s -name 'wayland-[0-9]*' -printf '%f\\n' 2>/dev/null | head -n1)
 test -S "$runtime/bus"
 test -n "$wayland"
+get_atspi_address() {{
+    runuser -u "$user" -- env -u AT_SPI_BUS_ADDRESS \
+        HOME="$home" XDG_RUNTIME_DIR="$runtime" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+        gdbus call --session --dest org.a11y.Bus --object-path /org/a11y/bus \
+        --method org.a11y.Bus.GetAddress \
+        | sed -n "s/^('\\(.*\\)',)$/\\1/p"
+}}
+atspi_address=$(get_atspi_address)
+atspi_repaired=false
+case "$atspi_address" in
+    unix:path=*)
+        atspi_socket=${{atspi_address#unix:path=}}
+        atspi_socket=${{atspi_socket%%,*}}
+        if [ ! -S "$atspi_socket" ]; then
+            runuser -u "$user" -- env \
+                HOME="$home" XDG_RUNTIME_DIR="$runtime" \
+                DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+                systemctl --user restart at-spi-dbus-bus.service
+            atspi_address=$(get_atspi_address)
+            atspi_socket=${{atspi_address#unix:path=}}
+            atspi_socket=${{atspi_socket%%,*}}
+            test -S "$atspi_socket"
+            atspi_repaired=true
+        fi
+        ;;
+    *)
+        test -n "$atspi_address"
+        ;;
+esac
+if [ "$atspi_repaired" = true ]; then
+    session_env="HOME=$home XDG_RUNTIME_DIR=$runtime DBUS_SESSION_BUS_ADDRESS=unix:path=$runtime/bus WAYLAND_DISPLAY=$wayland DISPLAY=:0"
+    runuser -u "$user" -- env $session_env \
+        gnome-extensions disable ding@rastersoft.com || true
+    runuser -u "$user" -- env $session_env \
+        gnome-extensions enable ding@rastersoft.com
+fi
 """
     environment = r"""
 runuser -u "$user" -- env \
     HOME="$home" \
     XDG_RUNTIME_DIR="$runtime" \
     DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+    AT_SPI_BUS_ADDRESS="$atspi_address" \
     WAYLAND_DISPLAY="$wayland" DISPLAY=:0 NO_AT_BRIDGE=0 \
     XDG_CURRENT_DESKTOP=GNOME XDG_SESSION_DESKTOP=gnome \
     DESKTOP_SESSION=gnome GDMSESSION=gnome"""
@@ -64,6 +102,7 @@ runuser -u "$user" -- env \
         --setenv=HOME="$home" \
         --setenv=XDG_RUNTIME_DIR="$runtime" \
         --setenv=DBUS_SESSION_BUS_ADDRESS="unix:path=$runtime/bus" \
+        --setenv=AT_SPI_BUS_ADDRESS="$atspi_address" \
         --setenv=WAYLAND_DISPLAY="$wayland" --setenv=DISPLAY=:0 \
         --setenv=NO_AT_BRIDGE=0 --setenv=XDG_CURRENT_DESKTOP=GNOME \
         --setenv=XDG_SESSION_DESKTOP=gnome --setenv=DESKTOP_SESSION=gnome \
@@ -302,6 +341,8 @@ def _power_off(vm: QemuVm) -> None:
         # writes or qcow2 metadata still pending at this instrumentation
         # boundary.
         vm.qmp.flush_block_device("target")
+        if getattr(vm, "live_media_attached", False):
+            vm.qmp.flush_block_device("live-media")
         vm.qmp.quit()
         vm.wait(15)
     finally:

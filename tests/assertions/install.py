@@ -12,7 +12,7 @@ from framework.serial import SerialConsole
 
 
 LIVE_ONLY_PACKAGES = (
-    "casper",
+    "anduinos-live-layers",
     "discover",
     "laptop-detect",
     "os-prober",
@@ -72,6 +72,13 @@ FORBIDDEN_IMAGE_PACKAGES = (
     "firmware-sof-signed",
     "alsa-ucm-conf",
     "plymouth-theme-spinner",
+    # AnduinOS permits exactly one early-boot generator stack.
+    "casper",
+    "initramfs-tools",
+    "initramfs-tools-core",
+    "initramfs-tools-bin",
+    "busybox-initramfs",
+    "finalrd",
     # Alternative terminals and unwanted desktop applications.
     "alacritty",
     "gnome-terminal",
@@ -214,6 +221,24 @@ else
 fi
 systemd-detect-virt || true
 ip -brief link
+test -s /run/anduinos-live/environment
+grep -Fxq 'ANDUINOS_LIVE=1' /run/anduinos-live/environment
+test -s /cdrom/LiveOS/rootfs.squashfs
+test -s /cdrom/LiveOS/initrd
+test "$(findmnt -n -o FSTYPE /)" = overlay
+modules=$(lsinitrd -m /cdrom/LiveOS/initrd)
+for module in dmsquash-live dmsquash-live-autooverlay overlayfs anduinos-live-layers; do
+    printf '%s\n' "$modules" | grep -Eq "^[[:space:]]*$module[[:space:]]*$"
+done
+initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)
+for forbidden_path in \
+    scripts/casper \
+    scripts/casper-bottom \
+    usr/share/initramfs-tools \
+    usr/share/initramfs-tools-core; do
+    ! printf '%s\n' "$initrd_listing" | grep -Fq "$forbidden_path"
+done
+printf 'dracut-live-contract=ok\n'
 """
     _record(console, script, evidence / "live-environment.txt")
     if scenario.firmware is Firmware.BIOS:
@@ -242,6 +267,95 @@ ip -brief link
             evidence,
             session_timeout_seconds=session_timeout_seconds,
         )
+
+
+def assert_live_identity(
+    console: SerialConsole,
+    evidence: Path,
+    *,
+    session_timeout_seconds: int = 120,
+) -> None:
+    """Prove the exact account, autologin, and privilege contract of Live."""
+
+    if session_timeout_seconds < 1:
+        raise ValueError("GNOME session timeout must be positive")
+    script = f"""
+set -uo pipefail
+expected_user=live
+expected_uid=1000
+expected_full_name='AnduinOS Live session user'
+expected_home=/home/live
+expected_shell=/bin/bash
+expected_hostname=anduinos
+
+passwd_entry=$(getent passwd "$expected_user" || true)
+account_name=$(printf '%s\n' "$passwd_entry" | cut -d: -f1)
+account_uid=$(printf '%s\n' "$passwd_entry" | cut -d: -f3)
+account_full_name=$(printf '%s\n' "$passwd_entry" | cut -d: -f5)
+account_home=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
+account_shell=$(printf '%s\n' "$passwd_entry" | cut -d: -f7)
+static_hostname=$(cat /etc/hostname 2>/dev/null || true)
+runtime_hostname=$(hostname 2>/dev/null || true)
+
+session_ready=false
+session_pid=
+session_deadline=$((SECONDS + {session_timeout_seconds}))
+while (( SECONDS < session_deadline )); do
+    session_pid=$(pgrep -n -u "$expected_uid" -x gnome-shell || true)
+    if test -n "$session_pid" \
+        && test -S "/run/user/$expected_uid/bus" \
+        && test -r "/proc/$session_pid/environ"; then
+        session_ready=true
+        break
+    fi
+    sleep 1
+done
+
+sudo_output=$(runuser -u "$expected_user" -- sudo -n -p '' id -u 2>&1)
+sudo_status=$?
+marker=/run/anduinos-live/environment
+marker_user=$(sed -n 's/^ANDUINOS_LIVE_USER=//p' "$marker" | tail -n1)
+marker_hostname=$(sed -n 's/^ANDUINOS_LIVE_HOSTNAME=//p' "$marker" | tail -n1)
+gdm_config=/etc/gdm3/custom.conf
+autologin_enabled=$(sed -n 's/^[# ]*AutomaticLoginEnable[ ]*=[ ]*//p' "$gdm_config" | tail -n1)
+autologin_user=$(sed -n 's/^[# ]*AutomaticLogin[ ]*=[ ]*//p' "$gdm_config" | tail -n1)
+timed_login_enabled=$(sed -n 's/^[# ]*TimedLoginEnable[ ]*=[ ]*//p' "$gdm_config" | tail -n1)
+
+printf 'account-name=%s\naccount-uid=%s\naccount-full-name=%s\n' \
+    "$account_name" "$account_uid" "$account_full_name"
+printf 'account-home=%s\naccount-shell=%s\n' "$account_home" "$account_shell"
+printf 'static-hostname=%s\nruntime-hostname=%s\n' \
+    "$static_hostname" "$runtime_hostname"
+printf 'session-ready=%s\nsession-pid=%s\n' "$session_ready" "$session_pid"
+printf 'sudo-status=%s\nsudo-output=%s\n' "$sudo_status" "$sudo_output"
+printf 'marker-user=%s\nmarker-hostname=%s\n' "$marker_user" "$marker_hostname"
+printf 'autologin-enabled=%s\nautologin-user=%s\ntimed-login-enabled=%s\n' \
+    "$autologin_enabled" "$autologin_user" "$timed_login_enabled"
+
+status=0
+test "$account_name" = "$expected_user" || status=1
+test "$account_uid" = "$expected_uid" || status=1
+test "$account_full_name" = "$expected_full_name" || status=1
+test "$account_home" = "$expected_home" || status=1
+test "$account_shell" = "$expected_shell" || status=1
+test "$static_hostname" = "$expected_hostname" || status=1
+test "$runtime_hostname" = "$expected_hostname" || status=1
+test "$session_ready" = true || status=1
+test "$sudo_status" -eq 0 || status=1
+test "$sudo_output" = 0 || status=1
+test "$marker_user" = "$expected_user" || status=1
+test "$marker_hostname" = "$expected_hostname" || status=1
+test "$autologin_enabled" = true || status=1
+test "$autologin_user" = "$expected_user" || status=1
+test "$timed_login_enabled" = false || status=1
+exit "$status"
+"""
+    _record(
+        console,
+        script,
+        evidence / "live-identity.txt",
+        timeout=session_timeout_seconds + 30,
+    )
 
 
 def assert_live_region(
@@ -549,7 +663,7 @@ def _assert_boot_packages(
     _record(
         console,
         "set -e\n"
-        f"for package in anduinos-core-system grub-common grub2-common {architecture_packages}; do\n"
+        f"for package in anduinos-core-system dracut dracut-core dracut-install grub-common grub2-common {architecture_packages}; do\n"
         "  dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\\n' \"$package\" | grep '^ii '\n"
         "done\n"
         "kernel=$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\\n' | sort -V | tail -n1)\n"
@@ -557,7 +671,12 @@ def _assert_boot_packages(
         "version=${kernel#vmlinuz-}\n"
         "test -s \"/boot/$kernel\"\n"
         "test -s \"/boot/initrd.img-$version\"\n"
-        "lsinitramfs \"/boot/initrd.img-$version\" >/dev/null\n"
+        "modules=$(lsinitrd -m \"/boot/initrd.img-$version\")\n"
+        "for forbidden in dmsquash-live dmsquash-live-autooverlay anduinos-live-layers; do\n"
+        "  ! printf '%s\\n' \"$modules\" | grep -Eq \"^[[:space:]]*$forbidden[[:space:]]*$\"\n"
+        "done\n"
+        "dpkg-query -S /usr/sbin/update-initramfs | "
+        "grep -Fxq 'dracut: /usr/sbin/update-initramfs'\n"
         "printf 'kernel=%s\\ninitrd=%s\\n' \"$kernel\" \"initrd.img-$version\"",
         evidence / "installed-boot-packages.txt",
     )
@@ -574,6 +693,20 @@ set -e
 dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' anduinos-btrfs-snapshots-manager | grep '^ii '
 test -f /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
 desktop-file-validate /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
+confirm=/usr/libexec/anduinos-btrfs-snapshots-manager-confirm
+initrd="/boot/initrd.img-$(uname -r)"
+test -x "$confirm"
+test -s "$initrd"
+installed_confirm_sha256=$(sha256sum "$confirm" | awk '{ print $1 }')
+embedded_confirm_sha256=$(lsinitrd -f "$confirm" "$initrd" | sha256sum | awk '{ print $1 }')
+test "$installed_confirm_sha256" = "$embedded_confirm_sha256"
+embedded_confirm_mode=$(lsinitrd "$initrd" | awk '$NF == "usr/libexec/anduinos-btrfs-snapshots-manager-confirm" { print $1; exit }')
+test -n "$embedded_confirm_mode"
+case "$embedded_confirm_mode" in
+  *x*) echo "The initramfs confirmation payload must remain non-executable during Dracut assembly" >&2; exit 1 ;;
+esac
+printf 'installed-confirm-sha256=%s\nembedded-confirm-sha256=%s\nembedded-confirm-mode=%s\n' \
+  "$installed_confirm_sha256" "$embedded_confirm_sha256" "$embedded_confirm_mode"
 """
     else:
         script = r"""

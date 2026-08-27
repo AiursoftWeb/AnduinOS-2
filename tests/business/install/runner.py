@@ -115,6 +115,12 @@ class ScenarioRunner(
             disk_gib=self.options.disk_gib,
             filesystem_reserve_gib=self.options.free_space_reserve_gib,
             memory_mib=self.options.memory_mib,
+            additional_bytes=(
+                self.inspection.path.stat().st_size
+                + PERSISTENT_LIVE_FREE_SPACE_GIB * GIB
+                if scenario.live_mode is LiveMode.PERSISTENT
+                else 0
+            ),
         )
         vm: QemuVm | None = None
         wifi_lab = WifiLab() if scenario.network is Network.WIFI else None
@@ -123,6 +129,7 @@ class ScenarioRunner(
         try:
             vm = self._create_vm(scenario, artifacts)
             vm.create_disk()
+            vm.create_live_media()
             self._write_manifest(scenario, vm.config, artifacts)
             boot_files = self._run_live_phase(
                 vm,
@@ -234,6 +241,13 @@ class ScenarioRunner(
         if vm.running:
             raise TestFailure("Cannot finalize a target disk while QEMU is running")
         outcome = "passed" if passed else "failed"
+        live_media = getattr(vm.config, "live_media", None)
+        if live_media is not None and live_media.exists():
+            if live_media.name != "live-media.raw" or live_media.is_symlink():
+                raise ConfigurationError(
+                    f"Refusing unexpected persistent Live-media cleanup target: {live_media}"
+                )
+            live_media.unlink()
         keep = (
             self.options.keep_passed_disk
             if passed
@@ -290,6 +304,11 @@ class ScenarioRunner(
             qemu_binary=qemu_binary,
             acceleration=acceleration,
             file_size_limit_bytes=self.options.disk_storage.qcow_limit_bytes,
+            live_media=(
+                self.options.disk_storage.root / scenario.id / "live-media.raw"
+                if scenario.live_mode is LiveMode.PERSISTENT
+                else None
+            ),
         )
         return QemuVm(config)
 
@@ -315,6 +334,14 @@ class ScenarioRunner(
                 "disk_backend_reason": self.options.disk_storage.reason,
                 "disk_file_size_limit_bytes": config.file_size_limit_bytes,
                 "ssh_forward_port": config.ssh_forward_port,
+                "live_media": (
+                    str(config.live_media) if config.live_media is not None else None
+                ),
+                "live_media_size_bytes": (
+                    config.live_media.stat().st_size
+                    if config.live_media is not None
+                    else None
+                ),
                 "firmware_code": (
                     str(config.firmware_selection.code)
                     if config.firmware_selection is not None

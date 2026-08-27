@@ -172,7 +172,10 @@ test -e /usr/share/icons/Fluent-dark-cursors/cursors/left_ptr
                 f"{remote_root}/evidence",
             ),
         )
-        result = vm.serial.run(command, timeout=90, check=False)
+        # The guest waits up to 120 seconds for DING to re-register after a
+        # repaired accessibility bus.  Keep the outer serial deadline larger
+        # so slow ARM TCG cannot terminate a valid in-guest readiness wait.
+        result = vm.serial.run(command, timeout=180, check=False)
         with (artifacts / "atspi-events.jsonl").open("a", encoding="utf-8") as stream:
             stream.write(result.stdout + "\n")
         _retrieve_tree(

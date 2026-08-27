@@ -8,11 +8,14 @@ DEPS_COMMON := \
   debootstrap \
   fonts-unifont \
   gnupg \
+  isomd5sum \
   squashfs-tools \
+  sbsigntool \
   xorriso \
   grub2-common \
   mtools \
-  dosfstools
+  dosfstools \
+  util-linux
 
 # Pick arch-specific GRUB packages at run time so the same Makefile works on
 # both amd64 and arm64 build hosts. amd64 uses grub-pc-bin for its El Torito
@@ -24,13 +27,19 @@ DEPS_amd64 := \
   grub-efi-amd64-signed \
   shim-signed
 
-DEPS_arm64 := \
-  grub-efi-arm64 \
-  grub-efi-arm64-signed \
-  shim-signed
+# The ARM64 EFI payload is built with the target root's GRUB modules, signed
+# GRUB image and shim inside a private mount namespace.  Installing foreign
+# shim-signed on an amd64 build host would conflict with the host's own signed
+# bootloader, so ARM64 deliberately has no target-EFI host packages here.
+DEPS_arm64 :=
 
+HOST_ARCH ?= $(shell dpkg --print-architecture)
 TARGET_ARCH ?= $(shell env -u TARGET_ARCH bash -c 'source ./args.sh; printf "%s\n" "$$TARGET_ARCH"')
-DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH))
+DEPS_CROSS :=
+ifneq ($(HOST_ARCH),$(TARGET_ARCH))
+DEPS_CROSS += qemu-user-binfmt
+endif
+DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH)) $(DEPS_CROSS)
 
 .PHONY: current clean bootstrap menuconfig buildtorrent test help
 

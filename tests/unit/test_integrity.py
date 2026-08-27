@@ -221,6 +221,28 @@ test \"$value\" = 'nested quotes'
             self.assertEqual(0, parsed.returncode, parsed.stderr)
             self.assertIn("nested quotes", command)
 
+    def test_desktop_command_repairs_and_pins_the_current_atspi_bus(self):
+        for managed in (False, True):
+            command = _desktop_command("anduinostest", ("true",), managed=managed)
+            self.assertIn("env -u AT_SPI_BUS_ADDRESS", command)
+            self.assertIn("org.a11y.Bus.GetAddress", command)
+            self.assertIn("test -S \"$atspi_socket\"", command)
+            self.assertIn("restart at-spi-dbus-bus.service", command)
+            self.assertIn("atspi_repaired=true", command)
+            self.assertIn("gnome-extensions disable ding@rastersoft.com", command)
+            self.assertIn("gnome-extensions enable ding@rastersoft.com", command)
+            self.assertIn('AT_SPI_BUS_ADDRESS="$atspi_address"', command)
+
+    def test_installed_region_outer_timeout_covers_ding_readiness_wait(self):
+        guest_source = (
+            ROOT / "assertions/guest/ui/shell_common.py"
+        ).read_text(encoding="utf-8")
+        host_source = (
+            ROOT / "business/install/contracts.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("deadline = time.monotonic() + 120", guest_source)
+        self.assertIn("vm.serial.run(command, timeout=180", host_source)
+
     def test_installed_release_script_contains_every_declared_command_contract(self):
         with tempfile.TemporaryDirectory() as directory:
             console = _CaptureConsole()
@@ -525,6 +547,33 @@ test \"$value\" = 'nested quotes'
                 (root / "target-disk-retention.txt").read_text(encoding="utf-8"),
             )
 
+    def test_persistent_live_media_is_discarded_even_with_target_retention(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            disk = root / "target.qcow2"
+            live_media = root / "live-media.raw"
+            disk.write_bytes(b"debug")
+            live_media.write_bytes(b"writable hybrid media")
+            runner = object.__new__(ScenarioRunner)
+            runner.options = SimpleNamespace(
+                keep_passed_disk=False,
+                keep_failed_disk=True,
+                disk_storage=DiskStorage(root, "filesystem", "unit test"),
+            )
+            vm = SimpleNamespace(
+                running=False,
+                config=SimpleNamespace(
+                    disk=disk,
+                    variables=None,
+                    live_media=live_media,
+                ),
+            )
+
+            runner._finalize_disk(vm, root, passed=False)
+
+            self.assertTrue(disk.exists())
+            self.assertFalse(live_media.exists())
+
     def test_feature_overlay_cleanup_discards_its_uefi_variables(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -584,6 +633,7 @@ test \"$value\" = 'nested quotes'
                 desktop_contracts=False,
                 snapshots_manager=False,
                 ssh=SshPolicy.DISABLED,
+                live_mode=LiveMode.TEMPORARY,
             )
             with self.assertRaises(KeyboardInterrupt):
                 runner.run(interrupted_scenario)
@@ -634,6 +684,7 @@ class HostStorageSafetyTests(unittest.TestCase):
                         "disk = artifacts / 'case' / 'target.qcow2'",
                         "disk.parent.mkdir(parents=True)",
                         "disk.write_bytes(b'disposable guest')",
+                        "(disk.parent / 'live-media.raw').write_bytes(b'disposable live')",
                         "(artifacts / 'durable-evidence.txt').write_text('keep\\n')",
                         "child = subprocess.Popen(",
                         "    ('sleep', '60'),",
@@ -666,6 +717,7 @@ class HostStorageSafetyTests(unittest.TestCase):
             self.assertEqual(128 + signal.SIGSEGV, result)
             self.assertIn("SIGSEGV", error.getvalue())
             self.assertFalse((artifacts / "case" / "target.qcow2").exists())
+            self.assertFalse((artifacts / "case" / "live-media.raw").exists())
             self.assertEqual(
                 "keep\n",
                 (artifacts / "durable-evidence.txt").read_text(encoding="utf-8"),
@@ -688,8 +740,14 @@ class HostStorageSafetyTests(unittest.TestCase):
             disk = root / "case" / "target.qcow2"
             disk.parent.mkdir()
             disk.write_bytes(b"user-owned preexisting disk")
+            live_media = disk.with_name("live-media.raw")
+            live_media.write_bytes(b"user-owned preexisting live media")
             _cleanup_persistent_disks(root, preexisting=True)
             self.assertEqual(b"user-owned preexisting disk", disk.read_bytes())
+            self.assertEqual(
+                b"user-owned preexisting live media",
+                live_media.read_bytes(),
+            )
 
     @patch("framework.storage.shutil.disk_usage")
     def test_capacity_budgets_the_full_virtual_disk_and_reserve(self, disk_usage):
@@ -698,6 +756,18 @@ class HostStorageSafetyTests(unittest.TestCase):
             capacity = assert_capacity(Path(directory), 40, 10)
         self.assertEqual(50 * GIB, capacity.required_bytes)
         self.assertEqual(55 * GIB, capacity.free_bytes)
+
+    @patch("framework.storage.shutil.disk_usage")
+    def test_capacity_adds_the_full_writable_live_media_budget(self, disk_usage):
+        disk_usage.return_value = SimpleNamespace(free=60 * GIB)
+        with tempfile.TemporaryDirectory() as directory:
+            capacity = assert_capacity(
+                Path(directory),
+                40,
+                10,
+                additional_bytes=6 * GIB,
+            )
+        self.assertEqual(56 * GIB, capacity.required_bytes)
 
     @patch("framework.storage.shutil.disk_usage")
     def test_capacity_fails_before_qemu_when_host_space_is_low(self, disk_usage):
@@ -784,6 +854,31 @@ class HostStorageSafetyTests(unittest.TestCase):
             memory_mib=8192,
         )
         self.assertEqual(12 * GIB, capacity.required_bytes)
+
+    @patch("framework.storage.shutil.disk_usage")
+    @patch("framework.storage._filesystem_type", return_value="tmpfs")
+    @patch("framework.storage._read_mem_available", return_value=30 * GIB)
+    def test_ramdisk_recheck_adds_persistent_live_media_budget(
+        self,
+        _memory,
+        _filesystem,
+        disk_usage,
+    ):
+        disk_usage.return_value = SimpleNamespace(free=20 * GIB)
+        storage = DiskStorage(
+            Path("/dev/shm/private/run"),
+            "ramdisk",
+            "unit test",
+            qcow_limit_bytes=12 * GIB,
+        )
+        capacity = assert_disk_storage_ready(
+            storage,
+            disk_gib=40,
+            filesystem_reserve_gib=10,
+            memory_mib=8192,
+            additional_bytes=6 * GIB,
+        )
+        self.assertEqual(18 * GIB, capacity.required_bytes)
 
     def test_qemu_child_file_size_limit_is_enforced_by_kernel(self):
         with tempfile.TemporaryDirectory() as directory:

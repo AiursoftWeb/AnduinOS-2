@@ -40,6 +40,15 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(1, sum(item.passwordless_sudo for item in scenarios))
         self.assertEqual(1, sum(item.automatic_login for item in scenarios))
         self.assertEqual(1, sum(item.desktop_contracts for item in scenarios))
+        persistent = [
+            item for item in scenarios if item.live_mode is LiveMode.PERSISTENT
+        ]
+        self.assertEqual(1, len(persistent))
+        self.assertEqual(
+            (Architecture.AMD64, Architecture.ARM64),
+            persistent[0].architectures,
+        )
+        self.assertEqual("uefi-nosb-offline-btrfs", persistent[0].id)
         desktop_case = next(item for item in scenarios if item.desktop_contracts)
         self.assertEqual("uefi-nosb-online-btrfs-ssh-enabled", desktop_case.id)
         self.assertTrue(desktop_case.rime)
@@ -80,6 +89,17 @@ class MatrixTests(unittest.TestCase):
         for invalid in (None, 0, 1, "true"):
             candidate = json.loads(json.dumps(raw))
             candidate["cases"][0]["passwordless_sudo"] = invalid
+            with tempfile.TemporaryDirectory() as directory:
+                path = Path(directory) / "matrix.json"
+                path.write_text(json.dumps(candidate), encoding="utf-8")
+                with self.assertRaises(ConfigurationError):
+                    TestMatrix.load(path)
+
+    def test_live_mode_is_required_and_strict(self):
+        raw = json.loads((ROOT / "cases/install.json").read_text(encoding="utf-8"))
+        for invalid in (None, "", "ram", "Persistent"):
+            candidate = json.loads(json.dumps(raw))
+            candidate["cases"][0]["live_mode"] = invalid
             with tempfile.TemporaryDirectory() as directory:
                 path = Path(directory) / "matrix.json"
                 path.write_text(json.dumps(candidate), encoding="utf-8")
@@ -623,6 +643,8 @@ class ScenarioCheckPlanTests(unittest.TestCase):
         for identifier in (
             "regional.grub-contract",
             "live-boot",
+            "live.identity-contract",
+            "live.temporary-overlay",
             "regional.grub-live-propagation",
             "installer-ui",
             "target-boot-files",
@@ -647,6 +669,17 @@ class ScenarioCheckPlanTests(unittest.TestCase):
             "boot.plymouth-anduinos-logo",
         ):
             self.assertIn(identifier, checks)
+
+    def test_persistent_scenario_declares_reboot_overlay_check(self):
+        matrix = TestMatrix.load(ROOT / "cases/install.json")
+        scenario = next(
+            item
+            for item in matrix.scenarios
+            if item.live_mode is LiveMode.PERSISTENT
+        )
+        checks = scenario_check_ids(scenario)
+        self.assertIn("live.persistent-overlay", checks)
+        self.assertNotIn("live.temporary-overlay", checks)
 
     def test_sudo_check_id_tracks_each_installation_choice(self):
         matrix = TestMatrix.load(ROOT / "cases/install.json")

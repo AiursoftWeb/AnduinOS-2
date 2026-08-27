@@ -39,6 +39,12 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
     checks = [
         "regional.grub-contract",
         "live-boot",
+        "live.identity-contract",
+        (
+            "live.persistent-overlay"
+            if scenario.live_mode is LiveMode.PERSISTENT
+            else "live.temporary-overlay"
+        ),
         "packages.live-image-junk-absent",
         "regional.grub-live-propagation",
         "installer-ui",

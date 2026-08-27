@@ -392,21 +392,40 @@ def exercise_localization_zh_cn(evidence: Path) -> None:
 
 
 def observe_installed_region_zh_cn(evidence: Path) -> None:
-    """Observe the already-running desktop without launching or changing UI."""
+    """Observe Simplified Chinese in the already-running GNOME Shell.
 
-    frame, desktop_icons = _desktop_default_icon_snapshot()
-    bounds = frame.get_extents(Atspi.CoordType.SCREEN)
-    labels = sorted(item["name"] for item in desktop_icons)
-    dump_accessibility(evidence / "installed-region-zh-cn.txt")
+    OOBE intentionally owns the foreground on first login, so DING is not a
+    valid installation-boundary oracle.  DING localization and geometry are
+    exercised later by the desktop feature suites after first-boot setup.
+    """
+
+    shell_nodes = visible_application_nodes("gnome-shell")
+    markers = sorted(
+        {
+            (role(item), name(item))
+            for item in shell_nodes
+            if (role(item), name(item))
+            in {("menu", "系统"), ("toggle button", "显示应用")}
+        }
+    )
+    expected = [("menu", "系统"), ("toggle button", "显示应用")]
+    if markers != expected:
+        raise UiFailure(
+            "GNOME Shell is not visibly localized to Simplified Chinese; "
+            f"markers={markers!r}"
+        )
+    (evidence / "installed-region-zh-cn.txt").write_text(
+        "\n".join(f"{item_role}\t{item_name}" for item_role, item_name in markers)
+        + "\n",
+        encoding="utf-8",
+    )
     event(
         "installed-region-zh-cn",
-        desktop_labels=labels,
-        desktop_frame={
-            "name": name(frame),
-            "role": role(frame),
-            "application": owning_application(frame),
-            "bounds": [bounds.x, bounds.y, bounds.width, bounds.height],
-        },
+        application="gnome-shell",
+        markers=[
+            {"role": item_role, "name": item_name}
+            for item_role, item_name in markers
+        ],
     )
 
 

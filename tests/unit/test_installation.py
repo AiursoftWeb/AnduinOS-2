@@ -185,6 +185,77 @@ class BootContractTests(unittest.TestCase):
         )
         self.assertEqual(330, console.run.call_args.kwargs["timeout"])
 
+    def test_live_identity_requires_the_exact_runtime_contract(self):
+        console = Mock()
+        console.run.return_value = CommandResult("identity-ok\n", 0)
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            assert_live_identity(
+                console,
+                evidence,
+                session_timeout_seconds=300,
+            )
+            self.assertEqual(
+                "identity-ok\n\n",
+                (evidence / "live-identity.txt").read_text(encoding="utf-8"),
+            )
+
+        script = console.run.call_args.args[0]
+        syntax = subprocess.run(
+            ("bash", "-n"),
+            input=script,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+        for contract in (
+            "expected_user=live",
+            "expected_uid=1000",
+            "expected_full_name='AnduinOS Live session user'",
+            "expected_home=/home/live",
+            "expected_shell=/bin/bash",
+            "expected_hostname=anduinos",
+            'test "$runtime_hostname" = "$expected_hostname"',
+            'test "$session_ready" = true',
+            'test "$sudo_output" = 0',
+            'test "$marker_user" = "$expected_user"',
+            'test "$autologin_enabled" = true',
+            'test "$autologin_user" = "$expected_user"',
+            'test "$timed_login_enabled" = false',
+        ):
+            self.assertIn(contract, script)
+        self.assertIn("session_deadline=$((SECONDS + 300))", script)
+        self.assertEqual(330, console.run.call_args.kwargs["timeout"])
+
+    def test_live_environment_rejects_legacy_initrd_hook_paths(self):
+        console = Mock()
+        console.run.return_value = CommandResult("", 0)
+        scenario = TestMatrix.load(ROOT / "cases/install.json").scenarios[0]
+        with tempfile.TemporaryDirectory() as directory:
+            assert_live_environment(
+                console,
+                scenario,
+                Path(directory),
+                "zh_CN.UTF-8",
+                "Asia/Shanghai",
+                check_region=False,
+            )
+        script = next(
+            item.args[0]
+            for item in console.run.call_args_list
+            if "initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)" in item.args[0]
+        )
+        self.assertIn("initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)", script)
+        for forbidden_path in (
+            "scripts/casper",
+            "scripts/casper-bottom",
+            "usr/share/initramfs-tools",
+            "usr/share/initramfs-tools-core",
+        ):
+            self.assertIn(forbidden_path, script)
+
     def test_gdm_login_waits_for_wayland_after_user_manager_becomes_active(self):
         clock = [0.0]
         serial = Mock()
@@ -276,25 +347,23 @@ class BootContractTests(unittest.TestCase):
         self.assertNotIn('test "$session_language" = zh_CN:zh', script)
         self.assertNotIn("dbus-run-session", script)
 
-    def test_installed_region_ui_oracle_requires_real_localized_ding(self):
+    def test_installed_region_ui_oracle_requires_real_localized_gnome_shell(self):
         passing = json.dumps(
             {
                 "event": "installed-region-zh-cn",
-                "desktop_labels": ["主目录", "回收站"],
-                "desktop_frame": {
-                    "name": "Desktop Icons 1",
-                    "role": "frame",
-                    "application": "gjs",
-                    "bounds": [0, 0, 1280, 752],
-                },
+                "application": "gnome-shell",
+                "markers": [
+                    {"role": "menu", "name": "系统"},
+                    {"role": "toggle button", "name": "显示应用"},
+                ],
             },
             ensure_ascii=False,
         )
         _validate_installed_region_ui_events(passing)
         faults = (
-            passing.replace("回收站", "Trash"),
-            passing.replace('"application": "gjs"', '"application": "fixture"'),
-            passing.replace("1280, 752", "320, 200"),
+            passing.replace("显示应用", "Show Applications"),
+            passing.replace('"application": "gnome-shell"', '"application": "fixture"'),
+            passing.replace('"role": "menu"', '"role": "label"'),
             passing + "\n" + passing,
         )
         for broken in faults:
@@ -319,7 +388,11 @@ class BootContractTests(unittest.TestCase):
                 firmware_delay=0,
                 menu_entry_index=2,
                 kernel_arguments=(
-                    "boot=casper",
+                    "root=live:CDLABEL=anduinos",
+                    "rd.live.dir=LiveOS",
+                    "rd.live.squashimg=rootfs.squashfs",
+                    "rd.overlay",
+                    "rd.anduinos.live=1",
                     "locale=zh_CN.UTF-8",
                     "quiet",
                     "splash",
@@ -332,11 +405,13 @@ class BootContractTests(unittest.TestCase):
         self.assertEqual(
             [
                 call(
-                    "linux /casper/vmlinuz boot=casper locale=zh_CN.UTF-8"
+                    "linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos"
+                    " rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs"
+                    " rd.overlay rd.anduinos.live=1 locale=zh_CN.UTF-8"
                     + debug_kernel_arguments(Architecture.ARM64),
                     timeout=120,
                 ),
-                call("initrd /casper/initrd", timeout=120),
+                call("initrd /LiveOS/initrd", timeout=120),
             ],
             command_line.submit.call_args_list,
         )
@@ -468,6 +543,75 @@ class BootContractTests(unittest.TestCase):
         self.assertNotIn("i8042", command)
         self.assertIn("usb-kbd,bus=xhci.0", command)
 
+    def test_persistent_live_media_is_a_writable_boot_disk_not_a_cdrom(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            live_media = root / "live-media.raw"
+            config = QemuConfig(
+                architecture=Architecture.AMD64,
+                firmware=Firmware.BIOS,
+                network=Network.OFFLINE,
+                memory_mib=4096,
+                cpus=2,
+                disk_gib=20,
+                ssh_forward_port=2222,
+                iso=root / "test.iso",
+                disk=root / "target.qcow2",
+                variables=None,
+                firmware_selection=None,
+                artifacts=root / "artifacts",
+                qemu_binary="qemu-system-x86_64",
+                acceleration="tcg,thread=multi",
+                live_media=live_media,
+            )
+            vm = QemuVm(config)
+            vm._runtime = tempfile.TemporaryDirectory(prefix="anduinos-unit-")
+            try:
+                command = vm.command(attach_iso=True)
+            finally:
+                vm._runtime.cleanup()
+                vm._runtime = None
+        rendered = " ".join(command)
+        self.assertIn(f"file={live_media}", rendered)
+        self.assertIn("id=live-media", rendered)
+        self.assertIn("scsi-hd", rendered)
+        self.assertNotIn("scsi-cd", rendered)
+        self.assertNotIn("readonly=on", rendered)
+
+    def test_persistent_live_media_copy_has_sparse_partition_space(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.iso"
+            source.write_bytes(b"hybrid-iso-fixture")
+            destination = root / "live-media.raw"
+            config = QemuConfig(
+                architecture=Architecture.AMD64,
+                firmware=Firmware.BIOS,
+                network=Network.OFFLINE,
+                memory_mib=4096,
+                cpus=2,
+                disk_gib=20,
+                ssh_forward_port=2222,
+                iso=source,
+                disk=root / "target.qcow2",
+                variables=None,
+                firmware_selection=None,
+                artifacts=root / "artifacts",
+                qemu_binary="qemu-system-x86_64",
+                acceleration="tcg,thread=multi",
+                live_media=destination,
+            )
+
+            QemuVm(config).create_live_media()
+
+            self.assertEqual(
+                source.stat().st_size + PERSISTENT_LIVE_FREE_SPACE_GIB * GIB,
+                destination.stat().st_size,
+            )
+            with destination.open("rb") as stream:
+                self.assertEqual(source.read_bytes(), stream.read(source.stat().st_size))
+            self.assertLess(destination.stat().st_blocks * 512, 1024 * 1024)
+
     def test_qemu_screenshot_retains_lossless_png_and_removes_raw_ppm(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -570,6 +714,64 @@ class BootContractTests(unittest.TestCase):
             events,
         )
         qmp.flush_block_device.assert_called_once_with("target")
+
+    def test_persistent_live_transition_flushes_both_writable_devices(self):
+        events = []
+        qmp = Mock()
+        qmp.flush_block_device.side_effect = lambda node: events.append(node)
+        vm = SimpleNamespace(
+            serial=Mock(),
+            qmp=qmp,
+            config=SimpleNamespace(live_media=Path("live-media.raw")),
+            live_media_attached=True,
+            wait=Mock(),
+            stop=Mock(),
+        )
+
+        _power_off(vm)
+
+        self.assertEqual(["target", "live-media"], events)
+
+    def test_installed_boot_does_not_flush_detached_persistent_live_media(self):
+        events = []
+        qmp = Mock()
+        qmp.flush_block_device.side_effect = lambda node: events.append(node)
+        vm = SimpleNamespace(
+            serial=Mock(),
+            qmp=qmp,
+            config=SimpleNamespace(live_media=Path("live-media.raw")),
+            live_media_attached=False,
+            wait=Mock(),
+            stop=Mock(),
+        )
+
+        _power_off(vm)
+
+        self.assertEqual(["target"], events)
+
+    def test_live_overlay_guest_probes_are_valid_bash(self):
+        runner = object.__new__(ScenarioRunner)
+        for method_name in (
+            "_assert_temporary_live_overlay",
+            "_create_persistent_live_sentinel",
+            "_assert_persistent_live_sentinel",
+        ):
+            with self.subTest(method=method_name):
+                serial = Mock()
+                serial.run.return_value = SimpleNamespace(stdout="ok")
+                vm = SimpleNamespace(serial=serial)
+                with tempfile.TemporaryDirectory() as directory:
+                    getattr(runner, method_name)(vm, Path(directory))
+                script = serial.run.call_args.args[0]
+                syntax = subprocess.run(
+                    ("bash", "-n"),
+                    input=script,
+                    text=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    check=False,
+                )
+                self.assertEqual(0, syntax.returncode, syntax.stderr)
 
     def test_failed_target_flush_is_a_visible_failure_and_still_cleans_up(self):
         vm = SimpleNamespace(
@@ -685,7 +887,7 @@ class BootContractTests(unittest.TestCase):
     def test_iso_boot_uses_the_exact_selected_grub_region(self):
         grub = "\n".join(
             f'''menuentry "Language {index}" {{
- linux /casper/vmlinuz boot=casper locale=l{index}_XX.UTF-8 timezone=Zone/{index} systemd.timezone=Zone/{index} nopersistent quiet splash ---
+ linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=l{index}_XX.UTF-8 timezone=Zone/{index} systemd.timezone=Zone/{index} quiet splash ---
 }}'''
             for index in range(28)
         )
@@ -698,7 +900,7 @@ class BootContractTests(unittest.TestCase):
         with self.assertRaises(ConfigurationError):
             _parse_live_entries(
                 '''menuentry "Only one" {
- linux /casper/vmlinuz boot=casper locale=en_US.UTF-8 timezone=Etc/UTC systemd.timezone=Etc/UTC
+ linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=en_US.UTF-8 timezone=Etc/UTC systemd.timezone=Etc/UTC
 }'''
             )
 

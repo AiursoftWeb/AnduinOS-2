@@ -6,9 +6,12 @@ set -u                  # treat unset variable as error
 
 wait_network
 
-print_ok "Installing Casper (live boot)..."
+print_ok "Installing the AnduinOS Dracut Live stack..."
 apt install -y \
-    casper \
+    dracut \
+    dracut-core \
+    dracut-install \
+    anduinos-live-layers \
     discover \
     laptop-detect \
     os-prober \
@@ -38,7 +41,6 @@ apt install -y \
     plymouth-anduinos \
     alsa-ucm-conf-anduinos \
     firmware-sof-anduinos \
-    initramfs-tools \
     build-essential- \
     --install-recommends
 judge "Install anduinos-desktop"

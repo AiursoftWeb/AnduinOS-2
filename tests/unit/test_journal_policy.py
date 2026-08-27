@@ -81,6 +81,8 @@ class JournalPolicyShapeTests(unittest.TestCase):
             {
                 "gdm-autologin-keyring-locked",
                 "gnome50-keyboard-null-variant",
+                "gnome50-gdm-media-keys-null-table",
+                "gnome50-sharing-closed-dbus",
                 "gnome50-transient-stack-position",
                 "ding93-gtk422-transient-a11y-toplevel",
                 "gnome50-hidden-dash-null-icon",
@@ -103,11 +105,10 @@ class JournalPolicyShapeTests(unittest.TestCase):
             self.assertNotEqual("*", item.version_glob)
             self.assertTrue(item.owner)
             self.assertGreater(len(item.reason), 40)
-            expected_budget = (
-                16
-                if item.id == "spice-vdagent-tty-switch-no-active-session"
-                else 1
-            )
+            expected_budget = {
+                "spice-vdagent-tty-switch-no-active-session": 16,
+                "gnome50-sharing-closed-dbus": 2,
+            }.get(item.id, 1)
             self.assertEqual(expected_budget, item.max_occurrences)
             self.assertNotIn(".*", item.message_regex)
 
@@ -189,6 +190,24 @@ class JournalClassificationTests(unittest.TestCase):
         self.assertFalse(verdict.passed)
         self.assertIn("allowed 50.*", verdict.blockers[0].reason)
 
+    def test_keyboard_diagnostic_applies_to_rime_feature_base(self):
+        item = entry(
+            "g_variant_unref: assertion 'value != NULL' failed",
+            "gsd-keyboard",
+        )
+        accepted = self.policy.classify(
+            (item,), scenario(desktop_contracts=False, rime=True), VERSIONS
+        )
+        no_rime = self.policy.classify(
+            (item,), scenario(desktop_contracts=False, rime=False), VERSIONS
+        )
+        self.assertTrue(accepted.passed)
+        self.assertEqual(
+            "gnome50-keyboard-null-variant",
+            accepted.known_diagnostics[0].rule_id,
+        )
+        self.assertFalse(no_rime.passed)
+
     def test_known_diagnostic_budget_excess_is_a_blocker(self):
         items = tuple(
             entry(
@@ -202,6 +221,65 @@ class JournalClassificationTests(unittest.TestCase):
         self.assertFalse(verdict.passed)
         self.assertEqual(1, len(verdict.known_diagnostics))
         self.assertEqual("diagnostic-budget-exceeded", verdict.blockers[0].kind)
+
+    def test_gdm_media_keys_diagnostic_is_manual_login_only_and_excludes_user(self):
+        message = "g_hash_table_size: assertion 'hash_table != NULL' failed"
+        greeter = entry(
+            message,
+            "gsd-media-keys|user@60578.service|"
+            "org.gnome.SettingsDaemon.MediaKeys.service|"
+            "/usr/libexec/gsd-media-keys",
+        )
+        user = entry(
+            message,
+            "gsd-media-keys|user@1000.service|"
+            "org.gnome.SettingsDaemon.MediaKeys.service|"
+            "/usr/libexec/gsd-media-keys",
+        )
+        accepted = self.policy.classify(
+            (greeter,), scenario(automatic_login=False), VERSIONS
+        )
+        automatic = self.policy.classify(
+            (greeter,), scenario(automatic_login=True), VERSIONS
+        )
+        installed_user = self.policy.classify(
+            (user,), scenario(automatic_login=False), VERSIONS
+        )
+        self.assertTrue(accepted.passed)
+        self.assertEqual(
+            "gnome50-gdm-media-keys-null-table",
+            accepted.known_diagnostics[0].rule_id,
+        )
+        self.assertFalse(automatic.passed)
+        self.assertFalse(installed_user.passed)
+
+    def test_sharing_diagnostic_is_exact_automatic_desktop_pair(self):
+        message = (
+            "g_dbus_connection_call_internal: assertion "
+            "'G_IS_DBUS_CONNECTION (connection)' failed"
+        )
+        component = (
+            "gsd-sharing|user@1000.service|"
+            "org.gnome.SettingsDaemon.Sharing.service|/usr/libexec/gsd-sharing"
+        )
+        entries = (
+            entry(message, component, cursor="sharing-1"),
+            entry(message, component, cursor="sharing-2"),
+        )
+        accepted = self.policy.classify(entries, scenario(), VERSIONS)
+        manual = self.policy.classify(
+            entries, scenario(automatic_login=False), VERSIONS
+        )
+        excessive = self.policy.classify(
+            (*entries, entry(message, component, cursor="sharing-3")),
+            scenario(),
+            VERSIONS,
+        )
+        self.assertTrue(accepted.passed)
+        self.assertEqual(2, len(accepted.known_diagnostics))
+        self.assertFalse(manual.passed)
+        self.assertFalse(excessive.passed)
+        self.assertEqual("diagnostic-budget-exceeded", excessive.blockers[0].kind)
 
     def test_ding_a11y_diagnostic_is_exact_versioned_and_budgeted(self):
         message = (

@@ -225,17 +225,24 @@ def _ensure_desktop_foreground(request: str) -> None:
 
 
 def _desktop_default_icon_snapshot() -> tuple[object, list[dict[str, object]]]:
-    frames = _desktop_frames()
+    expected = {"主目录", "回收站"}
+    deadline = time.monotonic() + 120
+    frames = []
+    nodes = []
+    while time.monotonic() < deadline:
+        frames = _desktop_frames()
+        nodes = [
+            item
+            for item in visible_nodes()
+            if owning_application(item) == "gjs"
+            and role(item) == "label"
+            and name(item) in expected
+        ]
+        if len(frames) == 1 and {name(item) for item in nodes} == expected:
+            break
+        time.sleep(0.25)
     if len(frames) != 1:
         raise UiFailure(f"Expected one DING desktop frame, observed {len(frames)}")
-    expected = {"主目录", "回收站"}
-    nodes = [
-        item
-        for item in visible_nodes()
-        if owning_application(item) == "gjs"
-        and role(item) == "label"
-        and name(item) in expected
-    ]
     if len(nodes) != 2 or {name(item) for item in nodes} != expected:
         raise UiFailure(
             "DING did not expose exactly one localized Home and Trash label"

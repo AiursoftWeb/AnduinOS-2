@@ -8,6 +8,9 @@ from pathlib import Path
 from .errors import ConfigurationError, ProtocolError
 
 
+_POINTER_MAPPING_SETTLE_SECONDS = 1.0
+
+
 _SET1_KEYS = {
     **dict(zip("1234567890", range(0x02, 0x0C), strict=True)),
     **dict(
@@ -156,6 +159,7 @@ class SpiceInputClient:
             try:
                 self._require_agent()
                 self._require_client_mouse_mode()
+                self._settle_pointer_mapping()
             except ProtocolError:
                 session.disconnect()
                 raise
@@ -221,6 +225,19 @@ class SpiceInputClient:
                 "SPICE pointer connection did not enter client mouse mode "
                 f"(mode={mode!r})"
             )
+
+    def _settle_pointer_mapping(self) -> None:
+        """Drain the vdagent display-map handshake before the first pointer packet."""
+
+        # ``agent-connected`` becomes true before spice-vdagent has necessarily
+        # finished mapping the guest connector to the SPICE display.  Sending
+        # the first absolute position in that window can be acknowledged by the
+        # channel and still be discarded by the agent.  Keep pumping GLib long
+        # enough for that first mapping exchange, then fail closed if either
+        # readiness property changed while the events were being processed.
+        self._run_for(_POINTER_MAPPING_SETTLE_SECONDS)
+        self._require_agent()
+        self._require_client_mouse_mode()
 
     def close(self) -> None:
         if self._session is not None:

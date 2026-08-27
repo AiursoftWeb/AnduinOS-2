@@ -50,6 +50,8 @@ _DOWNLOAD_CHUNK_BYTES = 24 * 1024
 _DOWNLOAD_FRAME_ATTEMPTS = 8
 _DOWNLOAD_FILE_ATTEMPTS = 3
 _DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024
+_UPLOAD_CHUNK_BYTES = 1024
+_UPLOAD_FRAME_ATTEMPTS = 4
 
 
 @dataclass(frozen=True)
@@ -246,19 +248,91 @@ class SerialConsole:
         return result
 
     def upload(self, source: Path, destination: str, mode: int = 0o600) -> None:
-        temporary = f"{destination}.tmp-{os.getpid()}"
-        self.run(f": > '{temporary}'")
-        with source.open("rb") as stream:
-            while chunk := stream.read(48 * 1024):
-                data = base64.b64encode(chunk).decode("ascii")
-                self.run(
-                    f"printf '%s' '{data}' | base64 -d >> '{temporary}'"
-                )
+        """Upload one file through idempotent, verified, TTY-sized frames.
+
+        The debug shell still uses a terminal line discipline.  A Base64
+        command approaching the canonical input limit can be truncated under
+        slow TCG emulation even when the host socket accepted every byte.
+        Keep each command comfortably below that boundary, validate every
+        decoded frame before appending it, and make a repeated frame harmless
+        when its acknowledgement was lost.
+        """
+
+        source = source.resolve(strict=True)
+        size = source.stat().st_size
+        expected_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
+        token = uuid.uuid4().hex
+        temporary = f"{destination}.tmp-{token}"
+        chunk_file = f"{temporary}.chunk"
+        quoted_temporary = shlex.quote(temporary)
+        quoted_chunk = shlex.quote(chunk_file)
+        quoted_destination = shlex.quote(destination)
         self.run(
             "set -e\n"
-            f"chmod {mode:o} '{temporary}'\n"
-            f"mv '{temporary}' '{destination}'"
+            f"rm -f {quoted_chunk}\n"
+            f": > {quoted_temporary}"
         )
+        try:
+            offset = 0
+            with source.open("rb") as stream:
+                while chunk := stream.read(_UPLOAD_CHUNK_BYTES):
+                    data = base64.b64encode(chunk).decode("ascii")
+                    digest = hashlib.sha256(chunk).hexdigest()
+                    next_offset = offset + len(chunk)
+                    script = (
+                        "set -euo pipefail\n"
+                        f"target={quoted_temporary}\n"
+                        f"frame={quoted_chunk}\n"
+                        f"offset={offset}\n"
+                        f"next={next_offset}\n"
+                        f"count={len(chunk)}\n"
+                        f"expected={digest}\n"
+                        "current=$(stat -c %s \"$target\")\n"
+                        "if [ \"$current\" -eq \"$next\" ]; then exit 0; fi\n"
+                        "test \"$current\" -eq \"$offset\"\n"
+                        "rm -f \"$frame\"\n"
+                        f"printf '%s' '{data}' | base64 -d > \"$frame\"\n"
+                        "test \"$(stat -c %s \"$frame\")\" -eq \"$count\"\n"
+                        "observed=$(sha256sum \"$frame\" | cut -d' ' -f1)\n"
+                        "test \"$observed\" = \"$expected\"\n"
+                        "cat \"$frame\" >> \"$target\"\n"
+                        "rm -f \"$frame\"\n"
+                        "test \"$(stat -c %s \"$target\")\" -eq \"$next\""
+                    )
+                    last_error: Exception | None = None
+                    for _attempt in range(_UPLOAD_FRAME_ATTEMPTS):
+                        try:
+                            result = self.run(script, check=False)
+                        except ProtocolError as error:
+                            last_error = error
+                            continue
+                        if result.returncode == 0:
+                            break
+                        last_error = TestFailure(
+                            f"Guest rejected serial upload frame at offset {offset}"
+                        )
+                    else:
+                        raise ProtocolError(
+                            "Could not deliver a verified serial upload frame for "
+                            f"{source} at offset {offset}"
+                        ) from last_error
+                    offset = next_offset
+            self.run(
+                "set -euo pipefail\n"
+                f"target={quoted_temporary}\n"
+                f"destination={quoted_destination}\n"
+                f"test \"$(stat -c %s \"$target\")\" -eq {size}\n"
+                "observed=$(sha256sum \"$target\" | cut -d' ' -f1)\n"
+                f"test \"$observed\" = {expected_sha256}\n"
+                f"chmod {mode:o} \"$target\"\n"
+                "mv \"$target\" \"$destination\""
+            )
+        except BaseException:
+            self.run(
+                f"rm -f {quoted_temporary} {quoted_chunk}",
+                check=False,
+            )
+            raise
 
     def download(
         self,

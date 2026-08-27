@@ -46,6 +46,11 @@ class SshPolicy(str, Enum):
     TOGGLE = "toggle"
 
 
+class LiveMode(str, Enum):
+    TEMPORARY = "temporary"
+    PERSISTENT = "persistent"
+
+
 @dataclass(frozen=True)
 class MatrixDefaults:
     memory_mib: int
@@ -71,6 +76,7 @@ class Scenario:
     firmware: Firmware
     network: Network
     filesystem: Filesystem
+    live_mode: LiveMode
     rime: bool
     online_features: bool
     ssh: SshPolicy
@@ -178,6 +184,7 @@ def _load_scenario(value: object) -> Scenario:
         "firmware",
         "network",
         "filesystem",
+        "live_mode",
         "rime",
         "online_features",
         "ssh",
@@ -200,6 +207,7 @@ def _load_scenario(value: object) -> Scenario:
         firmware = Firmware(value["firmware"])
         network = Network(value["network"])
         filesystem = Filesystem(value["filesystem"])
+        live_mode = LiveMode(value["live_mode"])
         ssh = SshPolicy(value["ssh"])
     except (TypeError, ValueError) as error:
         raise ConfigurationError(f"{identifier}: invalid enum value") from error
@@ -230,6 +238,10 @@ def _load_scenario(value: object) -> Scenario:
         raise ConfigurationError(
             f"{identifier}: the hwsim test environment is currently amd64-only"
         )
+    if live_mode is LiveMode.PERSISTENT and network is Network.WIFI:
+        raise ConfigurationError(
+            f"{identifier}: persistent-media reboot cannot retain the in-guest Wi-Fi lab"
+        )
     if value["mok_enrollment"] != firmware.secure_boot:
         raise ConfigurationError(f"{identifier}: MOK policy contradicts firmware")
     if value["snapshots_manager"] != (filesystem is Filesystem.BTRFS):
@@ -242,6 +254,7 @@ def _load_scenario(value: object) -> Scenario:
         firmware=firmware,
         network=network,
         filesystem=filesystem,
+        live_mode=live_mode,
         rime=value["rime"],
         online_features=value["online_features"],
         ssh=ssh,

@@ -118,10 +118,10 @@ version=${{kernel#vmlinuz-}}
 initrd="initrd.img-$version"
 test -s "$mountpoint/boot/$kernel"
 test -s "$mountpoint/boot/$initrd"
-test -s /cdrom/casper/vmlinuz
+test -s /cdrom/LiveOS/vmlinuz
 target_kernel_sha256=$(sha256sum "$mountpoint/boot/$kernel" | awk '{{ print $1 }}')
-iso_kernel_sha256=$(sha256sum /cdrom/casper/vmlinuz | awk '{{ print $1 }}')
-lsinitramfs "$mountpoint/boot/$initrd" >/dev/null
+iso_kernel_sha256=$(sha256sum /cdrom/LiveOS/vmlinuz | awk '{{ print $1 }}')
+lsinitrd "$mountpoint/boot/$initrd" >/dev/null
 printf 'ANDUINOS_TARGET_KERNEL_SHA256=%s\n' "$target_kernel_sha256"
 printf 'ANDUINOS_ISO_KERNEL_SHA256=%s\n' "$iso_kernel_sha256"
 printf 'ANDUINOS_INITRD_CHECK=ok\n'

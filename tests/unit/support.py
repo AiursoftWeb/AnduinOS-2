@@ -34,6 +34,8 @@ from assertions.install import (
     _assert_release_contracts,
     _validate_passwordless_sudo_evidence,
     assert_installed_region,
+    assert_live_environment,
+    assert_live_identity,
     assert_live_region,
     assert_passwordless_sudo_behavior,
     assert_release_contract,
@@ -125,11 +127,17 @@ from framework.model import (
     Architecture,
     Filesystem,
     Firmware,
+    LiveMode,
     Network,
     SshPolicy,
     TestMatrix,
 )
-from framework.qemu import QemuConfig, QemuVm, _file_size_limiter
+from framework.qemu import (
+    PERSISTENT_LIVE_FREE_SPACE_GIB,
+    QemuConfig,
+    QemuVm,
+    _file_size_limiter,
+)
 from framework.qmp import QmpClient, _ppm_dimensions
 from framework.reporting import write_junit_report
 from framework.visual import (
@@ -233,6 +241,9 @@ class _CleanupVm:
         self.config.disk.parent.mkdir(parents=True, exist_ok=True)
         self.config.disk.write_bytes(b"partial guest")
         self.running = True
+
+    def create_live_media(self):
+        pass
 
     def stop(self):
         self.running = False
