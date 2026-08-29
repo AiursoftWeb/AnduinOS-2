@@ -260,6 +260,14 @@ class BootContractTests(unittest.TestCase):
             "usr/share/initramfs-tools-core",
         ):
             self.assertIn(forbidden_path, script)
+        self.assertNotIn(
+            'printf \'%s\\n\' "$initrd_listing" | grep',
+            script,
+        )
+        self.assertIn(
+            'grep -Fq "$required_member" <<< "$initrd_listing"',
+            script,
+        )
         for moved_assertion in (
             "var/lib/dracut/hooks/pre-pivot/90-anduinos-live-prepare.sh",
             "usr/sbin/create-overlay.upstream",

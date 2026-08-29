@@ -228,7 +228,7 @@ test -s /cdrom/LiveOS/initrd
 test "$(findmnt -n -o FSTYPE /)" = overlay
 modules=$(lsinitrd -m /cdrom/LiveOS/initrd)
 for module in dmsquash-live dmsquash-live-autooverlay overlayfs anduinos-live-layers; do
-    printf '%s\n' "$modules" | grep -Eq "^[[:space:]]*$module[[:space:]]*$"
+    grep -Eq "^[[:space:]]*$module[[:space:]]*$" <<< "$modules"
 done
 dpkg-query -S /usr/sbin/update-initramfs | grep -Fxq 'dracut: /usr/sbin/update-initramfs'
 initrd_listing=$(lsinitrd /cdrom/LiveOS/initrd)
@@ -237,18 +237,18 @@ for forbidden_path in \
     scripts/casper-bottom \
     usr/share/initramfs-tools \
     usr/share/initramfs-tools-core; do
-    ! printf '%s\n' "$initrd_listing" | grep -Fq "$forbidden_path"
+    ! grep -Fq "$forbidden_path" <<< "$initrd_listing"
 done
 for required_member in \
     var/lib/dracut/hooks/pre-pivot/90-anduinos-live-prepare.sh \
     usr/sbin/create-overlay \
     usr/sbin/create-overlay.upstream \
     usr/sbin/dmsquash-live-root; do
-    printf '%s\n' "$initrd_listing" | grep -Fq "$required_member"
+    grep -Fq "$required_member" <<< "$initrd_listing"
 done
 overlay_wrapper=$(lsinitrd -f usr/sbin/create-overlay /cdrom/LiveOS/initrd)
-printf '%s\n' "$overlay_wrapper" | grep -Fq 'parted --script --fix "$block_device" print'
-printf '%s\n' "$overlay_wrapper" | grep -Fq 'LABEL=ANDUINOS-PERSIST'
+grep -Fq 'parted --script --fix "$block_device" print' <<< "$overlay_wrapper"
+grep -Fq 'LABEL=ANDUINOS-PERSIST' <<< "$overlay_wrapper"
 dpkg-query -W -f='${db:Status-Abbrev}' spice-vdagent | grep -q '^ii '
 dpkg-query -W -f='${db:Status-Abbrev}' openssh-server | grep -q '^ii '
 installer_version=$(dpkg-query -W -f='${Version}' anduinos-installer-beta)
