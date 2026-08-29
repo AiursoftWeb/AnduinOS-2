@@ -41,7 +41,7 @@
     },
     {
       "id": "gnome50-gdm-media-keys-null-table",
-      "component_regex": "^gsd-media-keys\\|user@(?!1000\\.)[0-9]+\\.service\\|org\\.gnome\\.SettingsDaemon\\.MediaKeys\\.service\\|/usr/libexec/gsd-media-keys$",
+      "component_regex": "^gsd-media-keys\\|user@(?!1000\\.)[0-9]+\\.service\\|org\\.gnome\\.SettingsDaemon\\.MediaKeys\\.service(?:\\|/usr/libexec/gsd-media-keys)?$",
       "message_regex": "^g_hash_table_size: assertion 'hash_table != NULL' failed$",
       "conditions": {
         "automatic_login": false

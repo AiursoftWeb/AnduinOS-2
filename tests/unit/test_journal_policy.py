@@ -230,25 +230,45 @@ class JournalClassificationTests(unittest.TestCase):
             "org.gnome.SettingsDaemon.MediaKeys.service|"
             "/usr/libexec/gsd-media-keys",
         )
+        greeter_without_exe = entry(
+            message,
+            "gsd-media-keys|user@60578.service|"
+            "org.gnome.SettingsDaemon.MediaKeys.service",
+            cursor="greeter-without-exe",
+        )
         user = entry(
             message,
             "gsd-media-keys|user@1000.service|"
             "org.gnome.SettingsDaemon.MediaKeys.service|"
             "/usr/libexec/gsd-media-keys",
         )
+        user_without_exe = entry(
+            message,
+            "gsd-media-keys|user@1000.service|"
+            "org.gnome.SettingsDaemon.MediaKeys.service",
+            cursor="user-without-exe",
+        )
         accepted = self.policy.classify(
             (greeter,), scenario(automatic_login=False), VERSIONS
+        )
+        accepted_without_exe = self.policy.classify(
+            (greeter_without_exe,), scenario(automatic_login=False), VERSIONS
         )
         automatic = self.policy.classify(
             (greeter,), scenario(automatic_login=True), VERSIONS
         )
         installed_user = self.policy.classify(
-            (user,), scenario(automatic_login=False), VERSIONS
+            (user, user_without_exe), scenario(automatic_login=False), VERSIONS
         )
         self.assertTrue(accepted.passed)
+        self.assertTrue(accepted_without_exe.passed)
         self.assertEqual(
             "gnome50-gdm-media-keys-null-table",
             accepted.known_diagnostics[0].rule_id,
+        )
+        self.assertEqual(
+            "gnome50-gdm-media-keys-null-table",
+            accepted_without_exe.known_diagnostics[0].rule_id,
         )
         self.assertFalse(automatic.passed)
         self.assertFalse(installed_user.passed)
