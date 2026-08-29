@@ -894,6 +894,76 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
 
 
 class SerialTransportTests(unittest.TestCase):
+    def test_run_uploads_long_scripts_before_executing_them(self):
+        console = SerialConsole(Path("unused"), Path("unused"), timeout=1)
+        script = "printf 'one sufficiently long assertion line\\n'\n" * 100
+        uploaded = {}
+
+        def capture_upload(source, destination, mode=0o600):
+            uploaded["content"] = source.read_text(encoding="utf-8")
+            uploaded["destination"] = destination
+            uploaded["mode"] = mode
+
+        with patch.object(console, "upload", side_effect=capture_upload), patch.object(
+            console,
+            "_run_inline",
+            return_value=CommandResult(stdout="complete", returncode=0),
+        ) as run_inline:
+            result = console.run(script)
+
+        self.assertEqual(script, uploaded["content"])
+        self.assertEqual(0o700, uploaded["mode"])
+        self.assertRegex(
+            uploaded["destination"],
+            r"^/tmp/anduinos-serial-run-[0-9a-f]+\.sh$",
+        )
+        execution = run_inline.call_args_list[0].args[0]
+        self.assertIn(f"/bin/bash {uploaded['destination']}", execution)
+        self.assertEqual(CommandResult(stdout="complete", returncode=0), result)
+
+    def test_run_waits_for_the_complete_return_code_line(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "serial.log"
+            reader, writer = socket.socketpair()
+            console = SerialConsole(Path("unused"), transcript, timeout=1)
+            console._socket = reader
+            console._log = transcript.open("ab", buffering=0)
+            failures = []
+
+            def emulate_split_return_code():
+                try:
+                    command = bytearray()
+                    while not command.endswith(b"\n"):
+                        command.extend(writer.recv(65536))
+                    token = re.search(
+                        rb"__ANDUINOS_BEGIN_([0-9a-f]+)__",
+                        bytes(command),
+                    )
+                    if token is None:
+                        raise AssertionError("serial command marker is missing")
+                    value = token.group(1)
+                    writer.sendall(
+                        b"__ANDUINOS_BEGIN_" + value
+                        + b"__\noutput\n__ANDUINOS_END_" + value
+                        + b"__:14"
+                    )
+                    time.sleep(0.05)
+                    writer.sendall(b"1\r\n")
+                except BaseException as error:
+                    failures.append(error)
+
+            thread = threading.Thread(target=emulate_split_return_code)
+            thread.start()
+            try:
+                result = console.run("exit 141", check=False)
+            finally:
+                thread.join(timeout=1)
+                console.close()
+                writer.close()
+            self.assertEqual([], failures)
+            self.assertEqual(141, result.returncode)
+            self.assertEqual("output", result.stdout)
+
     def test_wait_for_shell_never_sends_a_probe_to_firmware_or_grub(self):
         with tempfile.TemporaryDirectory() as directory:
             transcript = Path(directory) / "serial.log"
@@ -1134,9 +1204,13 @@ class SerialTransportTests(unittest.TestCase):
             source = Path(directory) / "fixture.AppImage"
             source.write_bytes(b"X" * (1024 * 1024))
             console = _UploadCaptureConsole()
-            console.upload(source, "/tmp/fixture.AppImage", 0o755)
+            console.upload(
+                source,
+                "/tmp/anduinos-serial-run-0123456789abcdef0123456789abcdef.sh",
+                0o755,
+            )
         self.assertGreater(len(console.scripts), 1000)
-        self.assertLess(max(map(len, console.scripts)), 3000)
+        self.assertLessEqual(max(map(len, console.scripts)), 2048)
         self.assertIn(": > ", console.scripts[0])
         self.assertIn("if [ \"$current\" -eq \"$next\" ]", console.scripts[1])
         self.assertIn("sha256sum", console.scripts[1])

@@ -9,6 +9,7 @@ import re
 import select
 import shlex
 import socket
+import tempfile
 import time
 import uuid
 from dataclasses import dataclass
@@ -50,8 +51,9 @@ _DOWNLOAD_CHUNK_BYTES = 24 * 1024
 _DOWNLOAD_FRAME_ATTEMPTS = 8
 _DOWNLOAD_FILE_ATTEMPTS = 3
 _DOWNLOAD_MAX_BYTES = 64 * 1024 * 1024
-_UPLOAD_CHUNK_BYTES = 1024
+_UPLOAD_CHUNK_BYTES = 768
 _UPLOAD_FRAME_ATTEMPTS = 4
+_INLINE_SCRIPT_MAX_BYTES = 2048
 
 
 @dataclass(frozen=True)
@@ -215,6 +217,54 @@ class SerialConsole:
     ) -> CommandResult:
         """Run an arbitrary shell script without shell-quoting it on the wire."""
 
+        if len(script.encode("utf-8")) <= _INLINE_SCRIPT_MAX_BYTES:
+            return self._run_inline(script, timeout=timeout, check=check)
+
+        token = uuid.uuid4().hex
+        guest_script = f"/tmp/anduinos-serial-run-{token}.sh"
+        quoted_guest_script = shlex.quote(guest_script)
+        local_script: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                prefix="anduinos-serial-run-",
+                suffix=".sh",
+                delete=False,
+            ) as stream:
+                stream.write(script)
+                local_script = Path(stream.name)
+            self.upload(local_script, guest_script, mode=0o700)
+            return self._run_inline(
+                "set +e\n"
+                f"/bin/bash {quoted_guest_script}\n"
+                "rc=$?\n"
+                f"rm -f {quoted_guest_script}\n"
+                "exit \"$rc\"",
+                timeout=timeout,
+                check=check,
+            )
+        finally:
+            if local_script is not None:
+                local_script.unlink(missing_ok=True)
+            try:
+                self._run_inline(
+                    f"rm -f {quoted_guest_script}",
+                    timeout=10,
+                    check=False,
+                )
+            except (OSError, ProtocolError):
+                pass
+
+    def _run_inline(
+        self,
+        script: str,
+        *,
+        timeout: float | None = None,
+        check: bool = True,
+    ) -> CommandResult:
+        """Run one script that is safely below the guest TTY input limit."""
+
         token = uuid.uuid4().hex
         start = f"__ANDUINOS_BEGIN_{token}__"
         end = f"__ANDUINOS_END_{token}__"
@@ -226,12 +276,15 @@ class SerialConsole:
         )
         self._send(command.encode("ascii"))
         raw = self._read_until(
-            re.compile(re.escape(end.encode("ascii")) + rb":([0-9]+)"),
+            re.compile(re.escape(end.encode("ascii")) + rb":([0-9]+)\r?\n"),
             timeout or self.timeout,
         )
         clean = _ANSI_ESCAPE.sub(b"", raw).replace(b"\r", b"")
         start_index = clean.rfind(start.encode("ascii"))
-        match = re.search(re.escape(end.encode("ascii")) + rb":([0-9]+)", clean)
+        match = re.search(
+            re.escape(end.encode("ascii")) + rb":([0-9]+)\n",
+            clean,
+        )
         if start_index < 0 or match is None:
             raise ProtocolError("Serial command markers were not returned")
         output_start = start_index + len(start)
