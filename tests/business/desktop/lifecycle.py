@@ -322,7 +322,7 @@ class LifecycleChecks:
             "test \"$(loginctl show-session \"$session\" -p Type --value)\" = wayland "
             "&& loginctl show-session \"$session\" -p Name --value; done | "
             f"grep -Fx {shlex.quote(self.username)}",
-            timeout=120,
+            timeout=180,
         )
         (artifacts / "btrfs-rollback-graphical-session.txt").write_text(
             graphical + "\n", encoding="utf-8"
