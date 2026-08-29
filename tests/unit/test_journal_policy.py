@@ -25,7 +25,7 @@ ROOT = Path(__file__).parents[1]
 POLICY_PATH = ROOT / "assertions/journal-policy.json"
 VERSIONS = {
     "gdm3": "50.1-0ubuntu0.1",
-    "gnome-shell-extension-desktop-icons-ng-anduinos": "2.0.2-1+resolute",
+    "gnome-shell-extension-desktop-icons-ng-anduinos": "2.0.2-2+resolute",
     "gnome-shell": "50.1-0ubuntu1.2",
     "gnome-settings-daemon": "50.0-1ubuntu1",
     "mutter-common": "50.1-0ubuntu2.2",
@@ -312,7 +312,7 @@ class JournalClassificationTests(unittest.TestCase):
                 VERSIONS,
                 **{
                     "gnome-shell-extension-desktop-icons-ng-anduinos": (
-                        "2.0.2-2+resolute"
+                        "2.0.2-3+resolute"
                     )
                 },
             ),
@@ -327,7 +327,7 @@ class JournalClassificationTests(unittest.TestCase):
         self.assertFalse(excessive.passed)
         self.assertEqual("diagnostic-budget-exceeded", excessive.blockers[0].kind)
         self.assertFalse(expired.passed)
-        self.assertIn("allowed 2.0.2-1+resolute", expired.blockers[0].reason)
+        self.assertIn("allowed 2.0.2-[12]+resolute", expired.blockers[0].reason)
 
     def test_similar_but_unrecognized_error_cannot_use_exception(self):
         item = entry(

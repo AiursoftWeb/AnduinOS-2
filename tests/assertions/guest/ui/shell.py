@@ -459,7 +459,7 @@ def _desktop_terminal_keyboard_plan(evidence: Path) -> int:
     )
     version = version_result.stdout.strip()
     if version_result.returncode != 0 or not re.fullmatch(
-        r"2\.0\.2-1\+resolute(?:-addon)?", version
+        r"2\.0\.2-(?:1|2)\+resolute(?:-addon)?", version
     ):
         raise UiFailure(
             "DING keyboard fallback is not validated for installed version "

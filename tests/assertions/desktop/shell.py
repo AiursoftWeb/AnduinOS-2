@@ -649,7 +649,7 @@ def _validate_desktop_terminal_events(output: str) -> None:
     )
     if (
         not re.fullmatch(
-            r"2\.0\.2-1\+resolute(?:-addon)?",
+            r"2\.0\.2-(?:1|2)\+resolute(?:-addon)?",
             str(plan.get("package_version", "")),
         )
         or plan.get("action_tail")

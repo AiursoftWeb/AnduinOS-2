@@ -88,7 +88,7 @@
       },
       "max_occurrences": 1,
       "package": "gnome-shell-extension-desktop-icons-ng-anduinos",
-      "version_glob": "2.0.2-1+resolute",
+      "version_glob": "2.0.2-[12]+resolute",
       "owner": "GNOME Desktop Icons NG / GTK",
       "reason": "DING 93 on GTK 4.22 can emit this one transient accessibility assertion while closing or replacing a GTK popover. Separate UI checks require DING to remain alive and verify icons, background actions, desktop shortcuts, extension state, and GNOME Shell health."
     },

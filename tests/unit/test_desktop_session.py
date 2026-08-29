@@ -168,7 +168,7 @@ class DesktopSessionOracleTests(FeatureOracleCase):
                 "event": "desktop-context-menu-plan",
                 "target": "desktop_open_terminal",
                 "package": "gnome-shell-extension-desktop-icons-ng-anduinos",
-                "package_version": "2.0.2-1+resolute",
+                "package_version": "2.0.2-2+resolute",
                 "source": "/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/desktopMenu.js",
                 "action_tail": [
                     "open-in-terminal-desktop",
@@ -230,7 +230,7 @@ class DesktopSessionOracleTests(FeatureOracleCase):
         mutations = (
             (1, "target", "主目录", "exactly one semantic event"),
             (1, "application", "gnome-shell", "target DING"),
-            (2, "package_version", "2.0.3-1+resolute", "unvalidated DING"),
+            (2, "package_version", "2.0.2-3+resolute", "unvalidated DING"),
             (3, "key", "down", "exactly one semantic event"),
             (8, "application", "org.gnome.Nautilus", "open Ptyxis"),
             (8, "observed_cwds", [], "open Ptyxis"),
