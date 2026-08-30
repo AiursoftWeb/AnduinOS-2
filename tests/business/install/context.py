@@ -50,6 +50,8 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
         "installer-ui",
         "target-boot-files",
     ]
+    if scenario.firmware.is_uefi:
+        checks.append("boot.uefi-vendor-registration")
     if scenario.mok_enrollment:
         checks.append("mok-manager-workflow")
     checks.append("installed-boot")

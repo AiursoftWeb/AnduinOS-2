@@ -177,6 +177,7 @@ from business.install import (
     _validate_installed_region_ui_events,
     _validate_mok_lifecycle_evidence,
     _validate_target_boot_integrity,
+    _validate_uefi_boot_registration_evidence,
 )
 from framework.serial import CommandResult, SerialConsole, _fatal_kernel_marker
 from framework.storage import (

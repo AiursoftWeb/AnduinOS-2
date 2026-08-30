@@ -118,6 +118,13 @@ class InstallationPhases:
             boot_files = self._show_target_grub_once(vm, scenario, artifacts)
             self._assert_live_cleanup(vm, artifacts)
             vm.screenshot("installer-complete")
+        if scenario.firmware.is_uefi:
+            with self._check(scenario, "boot.uefi-vendor-registration"):
+                self.status(
+                    scenario.id,
+                    "Checking UEFI vendor entry before the first target boot",
+                )
+                self._assert_uefi_boot_registration(vm, scenario, artifacts)
         _power_off(vm)
         self.status(scenario.id, "Installation complete; ISO detached")
         return boot_files

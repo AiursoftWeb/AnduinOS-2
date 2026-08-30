@@ -648,6 +648,7 @@ class ScenarioCheckPlanTests(unittest.TestCase):
             "regional.grub-live-propagation",
             "installer-ui",
             "target-boot-files",
+            "boot.uefi-vendor-registration",
             "installed-boot",
             "installed-contracts",
             *RELEASE_CONTRACT_CHECKS,
@@ -680,6 +681,24 @@ class ScenarioCheckPlanTests(unittest.TestCase):
         checks = scenario_check_ids(scenario)
         self.assertIn("live.persistent-overlay", checks)
         self.assertNotIn("live.temporary-overlay", checks)
+
+    def test_uefi_registration_gate_runs_before_first_target_boot(self):
+        matrix = TestMatrix.load(ROOT / "cases/install.json")
+        for scenario in matrix.scenarios:
+            checks = scenario_check_ids(scenario)
+            with self.subTest(scenario=scenario.id):
+                if scenario.firmware.is_uefi:
+                    self.assertIn("boot.uefi-vendor-registration", checks)
+                    self.assertLess(
+                        checks.index("target-boot-files"),
+                        checks.index("boot.uefi-vendor-registration"),
+                    )
+                    self.assertLess(
+                        checks.index("boot.uefi-vendor-registration"),
+                        checks.index("installed-boot"),
+                    )
+                else:
+                    self.assertNotIn("boot.uefi-vendor-registration", checks)
 
     def test_sudo_check_id_tracks_each_installation_choice(self):
         matrix = TestMatrix.load(ROOT / "cases/install.json")

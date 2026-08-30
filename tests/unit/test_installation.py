@@ -104,6 +104,33 @@ class WifiMigrationOracleTests(unittest.TestCase):
 
 class BootContractTests(unittest.TestCase):
     _GOOD_KERNEL_HASH = "a" * 64
+    _ESP_PARTUUID = "b184c004-3eda-4770-a6c9-ba0a38cb71cb"
+
+    @classmethod
+    def _uefi_registration_evidence(
+        cls,
+        *,
+        fallback_registrar: str = "absent",
+        boot_order: str = "0007,0001",
+        loader: str = r"\EFI\AnduinOS\shimx64.efi",
+        file_device_path: bool = False,
+    ) -> str:
+        vendor_loader = f"File({loader})" if file_device_path else loader
+        return "\n".join(
+            (
+                "ESP_DEVICE=/dev/vda2",
+                f"ESP_PARTUUID={cls._ESP_PARTUUID}",
+                "VENDOR_LOADER=present",
+                f"FALLBACK_REGISTRAR={fallback_registrar}",
+                f"BootOrder: {boot_order}",
+                "Boot0001* UEFI OS "
+                f"HD(2,GPT,{cls._ESP_PARTUUID},0x1800,0x200000)/"
+                r"\EFI\BOOT\BOOTX64.EFI",
+                "Boot0007* AnduinOS "
+                f"HD(2,GPT,{cls._ESP_PARTUUID},0x1800,0x200000)/"
+                f"{vendor_loader}",
+            )
+        )
 
     def test_debug_tty_is_architecture_specific(self):
         self.assertIn("ttyS0", debug_kernel_arguments(Architecture.AMD64))
@@ -113,6 +140,157 @@ class BootContractTests(unittest.TestCase):
     def test_grub_synchronization_follows_the_available_console(self):
         self.assertTrue(uses_graphical_grub_synchronization(Architecture.AMD64))
         self.assertFalse(uses_graphical_grub_synchronization(Architecture.ARM64))
+
+    def test_issue_422_fallback_reset_loop_is_rejected(self):
+        old_installer_state = "\n".join(
+            (
+                "ESP_DEVICE=/dev/nvme0n1p2",
+                f"ESP_PARTUUID={self._ESP_PARTUUID}",
+                "VENDOR_LOADER=present",
+                "FALLBACK_REGISTRAR=present",
+                "BootCurrent: 0001",
+                "Timeout: 1 seconds",
+                "BootOrder: 0001,0000",
+                "Boot0000* AnduinOS    "
+                f"HD(2,GPT,{self._ESP_PARTUUID},0x1800,0x200000)/"
+                r"\EFI\ANDUINOS\SHIMX64.EFI",
+                "Boot0001* UEFI OS     "
+                f"HD(2,GPT,{self._ESP_PARTUUID},0x1800,0x200000)/"
+                r"\EFI\BOOT\BOOTX64.EFI0000424F",
+                "    data: 00 00 42 4f",
+            )
+        )
+        with self.assertRaisesRegex(TestFailure, "ResetSystem fallback loop"):
+            _validate_uefi_boot_registration_evidence(
+                old_installer_state,
+                expected_loader=r"\EFI\AnduinOS\shimx64.efi",
+            )
+
+    def test_uefi_vendor_entry_must_be_first_before_initial_target_boot(self):
+        for file_device_path in (False, True):
+            with self.subTest(file_device_path=file_device_path):
+                _validate_uefi_boot_registration_evidence(
+                    self._uefi_registration_evidence(
+                        file_device_path=file_device_path
+                    ),
+                    expected_loader=r"\EFI\AnduinOS\shimx64.efi",
+                )
+        passing = self._uefi_registration_evidence()
+        faults = {
+            "vendor-loader-missing": passing.replace(
+                "VENDOR_LOADER=present", "VENDOR_LOADER=missing"
+            ),
+            "fallback-registrar-present": passing.replace(
+                "FALLBACK_REGISTRAR=absent", "FALLBACK_REGISTRAR=present"
+            ),
+            "wrong-esp": passing.replace(self._ESP_PARTUUID, "a" * 36, 1),
+            "wrong-loader": passing.replace("shimx64.efi", "grubx64.efi"),
+            "vendor-entry-not-first": passing.replace(
+                "BootOrder: 0007,0001", "BootOrder: 0001,0007"
+            ),
+            "duplicate-vendor-entry": passing
+            + "\nBoot0008* AnduinOS "
+            + f"HD(2,GPT,{self._ESP_PARTUUID},0x1800,0x200000)/"
+            + r"\EFI\AnduinOS\shimx64.efi",
+        }
+        for label, evidence in faults.items():
+            with self.subTest(label=label), self.assertRaises(TestFailure):
+                _validate_uefi_boot_registration_evidence(
+                    evidence,
+                    expected_loader=r"\EFI\AnduinOS\shimx64.efi",
+                )
+
+    def test_uefi_registration_probe_is_valid_bash_and_keeps_raw_evidence(self):
+        runner = object.__new__(ScenarioRunner)
+        runner.architecture = Architecture.AMD64
+        runner._check_note = Mock()
+        scenario = next(
+            item
+            for item in TestMatrix.load(ROOT / "cases/install.json").scenarios
+            if item.firmware is Firmware.UEFI_SECURE_BOOT
+        )
+        serial = Mock()
+        serial.run.return_value = CommandResult(
+            self._uefi_registration_evidence(), 0
+        )
+        vm = SimpleNamespace(serial=serial)
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            runner._assert_uefi_boot_registration(vm, scenario, evidence)
+            self.assertEqual(
+                self._uefi_registration_evidence() + "\n",
+                (evidence / "uefi-boot-registration.txt").read_text(
+                    encoding="utf-8"
+                ),
+            )
+        script = serial.run.call_args.args[0]
+        syntax = subprocess.run(
+            ("bash", "-n"),
+            input=script,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+        self.assertIn("EFI/BOOT/fbx64.efi", script)
+        self.assertIn("efibootmgr --verbose", script)
+
+    def test_uefi_registration_probe_tracks_architecture_and_secure_boot(self):
+        cases = (
+            (
+                Architecture.AMD64,
+                Firmware.UEFI_NO_SECURE_BOOT,
+                "grubx64.efi",
+                "fbx64.efi",
+            ),
+            (
+                Architecture.AMD64,
+                Firmware.UEFI_SECURE_BOOT,
+                "shimx64.efi",
+                "fbx64.efi",
+            ),
+            (
+                Architecture.ARM64,
+                Firmware.UEFI_NO_SECURE_BOOT,
+                "grubaa64.efi",
+                "fbaa64.efi",
+            ),
+            (
+                Architecture.ARM64,
+                Firmware.UEFI_SECURE_BOOT,
+                "shimaa64.efi",
+                "fbaa64.efi",
+            ),
+        )
+        for architecture, firmware, loader, registrar in cases:
+            with self.subTest(
+                architecture=architecture.value,
+                firmware=firmware.value,
+            ):
+                runner = object.__new__(ScenarioRunner)
+                runner.architecture = architecture
+                runner._check_note = Mock()
+                serial = Mock()
+                serial.run.return_value = CommandResult(
+                    self._uefi_registration_evidence(
+                        loader=rf"\EFI\AnduinOS\{loader}"
+                    ),
+                    0,
+                )
+                scenario = SimpleNamespace(
+                    id="uefi-registration-unit",
+                    firmware=firmware,
+                )
+                with tempfile.TemporaryDirectory() as directory:
+                    runner._assert_uefi_boot_registration(
+                        SimpleNamespace(serial=serial),
+                        scenario,
+                        Path(directory),
+                    )
+                script = serial.run.call_args.args[0]
+                self.assertIn(f"EFI/AnduinOS/{loader}", script)
+                self.assertIn(f"EFI/BOOT/{registrar}", script)
 
     def test_live_region_failure_preserves_observed_values_before_rejecting(self):
         console = Mock()

@@ -4,6 +4,62 @@ from .context import *  # noqa: F403
 
 
 class BootChecks:
+    def _assert_uefi_boot_registration(
+        self,
+        vm: QemuVm,
+        scenario: Scenario,
+        artifacts: Path,
+    ) -> None:
+        """Prove the first target boot cannot enter shim's #422 reset loop."""
+
+        if not scenario.firmware.is_uefi:
+            raise TestFailure("UEFI registration check used for a BIOS case")
+        assert vm.serial is not None
+        suffix = "x64" if self.architecture is Architecture.AMD64 else "aa64"
+        executable = (
+            f"shim{suffix}.efi"
+            if scenario.firmware.secure_boot
+            else f"grub{suffix}.efi"
+        )
+        registrar = "fbx64.efi" if suffix == "x64" else "fbaa64.efi"
+        relative_loader = f"EFI/AnduinOS/{executable}"
+        expected_loader = "\\" + relative_loader.replace("/", "\\")
+        script = f"""
+set -uo pipefail
+esp_device=$(lsblk -pnro NAME,PARTLABEL,FSTYPE,TYPE | awk '$2 == "efi-system" && $3 == "vfat" && $4 == "part" {{ print $1; exit }}')
+esp_partuuid=missing
+vendor_loader=missing
+fallback_registrar=unknown
+if [ -n "$esp_device" ] && [ -b "$esp_device" ]; then
+    esp_partuuid=$(blkid -s PARTUUID -o value "$esp_device" 2>/dev/null || true)
+    mountpoint=$(mktemp -d /run/anduinos-esp.XXXXXX)
+    if mount --read-only --types vfat --options nosuid,nodev,noexec "$esp_device" "$mountpoint"; then
+        [ -s "$mountpoint/{relative_loader}" ] && vendor_loader=present || vendor_loader=missing
+        [ -e "$mountpoint/EFI/BOOT/{registrar}" ] && fallback_registrar=present || fallback_registrar=absent
+        umount "$mountpoint"
+    fi
+    rmdir "$mountpoint" 2>/dev/null || true
+fi
+nvram_output=$(efibootmgr --verbose 2>&1 || true)
+printf 'ESP_DEVICE=%s\n' "${{esp_device:-missing}}"
+printf 'ESP_PARTUUID=%s\n' "${{esp_partuuid:-missing}}"
+printf 'VENDOR_LOADER=%s\n' "$vendor_loader"
+printf 'FALLBACK_REGISTRAR=%s\n' "$fallback_registrar"
+printf '%s\n' "$nvram_output"
+"""
+        result = vm.serial.run(script, timeout=60, check=False)
+        destination = artifacts / "uefi-boot-registration.txt"
+        destination.write_text(result.stdout + "\n", encoding="utf-8")
+        _validate_uefi_boot_registration_evidence(
+            result.stdout,
+            expected_loader=expected_loader,
+        )
+        self._check_note(
+            scenario,
+            "boot.uefi-vendor-registration",
+            "AnduinOS vendor loader is first in BootOrder; shim fallback registrar absent",
+        )
+
     def _enroll_mok(
         self,
         vm: QemuVm,

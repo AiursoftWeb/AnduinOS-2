@@ -626,6 +626,7 @@ test \"$value\" = 'nested quotes'
             runner._run_live_phase = interrupt
             interrupted_scenario = SimpleNamespace(
                 id="interrupt",
+                firmware=Firmware.BIOS,
                 network=Network.OFFLINE,
                 mok_enrollment=False,
                 passwordless_sudo=False,

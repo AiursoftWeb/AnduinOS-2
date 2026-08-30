@@ -39,6 +39,78 @@ def _validate_target_boot_integrity(output: str) -> None:
         raise TestFailure("Installed initramfs did not pass structural validation")
 
 
+def _validate_uefi_boot_registration_evidence(
+    output: str,
+    *,
+    expected_loader: str,
+) -> None:
+    """Reject the installed-system shim fallback loop reported in #422."""
+
+    def exact_value(key: str) -> str:
+        matches = re.findall(rf"^{re.escape(key)}=(\S+)$", output, re.MULTILINE)
+        if len(matches) != 1:
+            raise TestFailure(
+                f"UEFI boot registration probe requires exactly one {key}"
+            )
+        return matches[0]
+
+    if exact_value("VENDOR_LOADER") != "present":
+        raise TestFailure("The installed AnduinOS vendor loader is missing")
+    if exact_value("FALLBACK_REGISTRAR") != "absent":
+        raise TestFailure(
+            "The installed UEFI path still contains shim's fallback registrar "
+            "and can enter the ResetSystem fallback loop"
+        )
+
+    partuuid = exact_value("ESP_PARTUUID").strip("{}").casefold()
+    if re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        partuuid,
+    ) is None:
+        raise TestFailure("The installed EFI System Partition has no valid PARTUUID")
+
+    entry_pattern = re.compile(
+        r"^Boot(?P<number>[0-9A-Fa-f]{4})\*?\s+AnduinOS\s+"
+        r"HD\(\d+,GPT,(?P<partuuid>[^,]+),[^)]*\)/"
+        r"(?:File\()?(?P<loader>\\[^)\s]+)\)?",
+        re.MULTILINE,
+    )
+    expected_path = expected_loader.replace("/", "\\").casefold()
+    vendor_entry_numbers = re.findall(
+        r"^Boot([0-9A-Fa-f]{4})\*?\s+AnduinOS(?:\s|$)",
+        output,
+        re.MULTILINE,
+    )
+    if len(vendor_entry_numbers) != 1:
+        raise TestFailure(
+            "Firmware does not contain exactly one AnduinOS boot entry"
+        )
+    matching_entries = []
+    for match in entry_pattern.finditer(output):
+        actual_uuid = match.group("partuuid").strip("{}").casefold()
+        actual_loader = match.group("loader").replace("/", "\\").casefold()
+        if actual_uuid == partuuid and actual_loader == expected_path:
+            matching_entries.append(match.group("number").upper())
+    if len(matching_entries) != 1 or (
+        matching_entries[0] != vendor_entry_numbers[0].upper()
+    ):
+        raise TestFailure(
+            "The AnduinOS boot entry does not target the installed ESP and "
+            "vendor loader"
+        )
+
+    order_matches = re.findall(
+        r"^BootOrder:\s*([0-9A-Fa-f]{4}(?:,[0-9A-Fa-f]{4})*)\s*$",
+        output,
+        re.MULTILINE,
+    )
+    if len(order_matches) != 1:
+        raise TestFailure("Firmware did not report exactly one valid BootOrder")
+    boot_order = tuple(item.upper() for item in order_matches[0].split(","))
+    if boot_order[0] != matching_entries[0]:
+        raise TestFailure("The installed AnduinOS entry is not first in BootOrder")
+
+
 def _validate_mok_lifecycle_evidence(
     pending_output: str,
     enrolled_output: str,
