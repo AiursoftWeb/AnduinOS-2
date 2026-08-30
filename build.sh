@@ -223,54 +223,42 @@ function build_iso() {
     TOGO_TEXT="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
     LIVE_BOOT_ARGS="root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
 
-    # Build locale submenu entries for Try mode.
-    # Each entry also derives a best-guess timezone so the live session
-    # clock matches the user's region, not hardcoded Los Angeles.
+    # Build the Try-mode submenu from the independent Live regional policy.
+    # The selected region supplies useful locale, timezone and physical-XKB
+    # guesses; none of these constrain the system chosen in the installer.
     _TRY_LOCALE_ENTRIES=""
-    while IFS="|" read -r _code _label; do
+    _LIVE_REGION_COUNT=0
+    while IFS="|" read -r _code _label _tz _kbd _extra; do
         [ -z "$_code" ] && continue
-        [ -z "$_label" ] && continue
-
-        # locale -> timezone best-guess mapping
-        case "${_code}" in
-            en_US) _tz="America/New_York" ;;
-            en_GB) _tz="Europe/London" ;;
-            zh_CN) _tz="Asia/Shanghai" ;;
-            zh_TW) _tz="Asia/Taipei" ;;
-            zh_HK) _tz="Asia/Hong_Kong" ;;
-            ja_JP) _tz="Asia/Tokyo" ;;
-            ko_KR) _tz="Asia/Seoul" ;;
-            vi_VN) _tz="Asia/Ho_Chi_Minh" ;;
-            th_TH) _tz="Asia/Bangkok" ;;
-            de_DE) _tz="Europe/Berlin" ;;
-            fr_FR) _tz="Europe/Paris" ;;
-            es_ES) _tz="Europe/Madrid" ;;
-            ru_RU) _tz="Europe/Moscow" ;;
-            it_IT) _tz="Europe/Rome" ;;
-            pt_PT) _tz="Europe/Lisbon" ;;
-            pt_BR) _tz="America/Sao_Paulo" ;;
-            ar_SA) _tz="Asia/Riyadh" ;;
-            nl_NL) _tz="Europe/Amsterdam" ;;
-            sv_SE) _tz="Europe/Stockholm" ;;
-            pl_PL) _tz="Europe/Warsaw" ;;
-            tr_TR) _tz="Europe/Istanbul" ;;
-            ro_RO) _tz="Europe/Bucharest" ;;
-            da_DK) _tz="Europe/Copenhagen" ;;
-            uk_UA) _tz="Europe/Kiev" ;;
-            id_ID) _tz="Asia/Jakarta" ;;
-            fi_FI) _tz="Europe/Helsinki" ;;
-            hi_IN) _tz="Asia/Kolkata" ;;
-            el_GR) _tz="Europe/Athens" ;;
-            *)      _tz="America/Los_Angeles" ;;
+        if [ -z "$_label" ] || [ -z "$_tz" ] || [ -z "$_kbd" ] || [ -n "$_extra" ]; then
+            print_error "Invalid Live regional policy entry: $_code"
+            exit 1
+        fi
+        case "$_code:$_tz:$_kbd" in
+            *[!A-Za-z0-9_+./:@-]*)
+                print_error "Unsafe Live regional policy entry: $_code"
+                exit 1
+                ;;
         esac
+        case "$_label" in
+            *\"*|*\\*|*\$*)
+                print_error "Unsafe Live GRUB label: $_label"
+                exit 1
+                ;;
+        esac
+        _LIVE_REGION_COUNT=$((_LIVE_REGION_COUNT + 1))
 
         _TRY_LOCALE_ENTRIES="$_TRY_LOCALE_ENTRIES
     menuentry \"$_label\" {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} quiet splash ---
+        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} rd.anduinos.keyboard=${_kbd} quiet splash ---
         initrd  /LiveOS/initrd
     }"
-    done <<< "$SUPPORTED_LOCALES"
+    done <<< "$SUPPORTED_LIVE_REGIONS"
+    if [ "$_LIVE_REGION_COUNT" -ne 28 ]; then
+        print_error "Live regional policy must contain exactly 28 entries"
+        exit 1
+    fi
 
     cat << EOF > image/isolinux/grub.cfg
 

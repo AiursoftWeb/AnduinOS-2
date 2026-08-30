@@ -14,7 +14,8 @@
     "mok_password": "123456",
     "live_grub_entry": "Simplified Chinese (China Mainland)",
     "live_locale": "zh_CN.UTF-8",
-    "live_timezone": "Asia/Shanghai"
+    "live_timezone": "Asia/Shanghai",
+    "live_keyboard": "us"
   },
   "cases": [
     {

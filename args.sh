@@ -52,40 +52,43 @@ done
 export LANGUAGE_PACKS="${_LP# }"
 unset _LP _c
 
-# ── GRUB boot menu locale submenu ──────────────────────────────────────────
+# ── GRUB / Live regional policy ────────────────────────────────────────────
 #
-# 28 entries — one per website language. Rendered under
-# "Try and Install in Other Languages..." on the live ISO boot screen.
-# Format: locale_code|Display Label
-export SUPPORTED_LOCALES="
-en_US|English (United States)
-en_GB|English (United Kingdom)
-zh_CN|Simplified Chinese (China Mainland)
-zh_TW|Traditional Chinese (Taiwan)
-zh_HK|Traditional Chinese (Hong Kong)
-ja_JP|Japanese
-ko_KR|Korean
-vi_VN|Vietnamese
-th_TH|Thai
-de_DE|German
-fr_FR|French
-es_ES|Spanish
-ru_RU|Russian
-it_IT|Italian
-pt_PT|Portuguese
-pt_BR|Portuguese (Brazil)
-ar_SA|Arabic
-nl_NL|Dutch
-sv_SE|Swedish
-pl_PL|Polish
-tr_TR|Turkish
-ro_RO|Romanian
-da_DK|Danish
-uk_UA|Ukrainian
-id_ID|Indonesian
-fi_FI|Finnish
-hi_IN|Hindi
-el_GR|Greek
+# This policy configures the temporary Live environment only. The native
+# installer's data/languages.json is an independent policy for the system that
+# will be installed, so users may boot one region and install another.
+#
+# 28 entries — one per Live boot language.
+# Format: locale_code|GRUB label|timezone|XKB layout
+export SUPPORTED_LIVE_REGIONS="
+en_US|English (United States)|America/New_York|us
+en_GB|English (United Kingdom)|Europe/London|gb
+zh_CN|Simplified Chinese (China Mainland)|Asia/Shanghai|us
+zh_TW|Traditional Chinese (Taiwan)|Asia/Taipei|us
+zh_HK|Traditional Chinese (Hong Kong)|Asia/Hong_Kong|us
+ja_JP|Japanese|Asia/Tokyo|jp
+ko_KR|Korean|Asia/Seoul|kr
+vi_VN|Vietnamese|Asia/Ho_Chi_Minh|us
+th_TH|Thai|Asia/Bangkok|th
+de_DE|German|Europe/Berlin|de
+fr_FR|French|Europe/Paris|fr
+es_ES|Spanish|Europe/Madrid|es
+ru_RU|Russian|Europe/Moscow|ru
+it_IT|Italian|Europe/Rome|it
+pt_PT|Portuguese|Europe/Lisbon|pt
+pt_BR|Portuguese (Brazil)|America/Sao_Paulo|br
+ar_SA|Arabic|Asia/Riyadh|ara
+nl_NL|Dutch|Europe/Amsterdam|nl
+sv_SE|Swedish|Europe/Stockholm|se
+pl_PL|Polish|Europe/Warsaw|pl
+tr_TR|Turkish|Europe/Istanbul|tr
+ro_RO|Romanian|Europe/Bucharest|ro
+da_DK|Danish|Europe/Copenhagen|dk
+uk_UA|Ukrainian|Europe/Kiev|ua
+id_ID|Indonesian|Asia/Jakarta|id
+fi_FI|Finnish|Europe/Helsinki|fi
+hi_IN|Hindi|Asia/Kolkata|us
+el_GR|Greek|Europe/Athens|gr
 "
 
 #==========================

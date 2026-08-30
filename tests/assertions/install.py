@@ -193,6 +193,7 @@ def assert_live_environment(
     evidence: Path,
     expected_locale: str,
     expected_timezone: str,
+    expected_keyboard: str,
     session_timeout_seconds: int = 120,
     *,
     check_region: bool = True,
@@ -283,6 +284,7 @@ printf 'dracut-live-contract=ok\n'
             console,
             expected_locale,
             expected_timezone,
+            expected_keyboard,
             evidence,
             session_timeout_seconds=session_timeout_seconds,
         )
@@ -381,6 +383,7 @@ def assert_live_region(
     console: SerialConsole,
     expected_locale: str,
     expected_timezone: str,
+    expected_keyboard: str,
     evidence: Path,
     *,
     session_timeout_seconds: int = 120,
@@ -392,6 +395,9 @@ set -uo pipefail
 localectl_output=$(localectl status 2>&1)
 localectl_status=$?
 system_locale=$(printf '%s\\n' "$localectl_output" | sed -n 's/^[[:space:]]*System Locale: LANG=//p')
+x11_layout=$(printf '%s\\n' "$localectl_output" | sed -n 's/^[[:space:]]*X11 Layout: //p')
+keyboard_file_layout=$(sed -n 's/^XKBLAYOUT="\\([^"]*\\)"$/\\1/p' /etc/default/keyboard)
+marker_keyboard=$(sed -n 's/^ANDUINOS_LIVE_KEYBOARD=//p' /run/anduinos-live/environment | tail -n1)
 timedatectl_output=$(timedatectl show -p Timezone --value 2>&1)
 timedatectl_status=$?
 timezone=$timedatectl_output
@@ -400,6 +406,8 @@ session_user=
 session_uid=
 session_pid=
 session_lang=
+session_sources=
+session_sources_status=1
 session_ready=false
 session_deadline=$((SECONDS + {session_timeout_seconds}))
 while (( SECONDS < session_deadline )); do
@@ -434,12 +442,25 @@ while (( SECONDS < session_deadline )); do
     test "$session_ready" = true && break
     sleep 1
 done
+if test "$session_ready" = true; then
+    session_home=$(getent passwd "$session_uid" | cut -d: -f6)
+    session_sources=$(runuser -u "$session_user" -- env \
+        HOME="$session_home" \
+        XDG_RUNTIME_DIR="/run/user/$session_uid" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$session_uid/bus" \
+        gsettings get org.gnome.desktop.input-sources sources 2>&1)
+    session_sources_status=$?
+fi
 printf 'localectl-status=%s\\ntimedatectl-status=%s\\n' \\
     "$localectl_status" "$timedatectl_status"
 printf 'system-locale=%s\\ntimezone=%s\\nzone-target=%s\\n' \\
     "$system_locale" "$timezone" "$zone_target"
+printf 'x11-layout=%s\\nkeyboard-file-layout=%s\\nmarker-keyboard=%s\\n' \\
+    "$x11_layout" "$keyboard_file_layout" "$marker_keyboard"
 printf 'session-ready=%s\\nsession-user=%s\\nsession-uid=%s\\nsession-pid=%s\\nsession-lang=%s\\n' \\
     "$session_ready" "$session_user" "$session_uid" "$session_pid" "$session_lang"
+printf 'session-sources-status=%s\\nsession-sources=%s\\n' \\
+    "$session_sources_status" "$session_sources"
 printf '%s\\n' "$localectl_output" | sed 's/^/localectl-output: /'
 if test "$session_ready" != true; then
     loginctl --no-pager list-sessions || true
@@ -461,8 +482,22 @@ test "$timedatectl_status" -eq 0 || status=1
 test "$system_locale" = {shlex.quote(expected_locale)} || status=1
 test "$timezone" = {shlex.quote(expected_timezone)} || status=1
 test "$zone_target" = /usr/share/zoneinfo/{shlex.quote(expected_timezone)} || status=1
+test "$x11_layout" = {shlex.quote(expected_keyboard)} || status=1
+test "$keyboard_file_layout" = {shlex.quote(expected_keyboard)} || status=1
+test "$marker_keyboard" = {shlex.quote(expected_keyboard)} || status=1
 test "$session_ready" = true || status=1
 test "$session_lang" = {shlex.quote(expected_locale)} || status=1
+test "$session_sources_status" -eq 0 || status=1
+case "$session_sources" in
+    *"'xkb',"*)
+        printf '%s' "$session_sources" | \
+            grep -Fq {shlex.quote("'xkb', '" + expected_keyboard + "'")} || status=1
+        ;;
+    *)
+        # An empty per-user source list deliberately inherits localed's XKB
+        # choice, already asserted above.
+        ;;
+esac
 exit "$status"
 """
     _record(

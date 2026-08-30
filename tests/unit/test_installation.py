@@ -308,6 +308,7 @@ class BootContractTests(unittest.TestCase):
                     console,
                     "zh_CN.UTF-8",
                     "Asia/Shanghai",
+                    "us",
                     evidence,
                 )
             self.assertIn(
@@ -331,6 +332,7 @@ class BootContractTests(unittest.TestCase):
                 console,
                 "zh_CN.UTF-8",
                 "Asia/Shanghai",
+                "us",
                 Path(directory),
             )
         script = console.run.call_args.args[0]
@@ -354,6 +356,7 @@ class BootContractTests(unittest.TestCase):
                 console,
                 "zh_CN.UTF-8",
                 "Asia/Shanghai",
+                "us",
                 Path(directory),
                 session_timeout_seconds=300,
             )
@@ -418,6 +421,7 @@ class BootContractTests(unittest.TestCase):
                 Path(directory),
                 "zh_CN.UTF-8",
                 "Asia/Shanghai",
+                "us",
                 check_region=False,
             )
         script = next(
@@ -1092,7 +1096,7 @@ class BootContractTests(unittest.TestCase):
     def test_iso_boot_uses_the_exact_selected_grub_region(self):
         grub = "\n".join(
             f'''menuentry "Language {index}" {{
- linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=l{index}_XX.UTF-8 timezone=Zone/{index} systemd.timezone=Zone/{index} quiet splash ---
+ linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=l{index}_XX.UTF-8 timezone=Zone/{index} systemd.timezone=Zone/{index} rd.anduinos.keyboard=k{index} quiet splash ---
 }}'''
             for index in range(28)
         )
@@ -1100,12 +1104,43 @@ class BootContractTests(unittest.TestCase):
         self.assertEqual(28, len(entries))
         self.assertEqual("l2_XX.UTF-8", entries[2].locale)
         self.assertEqual("Zone/2", entries[2].timezone)
+        self.assertEqual("k2", entries[2].keyboard)
+
+    def test_live_boot_regions_are_one_four_field_policy(self):
+        args = (ROOT.parent / "args.sh").read_text(encoding="utf-8")
+        match = re.search(
+            r'export SUPPORTED_LIVE_REGIONS="\n(?P<rows>.*?)\n"',
+            args,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(match)
+        rows = [line.split("|") for line in match["rows"].splitlines()]
+        self.assertEqual(28, len(rows))
+        self.assertTrue(all(len(row) == 4 and all(row) for row in rows))
+        by_locale = {row[0]: tuple(row[1:]) for row in rows}
+        self.assertEqual(
+            ("French", "Europe/Paris", "fr"),
+            by_locale["fr_FR"],
+        )
+        self.assertEqual(
+            (
+                "Simplified Chinese (China Mainland)",
+                "Asia/Shanghai",
+                "us",
+            ),
+            by_locale["zh_CN"],
+        )
+
+        build = (ROOT.parent / "build.sh").read_text(encoding="utf-8")
+        self.assertIn('done <<< "$SUPPORTED_LIVE_REGIONS"', build)
+        self.assertIn("rd.anduinos.keyboard=${_kbd}", build)
+        self.assertNotIn('case "${_code}"', build)
 
     def test_iso_rejects_a_partial_regional_menu(self):
         with self.assertRaises(ConfigurationError):
             _parse_live_entries(
                 '''menuentry "Only one" {
- linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=en_US.UTF-8 timezone=Etc/UTC systemd.timezone=Etc/UTC
+ linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=en_US.UTF-8 timezone=Etc/UTC systemd.timezone=Etc/UTC rd.anduinos.keyboard=us
 }'''
             )
 

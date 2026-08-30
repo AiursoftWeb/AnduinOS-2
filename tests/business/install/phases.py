@@ -42,6 +42,7 @@ class InstallationPhases:
                 artifacts,
                 self.defaults.live_locale,
                 self.defaults.live_timezone,
+                self.defaults.live_keyboard,
                 session_timeout_seconds=self.options.boot_timeout_seconds,
                 check_region=False,
             )
@@ -81,6 +82,7 @@ class InstallationPhases:
                     artifacts,
                     self.defaults.live_locale,
                     self.defaults.live_timezone,
+                    self.defaults.live_keyboard,
                     session_timeout_seconds=self.options.boot_timeout_seconds,
                     check_region=False,
                 )
@@ -97,12 +99,13 @@ class InstallationPhases:
         with self._check(scenario, "regional.grub-live-propagation"):
             self.status(
                 scenario.id,
-                "Checking GRUB locale and timezone in the real Live GNOME session",
+                "Checking GRUB locale, timezone and keyboard in the real Live GNOME session",
             )
             assert_live_region(
                 vm.serial,
                 self.defaults.live_locale,
                 self.defaults.live_timezone,
+                self.defaults.live_keyboard,
                 artifacts,
                 session_timeout_seconds=self.options.boot_timeout_seconds,
             )
@@ -143,6 +146,7 @@ class InstallationPhases:
                 f"locale={self.defaults.live_locale}",
                 f"timezone={self.defaults.live_timezone}",
                 f"systemd.timezone={self.defaults.live_timezone}",
+                f"rd.anduinos.keyboard={self.defaults.live_keyboard}",
             )
             if persistent
             else ()

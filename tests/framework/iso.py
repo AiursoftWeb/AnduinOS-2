@@ -42,6 +42,7 @@ class LiveGrubEntry:
     kernel_arguments: tuple[str, ...]
     locale: str
     timezone: str
+    keyboard: str
 
 
 @dataclass(frozen=True)
@@ -270,11 +271,15 @@ def _parse_live_entries(content: str) -> tuple[LiveGrubEntry, ...]:
             if "=" in token
             for key, value in (token.split("=", 1),)
         }
-        if "locale" not in values or "timezone" not in values:
+        if not {"locale", "timezone", "rd.anduinos.keyboard"} <= values.keys():
             continue
         if values.get("systemd.timezone") != values["timezone"]:
             raise ConfigurationError(
                 f"GRUB entry {match['name']!r} has contradictory timezone arguments"
+            )
+        if re.fullmatch(r"[a-z0-9_-]+", values["rd.anduinos.keyboard"]) is None:
+            raise ConfigurationError(
+                f"GRUB entry {match['name']!r} has an unsafe keyboard layout"
             )
         entries.append(
             LiveGrubEntry(
@@ -282,11 +287,13 @@ def _parse_live_entries(content: str) -> tuple[LiveGrubEntry, ...]:
                 kernel_arguments=arguments,
                 locale=values["locale"],
                 timezone=values["timezone"],
+                keyboard=values["rd.anduinos.keyboard"],
             )
         )
     if len(entries) != 28:
         raise ConfigurationError(
-            f"ISO GRUB must declare 28 locale/timezone live entries; found {len(entries)}"
+            "ISO GRUB must declare 28 locale/timezone/keyboard Live entries; "
+            f"found {len(entries)}"
         )
     if len({entry.name for entry in entries}) != len(entries):
         raise ConfigurationError("ISO GRUB contains duplicate localized live entry names")

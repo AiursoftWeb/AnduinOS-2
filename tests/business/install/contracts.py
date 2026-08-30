@@ -44,6 +44,11 @@ class InstallationContracts:
                 "GRUB entry timezone is "
                 f"{entry.timezone}, expected {self.defaults.live_timezone}"
             )
+        if entry.keyboard != self.defaults.live_keyboard:
+            raise TestFailure(
+                "GRUB entry keyboard is "
+                f"{entry.keyboard}, expected {self.defaults.live_keyboard}"
+            )
         return entry
 
     def _assert_grub_regional_contract(self, artifacts: Path):
@@ -55,6 +60,7 @@ class InstallationContracts:
                 "name": candidate.name,
                 "locale": candidate.locale,
                 "timezone": candidate.timezone,
+                "keyboard": candidate.keyboard,
                 "kernel_arguments": list(candidate.kernel_arguments),
             }
             for candidate in self.inspection.live_entries
@@ -71,6 +77,7 @@ class InstallationContracts:
             "selected_entry": selected[0],
             "expected_locale": self.defaults.live_locale,
             "expected_timezone": self.defaults.live_timezone,
+            "expected_keyboard": self.defaults.live_keyboard,
             "entries": values,
         }
         (artifacts / "iso-grub-regional-contract.json").write_text(

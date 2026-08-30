@@ -67,6 +67,7 @@ class MatrixDefaults:
     live_grub_entry: str
     live_locale: str
     live_timezone: str
+    live_keyboard: str
 
 
 @dataclass(frozen=True)
@@ -155,6 +156,7 @@ def _load_defaults(value: object) -> MatrixDefaults:
         "live_grub_entry",
         "live_locale",
         "live_timezone",
+        "live_keyboard",
     }
     if set(value) != required:
         raise ConfigurationError("Test matrix defaults have an invalid shape")

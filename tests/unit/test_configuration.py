@@ -59,6 +59,7 @@ class MatrixTests(unittest.TestCase):
         )
         self.assertEqual("zh_CN.UTF-8", matrix.defaults.live_locale)
         self.assertEqual("Asia/Shanghai", matrix.defaults.live_timezone)
+        self.assertEqual("us", matrix.defaults.live_keyboard)
 
     def test_wifi_acceptance_is_amd64_local_only(self):
         raw = json.loads((ROOT / "cases/install.json").read_text(encoding="utf-8"))
