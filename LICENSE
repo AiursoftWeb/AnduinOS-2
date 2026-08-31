@@ -632,7 +632,7 @@ the exclusion of warranty; and each file should have at least the
 
         AnduinOS is a custom Ubuntu-based Linux distribution that offers a familiar and easy-to-use experience for anyone moving to Linux.
 
-        Copyright (C) 2025  AnduinOS
+        Copyright (C) 2026  AnduinOS
 
         This program is free software: you can redistribute it and/or modify
         it under the terms of the GNU General Public License as published by
@@ -653,7 +653,7 @@ mail.
 If the program does terminal interaction, make it output a short
 notice like this when it starts in an interactive mode:
 
-        AnduinOS  Copyright (c) 2025  AnduinXue
+        AnduinOS  Copyright (c) 2026  AnduinXue
         This program comes with ABSOLUTELY NO WARRANTY; for details type `show w'.
         This is free software, and you are welcome to redistribute it
         under certain conditions; type `show c' for details.
