@@ -13,6 +13,12 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .disk_cleanup import (
+    DiskCleanupError,
+    format_cleanup_report,
+    reclaim_orphaned_disks,
+    test_results_lease,
+)
 from .process_lifecycle import parent_death_preexec
 from .storage import cleanup_supervised_ramdisk_workspaces
 
@@ -72,15 +78,26 @@ def supervised_main(entrypoint: Path, argv: list[str]) -> int:
         item in {"--keep-passed-disk", "--keep-passed-disks", "--keep-failed-disk"}
         for item in worker_argv
     )
-    return run_supervised_worker(
-        command,
-        environment=environment,
-        artifacts=artifacts,
-        artifacts_preexisting=artifacts_preexisting,
-        workspace_token=token,
-        retain_disks=retain_disks,
-        fault_log=fault_log,
-    )
+    try:
+        with test_results_lease(artifacts.parent):
+            report = reclaim_orphaned_disks(
+                artifacts.parent,
+                exclude_roots=(artifacts,),
+            )
+            if report.candidate_count or report.skipped_paths:
+                print(format_cleanup_report(report))
+            return run_supervised_worker(
+                command,
+                environment=environment,
+                artifacts=artifacts,
+                artifacts_preexisting=artifacts_preexisting,
+                workspace_token=token,
+                retain_disks=retain_disks,
+                fault_log=fault_log,
+            )
+    except DiskCleanupError as error:
+        print(f"error: acceptance disk preflight failed: {error}", file=sys.stderr)
+        return 2
 
 
 def run_supervised_worker(

@@ -49,3 +49,22 @@ the run, including the expanded writable Live-media copy and including after
 interruption. Keep the result directory when filing a failure; its evidence
 identifies whether the product, host prerequisites, or an external service
 caused the failure.
+
+Before a new matrix starts, `make test` also reclaims disposable disks orphaned
+by an uncatchable `SIGKILL`, power loss, or host reboot. A kernel-backed lease
+prevents cleanup while another acceptance run is active. The scanner removes
+only the exact `target.qcow2`, `overlay.qcow2`, and `live-media.raw` paths from
+user-owned result directories; it preserves logs, screenshots, structured
+evidence, explicit single-case debug disks, foreign-owned paths, and symlinks.
+
+Run the same cleanup without starting QEMU through the singular test entrypoint:
+
+```bash
+python3 tests/run.py clean-disks
+```
+
+Preview the reclaimable allocation without changing files with:
+
+```bash
+python3 tests/run.py clean-disks --dry-run
+```

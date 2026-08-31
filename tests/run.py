@@ -13,6 +13,10 @@ if str(TESTS_DIRECTORY) not in sys.path:
     sys.path.insert(0, str(TESTS_DIRECTORY))
 
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["clean-disks"]:
+        from framework.disk_cleanup import cleanup_main
+
+        raise SystemExit(cleanup_main(sys.argv[2:]))
     # Keep the long-running CLI in a child process.  The parent imports no
     # image/UI native modules and can still reclaim QEMU and qcow2 files if a
     # codec or accessibility library terminates the worker with SIGSEGV.

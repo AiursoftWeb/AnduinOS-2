@@ -123,6 +123,7 @@ buildtorrent:
 	echo "[MAKE] Torrent generation complete."
 
 test:
+	@python3 tests/run.py clean-disks --root test-results
 	@PYTHONPATH=tests python3 -m unittest discover -s tests/unit -p 'test_*.py'
 	@iso='$(ISO)'; arch='$(ARCH)'; \
 	if [ -z "$$iso" ]; then \
