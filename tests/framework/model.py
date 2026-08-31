@@ -71,6 +71,14 @@ class MatrixDefaults:
 
 
 @dataclass(frozen=True)
+class LiveRegion:
+    grub_entry: str
+    locale: str
+    timezone: str
+    keyboard: str
+
+
+@dataclass(frozen=True)
 class Scenario:
     id: str
     architectures: tuple[Architecture, ...]
@@ -78,6 +86,7 @@ class Scenario:
     network: Network
     filesystem: Filesystem
     live_mode: LiveMode
+    live_region: LiveRegion | None
     rime: bool
     online_features: bool
     ssh: SshPolicy
@@ -89,6 +98,20 @@ class Scenario:
 
     def supports(self, architecture: Architecture) -> bool:
         return architecture in self.architectures
+
+
+def scenario_live_region(
+    defaults: MatrixDefaults,
+    scenario: Scenario,
+) -> LiveRegion:
+    """Resolve a case-specific Live policy without changing install choices."""
+
+    return scenario.live_region or LiveRegion(
+        grub_entry=defaults.live_grub_entry,
+        locale=defaults.live_locale,
+        timezone=defaults.live_timezone,
+        keyboard=defaults.live_keyboard,
+    )
 
 
 @dataclass(frozen=True)
@@ -196,7 +219,8 @@ def _load_scenario(value: object) -> Scenario:
         "snapshots_manager",
         "mok_enrollment",
     }
-    if set(value) != required:
+    optional = {"live_region"}
+    if not required <= set(value) or not set(value) <= required | optional:
         raise ConfigurationError("A test case has an invalid shape")
     identifier = value["id"]
     if not isinstance(identifier, str) or not identifier:
@@ -250,6 +274,9 @@ def _load_scenario(value: object) -> Scenario:
         raise ConfigurationError(
             f"{identifier}: snapshot-manager policy contradicts filesystem"
         )
+    live_region = None
+    if "live_region" in value:
+        live_region = _load_live_region(value["live_region"], identifier)
     return Scenario(
         id=identifier,
         architectures=architectures,
@@ -257,6 +284,7 @@ def _load_scenario(value: object) -> Scenario:
         network=network,
         filesystem=filesystem,
         live_mode=live_mode,
+        live_region=live_region,
         rime=value["rime"],
         online_features=value["online_features"],
         ssh=ssh,
@@ -266,3 +294,21 @@ def _load_scenario(value: object) -> Scenario:
         snapshots_manager=value["snapshots_manager"],
         mok_enrollment=value["mok_enrollment"],
     )
+
+
+def _load_live_region(value: object, identifier: str) -> LiveRegion:
+    if not isinstance(value, dict) or set(value) != {
+        "grub_entry",
+        "locale",
+        "timezone",
+        "keyboard",
+    }:
+        raise ConfigurationError(
+            f"{identifier}: live_region must contain exactly four fields"
+        )
+    for name, item in value.items():
+        if not isinstance(item, str) or not item:
+            raise ConfigurationError(
+                f"{identifier}: live_region.{name} must be a non-empty string"
+            )
+    return LiveRegion(**value)

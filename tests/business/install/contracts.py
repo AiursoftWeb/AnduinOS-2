@@ -33,28 +33,34 @@ class InstallationContracts:
                 + "\n- ".join(failures)
             )
 
-    def _live_grub_entry(self):
-        entry = self.inspection.live_entry(self.defaults.live_grub_entry)
-        if entry.locale != self.defaults.live_locale:
+    def _live_grub_entry(self, scenario: Scenario):
+        region = scenario_live_region(self.defaults, scenario)
+        entry = self.inspection.live_entry(region.grub_entry)
+        if entry.locale != region.locale:
             raise TestFailure(
-                f"GRUB entry locale is {entry.locale}, expected {self.defaults.live_locale}"
+                f"GRUB entry locale is {entry.locale}, expected {region.locale}"
             )
-        if entry.timezone != self.defaults.live_timezone:
+        if entry.timezone != region.timezone:
             raise TestFailure(
                 "GRUB entry timezone is "
-                f"{entry.timezone}, expected {self.defaults.live_timezone}"
+                f"{entry.timezone}, expected {region.timezone}"
             )
-        if entry.keyboard != self.defaults.live_keyboard:
+        if entry.keyboard != region.keyboard:
             raise TestFailure(
                 "GRUB entry keyboard is "
-                f"{entry.keyboard}, expected {self.defaults.live_keyboard}"
+                f"{entry.keyboard}, expected {region.keyboard}"
             )
         return entry
 
-    def _assert_grub_regional_contract(self, artifacts: Path):
+    def _assert_grub_regional_contract(
+        self,
+        scenario: Scenario,
+        artifacts: Path,
+    ):
         """Retain the exact 28-entry ISO contract before QEMU can boot it."""
 
-        entry = self._live_grub_entry()
+        region = scenario_live_region(self.defaults, scenario)
+        entry = self._live_grub_entry(scenario)
         values = [
             {
                 "name": candidate.name,
@@ -68,16 +74,16 @@ class InstallationContracts:
         if len(values) != 28 or len({value["name"] for value in values}) != 28:
             raise TestFailure("ISO GRUB regional contract is not 28 unique entries")
         selected = [
-            value for value in values if value["name"] == self.defaults.live_grub_entry
+            value for value in values if value["name"] == region.grub_entry
         ]
         if len(selected) != 1:
             raise TestFailure("Selected GRUB regional entry is not unique")
         report = {
             "entry_count": len(values),
             "selected_entry": selected[0],
-            "expected_locale": self.defaults.live_locale,
-            "expected_timezone": self.defaults.live_timezone,
-            "expected_keyboard": self.defaults.live_keyboard,
+            "expected_locale": region.locale,
+            "expected_timezone": region.timezone,
+            "expected_keyboard": region.keyboard,
             "entries": values,
         }
         (artifacts / "iso-grub-regional-contract.json").write_text(

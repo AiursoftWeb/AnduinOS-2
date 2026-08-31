@@ -31,7 +31,11 @@ class UiFailure(RuntimeError):
 ALIASES = {
     "next": ("Next", "下一步", "Continue Installation", "继续安装"),
     "skip": ("Skip", "跳过"),
-    "welcome": ("Welcome to AnduinOS", "欢迎使用 AnduinOS"),
+    "welcome": (
+        "Welcome to AnduinOS",
+        "欢迎使用 AnduinOS",
+        "AnduinOS へようこそ",
+    ),
     "secure_boot": (
         "AnduinOS supports Secure Boot",
         "AnduinOS 支持安全启动",

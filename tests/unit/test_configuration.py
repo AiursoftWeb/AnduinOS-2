@@ -2,10 +2,10 @@
 
 from unit.support import *  # noqa: F403
 class MatrixTests(unittest.TestCase):
-    def test_matrix_has_the_intended_eleven_unique_scenarios(self):
+    def test_matrix_has_the_intended_twelve_unique_scenarios(self):
         matrix = TestMatrix.load(ROOT / "cases/install.json")
-        self.assertEqual(11, len(matrix.scenarios))
-        self.assertEqual(11, len({item.id for item in matrix.scenarios}))
+        self.assertEqual(12, len(matrix.scenarios))
+        self.assertEqual(12, len({item.id for item in matrix.scenarios}))
         self.assertEqual(
             {
                 "bios-offline-btrfs",
@@ -14,6 +14,7 @@ class MatrixTests(unittest.TestCase):
                 "uefi-nosb-offline-btrfs",
                 "uefi-nosb-online-btrfs-ssh-enabled",
                 "uefi-nosb-online-btrfs-ssh-toggle",
+                "uefi-nosb-online-btrfs-japanese-live-chinese-rime",
                 "uefi-nosb-offline-ext4",
                 "uefi-nosb-wifi-btrfs",
                 "uefi-sb-offline-btrfs",
@@ -22,7 +23,7 @@ class MatrixTests(unittest.TestCase):
             },
             {item.id for item in matrix.scenarios},
         )
-        self.assertEqual(11, len(matrix.select(Architecture.AMD64)))
+        self.assertEqual(12, len(matrix.select(Architecture.AMD64)))
         self.assertEqual(7, len(matrix.select(Architecture.ARM64)))
 
         scenarios = matrix.scenarios
@@ -36,7 +37,7 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(1, sum(item.ssh is SshPolicy.TOGGLE for item in scenarios))
         self.assertEqual(4, sum(item.network is Network.OFFLINE for item in scenarios))
         self.assertEqual(1, sum(item.network is Network.WIFI for item in scenarios))
-        self.assertEqual(3, sum(item.rime for item in scenarios))
+        self.assertEqual(4, sum(item.rime for item in scenarios))
         self.assertEqual(1, sum(item.passwordless_sudo for item in scenarios))
         self.assertEqual(1, sum(item.automatic_login for item in scenarios))
         self.assertEqual(1, sum(item.desktop_contracts for item in scenarios))
@@ -60,6 +61,35 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual("zh_CN.UTF-8", matrix.defaults.live_locale)
         self.assertEqual("Asia/Shanghai", matrix.defaults.live_timezone)
         self.assertEqual("us", matrix.defaults.live_keyboard)
+        japanese = next(
+            item
+            for item in scenarios
+            if item.id
+            == "uefi-nosb-online-btrfs-japanese-live-chinese-rime"
+        )
+        self.assertEqual(
+            LiveRegion(
+                grub_entry="Japanese",
+                locale="ja_JP.UTF-8",
+                timezone="Asia/Tokyo",
+                keyboard="jp",
+            ),
+            japanese.live_region,
+        )
+        self.assertEqual(
+            japanese.live_region,
+            scenario_live_region(matrix.defaults, japanese),
+        )
+        ordinary = next(item for item in scenarios if item.live_region is None)
+        self.assertEqual(
+            LiveRegion(
+                grub_entry="Simplified Chinese (China Mainland)",
+                locale="zh_CN.UTF-8",
+                timezone="Asia/Shanghai",
+                keyboard="us",
+            ),
+            scenario_live_region(matrix.defaults, ordinary),
+        )
 
     def test_wifi_acceptance_is_amd64_local_only(self):
         raw = json.loads((ROOT / "cases/install.json").read_text(encoding="utf-8"))

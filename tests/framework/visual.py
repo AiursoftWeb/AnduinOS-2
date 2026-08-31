@@ -126,7 +126,11 @@ def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
     # A partially repainted 28-entry locale menu can temporarily lose its wide
     # highlight band; rejecting crowded content prevents that transient menu
     # from masquerading as the editor after the `e` key.
-    if not 3 <= len(command_bands) <= 8:
+    # While a long linux line is wrapping, the first few glyphs on its new
+    # visual row can form several disconnected horizontal bands. The Live
+    # keyboard argument made one real trace briefly reach nine bands while
+    # typing k=s; the 28-entry locale menu remains far above this bound.
+    if not 3 <= len(command_bands) <= 12:
         return None
     return GrubEditorLayout(
         top=top,

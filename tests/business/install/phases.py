@@ -12,8 +12,9 @@ class InstallationPhases:
         *,
         wifi_lab: WifiLab | None = None,
     ) -> InstalledBootFiles | None:
+        live_region = scenario_live_region(self.defaults, scenario)
         with self._check(scenario, "regional.grub-contract"):
-            live_entry = self._assert_grub_regional_contract(artifacts)
+            live_entry = self._assert_grub_regional_contract(scenario, artifacts)
         persistent = scenario.live_mode is LiveMode.PERSISTENT
         with self._check(scenario, "live-boot"):
             self.status(
@@ -25,6 +26,7 @@ class InstallationPhases:
             self._boot_live_session(
                 vm,
                 live_entry,
+                live_region,
                 persistent=persistent,
                 phase=("live-persistent-first" if persistent else "live-temporary"),
             )
@@ -40,9 +42,9 @@ class InstallationPhases:
                 vm.serial,
                 scenario,
                 artifacts,
-                self.defaults.live_locale,
-                self.defaults.live_timezone,
-                self.defaults.live_keyboard,
+                live_region.locale,
+                live_region.timezone,
+                live_region.keyboard,
                 session_timeout_seconds=self.options.boot_timeout_seconds,
                 check_region=False,
             )
@@ -73,6 +75,7 @@ class InstallationPhases:
                 self._boot_live_session(
                     vm,
                     live_entry,
+                    live_region,
                     persistent=True,
                     phase="live-persistent-second",
                 )
@@ -80,9 +83,9 @@ class InstallationPhases:
                     vm.serial,
                     scenario,
                     artifacts,
-                    self.defaults.live_locale,
-                    self.defaults.live_timezone,
-                    self.defaults.live_keyboard,
+                    live_region.locale,
+                    live_region.timezone,
+                    live_region.keyboard,
                     session_timeout_seconds=self.options.boot_timeout_seconds,
                     check_region=False,
                 )
@@ -103,9 +106,9 @@ class InstallationPhases:
             )
             assert_live_region(
                 vm.serial,
-                self.defaults.live_locale,
-                self.defaults.live_timezone,
-                self.defaults.live_keyboard,
+                live_region.locale,
+                live_region.timezone,
+                live_region.keyboard,
                 artifacts,
                 session_timeout_seconds=self.options.boot_timeout_seconds,
             )
@@ -136,6 +139,7 @@ class InstallationPhases:
         self,
         vm: QemuVm,
         regional_entry,
+        live_region: LiveRegion,
         *,
         persistent: bool,
         phase: str,
@@ -143,10 +147,10 @@ class InstallationPhases:
         entry = self.inspection.persistent_entry if persistent else regional_entry
         extra_arguments = (
             (
-                f"locale={self.defaults.live_locale}",
-                f"timezone={self.defaults.live_timezone}",
-                f"systemd.timezone={self.defaults.live_timezone}",
-                f"rd.anduinos.keyboard={self.defaults.live_keyboard}",
+                f"locale={live_region.locale}",
+                f"timezone={live_region.timezone}",
+                f"systemd.timezone={live_region.timezone}",
+                f"rd.anduinos.keyboard={live_region.keyboard}",
             )
             if persistent
             else ()
@@ -452,6 +456,13 @@ fi
                 self.defaults.live_timezone,
                 artifacts,
             )
+            if scenario.live_region is not None:
+                assert_installed_keyboard(
+                    vm.serial,
+                    self.defaults.username,
+                    self.defaults.live_keyboard,
+                    artifacts,
+                )
             self._assert_installed_ui_region(vm, scenario, artifacts)
         with self._check(scenario, "theme.cursor-user-session"):
             vm.screenshot("installed-desktop")

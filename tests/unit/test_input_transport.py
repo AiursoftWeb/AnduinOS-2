@@ -1239,6 +1239,15 @@ class SerialTransportTests(unittest.TestCase):
             self.assertFalse(destination.exists())
 
 
+class InstallerUiContractTests(unittest.TestCase):
+    def test_welcome_alias_accepts_the_japanese_live_installer_title(self):
+        source = (ROOT / "assertions/guest/ui/core.py").read_text(
+            encoding="utf-8"
+        )
+        welcome_alias = source.split('"welcome": (', 1)[1].split("),", 1)[0]
+        self.assertIn('"AnduinOS へようこそ"', welcome_alias)
+
+
 class VisualOracleTests(unittest.TestCase):
     def test_grub_top_menu_waits_for_three_stable_frames(self):
         editor = object.__new__(_GraphicalGrubMenuEditor)
@@ -1534,6 +1543,7 @@ class VisualOracleTests(unittest.TestCase):
             crowded = root / "crowded-menu.ppm"
             cursor = root / "cursor.ppm"
             wrapped = root / "wrapped-editor.ppm"
+            sparse_wrap = root / "sparse-wrapped-editor.ppm"
             image = Image.new("RGB", (1280, 800), "black")
             draw = ImageDraw.Draw(image)
             draw.rectangle((12, 67, 1267, 675), outline=(190, 190, 190), width=2)
@@ -1573,6 +1583,14 @@ class VisualOracleTests(unittest.TestCase):
                 "timezone=Asia/Shanghai rd.overlay quiet splash ---",
                 fill="white",
             )
+            sparse_wrap_image = image.copy()
+            sparse_wrap_draw = ImageDraw.Draw(sparse_wrap_image)
+            for y in (190, 194, 198, 202, 206):
+                sparse_wrap_draw.line((80, y, 86, y), fill="white")
+            sparse_wrap_image.save(sparse_wrap)
+            sparse_layout = grub_editor_layout(sparse_wrap)
+            self.assertIsNotNone(sparse_layout)
+            self.assertEqual(9, sparse_layout.visible_command_lines)
             wrapped_image.save(wrapped)
             wrapped_layout = grub_editor_layout(wrapped)
             self.assertIsNotNone(wrapped_layout)

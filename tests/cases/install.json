@@ -115,6 +115,28 @@
       "mok_enrollment": false
     },
     {
+      "id": "uefi-nosb-online-btrfs-japanese-live-chinese-rime",
+      "architectures": ["amd64"],
+      "firmware": "uefi-nosb",
+      "network": "online",
+      "filesystem": "btrfs",
+      "live_mode": "temporary",
+      "live_region": {
+        "grub_entry": "Japanese",
+        "locale": "ja_JP.UTF-8",
+        "timezone": "Asia/Tokyo",
+        "keyboard": "jp"
+      },
+      "rime": true,
+      "online_features": false,
+      "ssh": "disabled",
+      "passwordless_sudo": false,
+      "automatic_login": false,
+      "desktop_contracts": false,
+      "snapshots_manager": true,
+      "mok_enrollment": false
+    },
+    {
       "id": "uefi-nosb-offline-ext4",
       "architectures": ["amd64", "arm64"],
       "firmware": "uefi-nosb",

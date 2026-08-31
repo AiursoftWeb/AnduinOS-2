@@ -22,6 +22,7 @@ from collections.abc import Callable
 from assertions.install import (
     RELEASE_CONTRACT_CHECKS,
     assert_installed_environment,
+    assert_installed_keyboard,
     assert_installed_region,
     assert_live_environment,
     assert_live_identity,
@@ -54,10 +55,12 @@ from framework.model import (
     Architecture,
     Firmware,
     LiveMode,
+    LiveRegion,
     MatrixDefaults,
     Network,
     Scenario,
     SshPolicy,
+    scenario_live_region,
 )
 from framework.qemu import (
     PERSISTENT_LIVE_FREE_SPACE_GIB,

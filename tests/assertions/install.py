@@ -352,6 +352,18 @@ printf 'sudo-status=%s\nsudo-output=%s\n' "$sudo_status" "$sudo_output"
 printf 'marker-user=%s\nmarker-hostname=%s\n' "$marker_user" "$marker_hostname"
 printf 'autologin-enabled=%s\nautologin-user=%s\ntimed-login-enabled=%s\n' \
     "$autologin_enabled" "$autologin_user" "$timed_login_enabled"
+if test "$session_ready" != true; then
+    loginctl --no-pager list-sessions 2>&1 | sed 's/^/loginctl: /' || true
+    ps -eo user:24,pid,comm,args \
+        | grep -E 'gnome-shell|gdm|anduinos-live-session' \
+        | sed 's/^/process: /' || true
+    systemctl --no-pager --full status \
+        anduinos-live-session.service gdm.service 2>&1 \
+        | sed 's/^/systemd: /' || true
+    journalctl -b --no-pager -n 200 \
+        -u anduinos-live-session.service -u gdm.service 2>&1 \
+        | sed 's/^/journal: /' || true
+fi
 
 status=0
 test "$account_name" = "$expected_user" || status=1
@@ -572,6 +584,57 @@ exit "$status"
         console,
         script,
         evidence / "installed-locale-timezone-session.txt",
+        timeout=60,
+    )
+
+
+def assert_installed_keyboard(
+    console: SerialConsole,
+    username: str,
+    expected_keyboard: str,
+    evidence: Path,
+) -> None:
+    """Prove the installed keyboard for the cross-policy regional scenario."""
+
+    quoted_user = shlex.quote(username)
+    quoted_keyboard = shlex.quote(expected_keyboard)
+    quoted_xkb_source = shlex.quote("'xkb', '" + expected_keyboard + "'")
+    script = f"""
+set -uo pipefail
+localectl_output=$(localectl status 2>&1)
+localectl_status=$?
+x11_layout=$(printf '%s\n' "$localectl_output" | sed -n 's/^[[:space:]]*X11 Layout: //p')
+keyboard_file_layout=$(sed -n 's/^XKBLAYOUT="\\([^"]*\\)"$/\\1/p' /etc/default/keyboard)
+uid=$(id -u {quoted_user})
+session_home=$(getent passwd {quoted_user} | cut -d: -f6)
+session_sources=$(runuser -u {quoted_user} -- env \
+    HOME="$session_home" \
+    XDG_RUNTIME_DIR="/run/user/$uid" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+    gsettings get org.gnome.desktop.input-sources sources 2>&1)
+session_sources_status=$?
+printf 'localectl-status=%s\nx11-layout=%s\nkeyboard-file-layout=%s\n' \
+    "$localectl_status" "$x11_layout" "$keyboard_file_layout"
+printf 'session-sources-status=%s\nsession-sources=%s\n' \
+    "$session_sources_status" "$session_sources"
+printf '%s\n' "$localectl_output" | sed 's/^/localectl-output: /'
+status=0
+test "$localectl_status" -eq 0 || status=1
+test "$x11_layout" = {quoted_keyboard} || status=1
+test "$keyboard_file_layout" = {quoted_keyboard} || status=1
+test "$session_sources_status" -eq 0 || status=1
+case "$session_sources" in
+    *"'xkb',"*)
+        printf '%s' "$session_sources" | grep -Fq {quoted_xkb_source} || status=1
+        ;;
+    *) ;;
+esac
+exit "$status"
+"""
+    _record(
+        console,
+        script,
+        evidence / "installed-keyboard.txt",
         timeout=60,
     )
 

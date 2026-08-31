@@ -408,6 +408,8 @@ class BootContractTests(unittest.TestCase):
         ):
             self.assertIn(contract, script)
         self.assertIn("session_deadline=$((SECONDS + 300))", script)
+        self.assertIn("anduinos-live-session.service gdm.service", script)
+        self.assertIn("journalctl -b --no-pager -n 200", script)
         self.assertEqual(330, console.run.call_args.kwargs["timeout"])
 
     def test_live_environment_rejects_legacy_initrd_hook_paths(self):
@@ -555,6 +557,18 @@ class BootContractTests(unittest.TestCase):
         self.assertNotIn('test "$session_lang" = zh_CN.UTF-8', script)
         self.assertNotIn('test "$session_language" = zh_CN:zh', script)
         self.assertNotIn("dbus-run-session", script)
+
+    def test_installed_keyboard_is_a_separate_targeted_contract(self):
+        console = Mock()
+        console.run.return_value = CommandResult("", 0)
+        with tempfile.TemporaryDirectory() as directory:
+            evidence = Path(directory)
+            assert_installed_keyboard(console, "anduinostest", "us", evidence)
+            self.assertTrue((evidence / "installed-keyboard.txt").is_file())
+        script = console.run.call_args.args[0]
+        self.assertIn('test "$x11_layout" = us', script)
+        self.assertIn('test "$keyboard_file_layout" = us', script)
+        self.assertIn("org.gnome.desktop.input-sources sources", script)
 
     def test_installed_region_ui_oracle_requires_real_localized_gnome_shell(self):
         passing = json.dumps(
@@ -1133,6 +1147,11 @@ class BootContractTests(unittest.TestCase):
 
         build = (ROOT.parent / "build.sh").read_text(encoding="utf-8")
         self.assertIn('done <<< "$SUPPORTED_LIVE_REGIONS"', build)
+        locale_mod = (
+            ROOT.parent / "mods/82-locales-config/install.sh"
+        ).read_text(encoding="utf-8")
+        self.assertIn('done <<< "$SUPPORTED_LIVE_REGIONS"', locale_mod)
+        self.assertNotIn("SUPPORTED_LOCALES", locale_mod)
         self.assertIn("rd.anduinos.keyboard=${_kbd}", build)
         self.assertNotIn('case "${_code}"', build)
 

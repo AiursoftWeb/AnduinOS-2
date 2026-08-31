@@ -33,6 +33,7 @@ from assertions.install import (
     RELEASE_CONTRACT_CHECKS,
     _assert_release_contracts,
     _validate_passwordless_sudo_evidence,
+    assert_installed_keyboard,
     assert_installed_region,
     assert_live_environment,
     assert_live_identity,
@@ -128,9 +129,11 @@ from framework.model import (
     Filesystem,
     Firmware,
     LiveMode,
+    LiveRegion,
     Network,
     SshPolicy,
     TestMatrix,
+    scenario_live_region,
 )
 from framework.qemu import (
     PERSISTENT_LIVE_FREE_SPACE_GIB,
