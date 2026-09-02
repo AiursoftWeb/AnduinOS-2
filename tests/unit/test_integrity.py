@@ -2,6 +2,22 @@
 
 from unit.support import *  # noqa: F403
 class AcceptanceWiringTests(unittest.TestCase):
+    def test_iso_carries_snapshots_manager_for_offline_btrfs_installation(self):
+        composition = Path(
+            "mods/05-live-kernel-apps-installer/install.sh"
+        ).read_text(encoding="utf-8")
+        payload_section = composition.split(
+            "Installing conditional Disk Snapshots Manager payload", 1
+        )[1]
+        payload_install = payload_section.split(
+            'judge "Install anduinos-btrfs-snapshots-manager payload"', 1
+        )[0]
+        self.assertIn(
+            "apt install -y anduinos-btrfs-snapshots-manager",
+            payload_install,
+        )
+        self.assertIn("--no-install-recommends", payload_install)
+
     def test_action_scoped_journal_is_real_in_base_and_overlay_drivers(self):
         runner = _source_tree(ROOT / "business/install")
         base = runner.split("def _assert_action_scoped_journal(", 1)[1].split(

@@ -808,6 +808,7 @@ def _assert_snapshots_manager(
         script = r"""
 set -e
 dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' anduinos-btrfs-snapshots-manager | grep '^ii '
+apt-mark showmanual | grep -Fxq 'anduinos-btrfs-snapshots-manager'
 test -f /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
 desktop-file-validate /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
 confirm=/usr/libexec/anduinos-btrfs-snapshots-manager-confirm
