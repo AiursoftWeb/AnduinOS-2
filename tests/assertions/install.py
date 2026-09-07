@@ -15,7 +15,6 @@ LIVE_ONLY_PACKAGES = (
     "anduinos-live-layers",
     "discover",
     "laptop-detect",
-    "os-prober",
     "gparted",
     "anduinos-installer-beta",
     "anduinos-live-settings",
@@ -684,6 +683,7 @@ for package in {packages}; do
     fi
 done
 dpkg-query -W -f='${{db:Status-Abbrev}}' openssh-server | grep -q '^ii '
+dpkg-query -W -f='${{db:Status-Abbrev}}' os-prober | grep -q '^ii '
 sshd -t
 test -n "$(find /etc/ssh -maxdepth 1 -type f -name 'ssh_host_*_key' -print -quit)"
 for package in open-vm-tools open-vm-tools-desktop xserver-xorg-video-vmware; do
