@@ -21,6 +21,7 @@ from framework.iso import inspect_iso
 from framework.model import Architecture, LiveMode, TestMatrix
 from framework.qemu import PERSISTENT_LIVE_FREE_SPACE_GIB, resolve_qemu
 from framework.reporting import write_junit_report
+from framework.spice_input import SpiceInputClient
 from .install import RunnerOptions, ScenarioRunner, scenario_check_ids
 from framework.storage import (
     DEFAULT_RAMDISK_THRESHOLD_GIB,
@@ -439,6 +440,7 @@ def _preflight(architecture, selected, overrides, suites=()) -> None:
         ) from error
     if any(scenario.desktop_contracts for scenario in selected) or suites:
         SpiceDisplayController.validate_dependencies()
+        SpiceInputClient.validate_dependencies()
     if any(scenario.desktop_contracts for scenario in selected):
         if shutil.which("mksquashfs") is None:
             raise ConfigurationError("Required executable is missing: mksquashfs")

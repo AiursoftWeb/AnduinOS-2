@@ -4,6 +4,31 @@ from unit.support import *  # noqa: F403
 
 
 class PublicDesktopOracleTests(FeatureOracleCase):
+    def test_wayland_wechat_waits_for_stable_button_without_flatpak_ps(self):
+        import ast
+
+        source = ROOT / "assertions/guest/ui/applications.py"
+        tree = ast.parse(source.read_text())
+        function = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                        and node.name == "_wait_wechat_compositor_window")
+        button = {"bounds": [727, 752, 56, 48], "accessible_name": "微信"}
+        clock = iter(range(30))
+        namespace = {
+            "time": SimpleNamespace(monotonic=lambda: next(clock), sleep=Mock()),
+            "UiFailure": RuntimeError,
+            "_x11_wechat_windows": Mock(return_value=[]),
+            "_wechat_instances": Mock(return_value=[]),
+            "_wechat_shell_taskbar_button": Mock(side_effect=[button, None, button, button, button, button]),
+        }
+        exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), "exec"), namespace)
+        result = namespace["_wait_wechat_compositor_window"](timeout=20)
+        self.assertEqual((None, [], button, [], 4), result)
+        self.assertEqual(6, namespace["_wechat_shell_taskbar_button"].call_count)
+        clock = iter(range(30))
+        namespace["_wechat_shell_taskbar_button"] = Mock(return_value=None)
+        with self.assertRaisesRegex(RuntimeError, "neither a mapped X11 window"):
+            namespace["_wait_wechat_compositor_window"](timeout=3)
+
     def test_extension_journal_filter_cannot_ignore_shell_js_errors(self):
         self.assertTrue(
             _is_gnome_extension_entry(
@@ -468,6 +493,30 @@ class PublicDesktopOracleTests(FeatureOracleCase):
         )
         launch = _validate_wechat_install_events(launch_events)
         self.assertEqual(5010, launch["process"]["pid"])
+        native_event = {
+            "event": "wechat-installed-launched", "search_result": "WeChat",
+            "activation_method": "qmp-keyboard", "application": "com.tencent.WeChat",
+            "observation": "gnome-shell-taskbar+visual", "visible": True,
+            "stable_observations": 4,
+            "shell_button": {"accessible_name": "微信", "role": "button",
+                             "application": "gnome-shell", "bounds": [727, 752, 56, 48],
+                             "screen": [1280, 800], "lower_taskbar": True},
+            "flatpak_instances": [{"instance": "123456", "pid": 1000, "child_pid": 1001,
+                                   "application": "com.tencent.WeChat", "arch": "x86_64",
+                                   "branch": "stable", "active": "yes", "background": "no"}],
+        }
+        prefix = self._events({"event": "wechat-launch-baseline", "taskbar_present": False}) + "\n"
+        prefix += "\n".join(launch_events.splitlines()[:-1]) + "\n"
+        native_events = prefix + self._events(native_event)
+        self.assertEqual("gnome-shell-taskbar+visual",
+                         _validate_wechat_install_events(native_events)["observation"])
+        _validate_wechat_install_events(prefix + self._events({**native_event, "flatpak_instances": []}))
+        with self.assertRaises(TestFailure):
+            _validate_wechat_install_events(native_events.replace('"taskbar_present": false', '"taskbar_present": true'))
+        for field, value in (("stable_observations", 1),
+                             ("shell_button", None), ("observation", "process-only")):
+            with self.subTest(field=field), self.assertRaises(TestFailure):
+                _validate_wechat_install_events(prefix + self._events({**native_event, field: value}))
         with self.assertRaisesRegex(TestFailure, "unrelated process"):
             _validate_wechat_install_events(
                 launch_events.replace(
@@ -591,6 +640,22 @@ class PublicDesktopOracleTests(FeatureOracleCase):
             )
             good_path = root / "wechat.png"
             good.save(good_path)
+            native_evidence = {"observation": "gnome-shell-taskbar+visual"}
+            assert_wechat_login_window(good_path, root / "native-light.json", native_evidence)
+            # A dark theme changes the window surface, not the login contract.
+            dark = good.copy()
+            dark_draw = ImageDraw.Draw(dark)
+            dark_draw.rectangle((left, top, left + width - 1, top + height - 1), fill=(30, 30, 30))
+            dark.paste(good.crop((qr_left, qr_top, qr_right, qr_bottom)), (qr_left, qr_top))
+            dark_draw.rectangle((left + 80, top + 250, left + 200, top + 270), fill=(0, 180, 80))
+            dark_path = root / "dark.png"
+            dark.save(dark_path)
+            assert_wechat_login_window(dark_path, root / "native-dark.json", native_evidence)
+            assert_wechat_login_window(dark_path, root / "x11-dark.json", {"main_window": wechat_window})
+            dark_draw.rectangle((left + 80, top + 250, left + 200, top + 270), fill=(30, 30, 30))
+            dark.save(dark_path)
+            with self.assertRaises(TestFailure):
+                assert_wechat_login_window(dark_path, root / "missing-label.json", native_evidence)
             assert_wechat_login_window(
                 good_path,
                 root / "wechat.json",
@@ -599,6 +664,8 @@ class PublicDesktopOracleTests(FeatureOracleCase):
             generic = Image.new("RGB", (1280, 800), "white")
             generic_path = root / "generic.png"
             generic.save(generic_path)
+            with self.assertRaises(TestFailure):
+                assert_wechat_login_window(generic_path, root / "native-generic.json", native_evidence)
             with self.assertRaisesRegex(TestFailure, "QR login UI"):
                 assert_wechat_login_window(
                     generic_path,

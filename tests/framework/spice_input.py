@@ -72,6 +72,12 @@ class SpiceInputClient:
             ) from error
         return GLib, GObject, SpiceClientGLib
 
+    @classmethod
+    def validate_dependencies(cls) -> None:
+        """Fail before the matrix starts when the SPICE GI binding is absent."""
+
+        cls._bindings()
+
     def connect(self, *, require_agent: bool = True) -> None:
         """Connect for desktop pointer input or firmware keyboard bootstrap."""
 

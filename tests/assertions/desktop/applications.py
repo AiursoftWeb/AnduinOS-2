@@ -81,6 +81,51 @@ def _validate_wechat_x11_window(value: object, context: str) -> dict[str, object
     return value
 
 
+def _validate_wechat_shell_button(value: object) -> dict[str, object]:
+    if not isinstance(value, dict):
+        raise TestFailure("Native-Wayland WeChat has no GNOME Shell taskbar evidence")
+    required = {
+        "accessible_name",
+        "role",
+        "application",
+        "bounds",
+        "screen",
+        "lower_taskbar",
+    }
+    if set(value) != required:
+        raise TestFailure("Native-Wayland WeChat returned malformed taskbar fields")
+    if (
+        str(value.get("accessible_name", "")).casefold() not in {"wechat", "微信"}
+        or value.get("role") != "button"
+        or value.get("application") != "gnome-shell"
+        or value.get("lower_taskbar") is not True
+    ):
+        raise TestFailure("Native-Wayland WeChat taskbar identity is invalid")
+    bounds = value.get("bounds")
+    screen = value.get("screen")
+    if (
+        not isinstance(bounds, list)
+        or len(bounds) != 4
+        or not isinstance(screen, list)
+        or len(screen) != 2
+        or any(not isinstance(item, int) for item in bounds + screen)
+    ):
+        raise TestFailure("Native-Wayland WeChat taskbar geometry is malformed")
+    x, y, width, height = bounds
+    screen_width, screen_height = screen
+    if (
+        x < 0
+        or y < 0
+        or not 16 <= width <= 128
+        or not 16 <= height <= 128
+        or x + width > screen_width
+        or y + height > screen_height
+        or y + height / 2 < screen_height * 0.75
+    ):
+        raise TestFailure("Native-Wayland WeChat is outside the lower taskbar")
+    return value
+
+
 def _validate_wechat_install_events(output: str) -> dict[str, object]:
     events = _all_event_objects(output)
     opened, _ = _one_event(
@@ -128,29 +173,47 @@ def _validate_wechat_install_events(output: str) -> dict[str, object]:
         search_result="WeChat",
         activation_method="qmp-keyboard",
         application=_WECHAT_APP_ID,
-        observation="ewmh-x11",
         visible=True,
     )
-    process = _validate_wechat_process(
-        event_value.get("process"),
-        "launched WeChat",
-    )
-    main_window = _validate_wechat_x11_window(
-        event_value.get("main_window"),
-        "launched WeChat",
-    )
-    windows = event_value.get("windows")
-    if not isinstance(windows, list) or main_window not in windows:
-        raise TestFailure("WeChat's main window is absent from the EWMH window set")
-    if process["namespace_pid"] != main_window["pid"]:
-        raise TestFailure("WeChat's EWMH PID was not mapped to its process namespace")
+    observation = event_value.get("observation")
+    if observation == "ewmh-x11":
+        process = _validate_wechat_process(
+            event_value.get("process"),
+            "launched WeChat",
+        )
+        main_window = _validate_wechat_x11_window(
+            event_value.get("main_window"),
+            "launched WeChat",
+        )
+        windows = event_value.get("windows")
+        if not isinstance(windows, list) or main_window not in windows:
+            raise TestFailure("WeChat's main window is absent from the EWMH window set")
+        if process["namespace_pid"] != main_window["pid"]:
+            raise TestFailure("WeChat's EWMH PID was not mapped to its process namespace")
+        evidence = {
+            "application": _WECHAT_APP_ID,
+            "observation": observation,
+            "main_window": main_window,
+            "process": process,
+        }
+    elif observation == "gnome-shell-taskbar+visual":
+        baseline, _ = _one_event(events, context="WeChat launch baseline",
+                                 event="wechat-launch-baseline", taskbar_present=False)
+        if baseline >= opened:
+            raise TestFailure("WeChat launch baseline was captured after opening ArcMenu")
+        if event_value.get("stable_observations") != 4:
+            raise TestFailure("Native-Wayland WeChat launch evidence was unstable")
+        shell_button = _validate_wechat_shell_button(event_value.get("shell_button"))
+        evidence = {
+            "application": _WECHAT_APP_ID,
+            "observation": observation,
+            "shell_button": shell_button,
+        }
+    else:
+        raise TestFailure(f"WeChat returned an unsupported window observation: {observation!r}")
     if not opened < typed < result < focused < activation < launched:
         raise TestFailure("WeChat ArcMenu launch evidence is out of order")
-    return {
-        "application": _WECHAT_APP_ID,
-        "main_window": main_window,
-        "process": process,
-    }
+    return evidence
 
 
 def _validate_wechat_tray_events(output: str) -> dict[str, object]:

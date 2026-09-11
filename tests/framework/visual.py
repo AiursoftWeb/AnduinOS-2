@@ -495,16 +495,68 @@ def assert_cpu_z_thumbnail(frame: Path, report: Path) -> None:
         raise TestFailure("CPU-Z thumbnail lost its purple corner background")
 
 
+def _wechat_qr_candidates(screen: Image.Image) -> list[dict[str, object]]:
+    """Locate dense square black/white patterns with a green login label below.
+
+    Search pixels rather than compositor metadata: native Wayland clients do
+    not expose EWMH geometry, and WeChat follows the desktop's dark theme.
+    """
+    width, height = screen.size
+    pixels = list(_pixels(screen))
+    binary = [max(pixel) < 100 for pixel in pixels]
+    rows = [sum(binary[y * width + x] != binary[y * width + x - 1]
+                for x in range(1, width)) for y in range(height)]
+    columns = [sum(binary[y * width + x] != binary[(y - 1) * width + x]
+                   for y in range(1, height)) for x in range(width)]
+    row_bands = _integer_bands([i for i, count in enumerate(rows) if count >= 10], maximum_gap=3)
+    column_bands = _integer_bands([i for i, count in enumerate(columns) if count >= 10], maximum_gap=3)
+    candidates = []
+    for top, bottom in row_bands:
+        for left, right in column_bands:
+            w, h = right - left + 1, bottom - top + 1
+            if not (90 <= w <= 500 and 90 <= h <= 500 and 0.8 <= w / h <= 1.25):
+                continue
+            qr = list(_pixels(screen.crop((left, top, right + 1, bottom + 1))))
+            dark = sum(max(pixel) < 100 for pixel in qr)
+            light = sum(min(pixel) > 205 for pixel in qr)
+            mask = [max(pixel) < 100 for pixel in qr]
+            horizontal = sum(mask[y * w + x] != mask[y * w + x - 1]
+                             for y in range(h) for x in range(1, w))
+            vertical = sum(mask[y * w + x] != mask[(y - 1) * w + x]
+                           for y in range(1, h) for x in range(w))
+            label = screen.crop((max(0, left - w // 3), bottom + 1,
+                                 min(width, right + 1 + w // 3), min(height, bottom + 1 + h)))
+            green = sum(g >= 100 and g >= r + 35 and g >= b + 20 for r, g, b in _pixels(label))
+            if (0.2 <= dark / (w * h) <= 0.7 and light >= w * h * 0.25
+                    and horizontal >= 500 and vertical >= 500 and green >= 50):
+                candidates.append({"qr_bounds": [left, top, w, h], "dark_pixels": dark,
+                                   "light_pixels": light, "horizontal_transitions": horizontal,
+                                   "vertical_transitions": vertical, "green_label_pixels": green})
+    return candidates
+
+
 def assert_wechat_login_window(
     frame: Path,
     report: Path,
     evidence: object,
 ) -> None:
-    """Require WeChat's mapped X11 window to visibly contain its QR login UI."""
+    """Require visible QR login content on either supported compositor path."""
 
     if not isinstance(evidence, dict):
         raise TestFailure("WeChat visual evidence is not an object")
     window = evidence.get("main_window")
+    if evidence.get("observation") == "gnome-shell-taskbar+visual":
+        try:
+            with Image.open(frame) as source:
+                screen = source.convert("RGB")
+        except (OSError, ValueError) as error:
+            raise TestFailure(f"WeChat screenshot is unreadable: {error}") from error
+        candidates = _wechat_qr_candidates(screen)
+        report.write_text(json.dumps({"screen_size": list(screen.size),
+                                     "qr_candidates": candidates}, indent=2) + "\n", encoding="utf-8")
+        if len(candidates) != 1:
+            raise TestFailure("WeChat screen does not contain exactly one visible QR login UI")
+        return
     if not isinstance(window, dict):
         raise TestFailure("WeChat visual evidence has no main X11 window")
     try:
@@ -532,6 +584,11 @@ def assert_wechat_login_window(
             f"WeChat returned unusable visible window geometry: {[left, top, width, height]}"
         )
     crop = screen.crop((left, top, left + width, top + height))
+    candidates = _wechat_qr_candidates(crop)
+    if len(candidates) == 1:
+        report.write_text(json.dumps({"window": window, "qr_candidates": candidates}, indent=2)
+                          + "\n", encoding="utf-8")
+        return
     qr = crop.crop(
         (
             round(width * 0.15),
@@ -584,7 +641,7 @@ def assert_wechat_login_window(
         or horizontal_transitions < 500
         or vertical_transitions < 500
         or green < 50
-        or bright < window_area * 0.50
+        or (bright < window_area * 0.50 and not _wechat_qr_candidates(crop))
     ):
         raise TestFailure(
             "The mapped WeChat window does not visibly contain its QR login UI"

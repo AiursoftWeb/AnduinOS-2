@@ -86,6 +86,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gnome50-transient-stack-position",
                 "ding93-gtk422-transient-a11y-toplevel",
                 "gnome50-hidden-dash-null-icon",
+                "gnome50-super-i-hidden-dash-null-icon",
                 "spice-vdagent-tty-switch-no-active-session",
             },
             {item.id for item in policy.known_diagnostics},
@@ -385,14 +386,17 @@ class JournalClassificationTests(unittest.TestCase):
             during_switch.known_diagnostics[0].rule_id,
         )
 
-    def test_hidden_dash_null_icon_is_only_known_for_exact_about_action(self):
+    def test_hidden_dash_null_icon_is_only_known_for_proven_actions(self):
         item = entry(DASH_NULL_ICON, "gnome-shell")
         outside = self.policy.classify((item,), scenario(), VERSIONS)
-        wrong_action = self.policy.classify(
+        during_super_i = self.policy.classify(
             (item,),
             scenario(),
             VERSIONS,
             action_scope="shortcut-super-i",
+        )
+        wrong_action = self.policy.classify(
+            (item,), scenario(), VERSIONS, action_scope="shortcut-super-u"
         )
         during_about = self.policy.classify(
             (item,),
@@ -402,7 +406,12 @@ class JournalClassificationTests(unittest.TestCase):
         )
         self.assertFalse(outside.passed)
         self.assertFalse(wrong_action.passed)
+        self.assertTrue(during_super_i.passed)
         self.assertTrue(during_about.passed)
+        self.assertEqual(
+            "gnome50-super-i-hidden-dash-null-icon",
+            during_super_i.known_diagnostics[0].rule_id,
+        )
         self.assertEqual(
             "gnome50-hidden-dash-null-icon",
             during_about.known_diagnostics[0].rule_id,

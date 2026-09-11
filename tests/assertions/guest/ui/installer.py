@@ -216,6 +216,49 @@ def wait_page(key: str, timeout: float = 60) -> None:
     event("page", page=key, accessible_name=name(node))
 
 
+def assert_automatic_disk_layout(config: dict[str, object], evidence: Path) -> None:
+    wait_page("disk_layout")
+    names = tuple(name(item) for item in visible_nodes() if name(item))
+    filesystem = str(config["filesystem"])
+    expected_prefix = "EXT4 ·" if filesystem == "ext4" else "Btrfs ·"
+    layout = next(
+        (
+            value
+            for value in names
+            if value.startswith(expected_prefix)
+            and re.search(r"/dev/(?:vda|nvme\d+n\d+)$", value)
+        ),
+        None,
+    )
+    swap_size = next(
+        (
+            int(match.group(1))
+            for value in names
+            if (match := re.fullmatch(r"([1-9]\d*) GiB", value)) is not None
+        ),
+        None,
+    )
+    if layout is None or swap_size is None:
+        dump_accessibility(evidence / "disk-layout.txt")
+        raise UiFailure(
+            "Automatic disk layout does not expose the selected filesystem "
+            "and a non-zero whole-GiB Swap size"
+        )
+    find("recommended_swap", timeout=10)
+    find("zram_swap_contract", timeout=10)
+    event(
+        "disk-layout",
+        filesystem=filesystem,
+        layout=layout,
+        swap_size_gib=swap_size,
+        swap_policy="recommended",
+        zram_ram_percent=50,
+        zram_algorithm="lz4",
+        zram_priority=100,
+        disk_swap_priority=10,
+    )
+
+
 def wait_application(candidates: tuple[str, ...], timeout: float = 90) -> str:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -392,6 +435,9 @@ def install(config: dict[str, object], evidence: Path) -> None:
     wait_page("strategy")
     filesystem = str(config["filesystem"])
     set_toggle(filesystem, True)
+    click("next")
+
+    assert_automatic_disk_layout(config, evidence)
     click("next")
 
     wait_page("user")

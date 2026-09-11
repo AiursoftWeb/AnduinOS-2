@@ -42,13 +42,13 @@ def _validate_search_provider_preflight(output: str, returncode: int) -> None:
 
     before = re.search(
         r"^before_pid=(?P<pid>[0-9]+) before_restarts=(?P<restarts>[0-9]+) "
-        r"before_active=(?P<active>[^ ]+)$",
+        r"before_active=(?P<active>\S+)$",
         output,
         re.MULTILINE,
     )
     after = re.search(
         r"^after_pid=(?P<pid>[0-9]+) after_restarts=(?P<restarts>[0-9]+) "
-        r"after_active=(?P<active>[^ ]+)$",
+        r"after_active=(?P<active>\S+)$",
         output,
         re.MULTILINE,
     )
@@ -81,6 +81,38 @@ def _validate_search_provider_preflight(output: str, returncode: int) -> None:
         raise TestFailure(
             "GNOME Software ready marker contradicts its lifecycle evidence"
         )
+
+
+def _validate_sharing_service_preflight(output: str, returncode: int) -> None:
+    """Require one healthy, unchanged Sharing process and a live D-Bus peer."""
+
+    if returncode != 0:
+        raise TestFailure(
+            "GNOME Sharing service did not reach a stable session state:\n"
+            + output[-8000:]
+        )
+    before = re.search(
+        r"^before_pid=(?P<pid>[0-9]+) before_restarts=(?P<restarts>[0-9]+) "
+        r"before_active=(?P<active>\S+)$",
+        output,
+        re.MULTILINE,
+    )
+    after = re.search(
+        r"^after_pid=(?P<pid>[0-9]+) after_restarts=(?P<restarts>[0-9]+) "
+        r"after_active=(?P<active>\S+)$",
+        output,
+        re.MULTILINE,
+    )
+    if before is None or after is None or "sharing-dbus=ready" not in output:
+        raise TestFailure("GNOME Sharing preflight omitted its health evidence")
+    before_pid = int(before.group("pid"))
+    after_pid = int(after.group("pid"))
+    if int(before.group("restarts")) != 0 or int(after.group("restarts")) != 0:
+        raise TestFailure("GNOME Sharing crashed and restarted before the feature action")
+    if before.group("active") != "active" or after.group("active") != "active":
+        raise TestFailure("GNOME Sharing service is not active")
+    if before_pid == 0 or after_pid == 0 or before_pid != after_pid:
+        raise TestFailure("GNOME Sharing process changed during session preflight")
 
 
 def _validate_local_search_provider_isolation_configuration(

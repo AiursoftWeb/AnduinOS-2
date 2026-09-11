@@ -106,9 +106,18 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
             "search-provider=ready pid=2192 restarts=0",
         )
     )
-
     def test_shell_search_provider_oracle_accepts_one_unchanged_process(self):
         _validate_search_provider_preflight(self.SEARCH_PROVIDER_PREFLIGHT, 0)
+
+    def test_spice_pointer_preflight_loads_gi_bindings(self):
+        with patch.object(SpiceInputClient, "_bindings") as bindings:
+            SpiceInputClient.validate_dependencies()
+        bindings.assert_called_once_with()
+
+    def test_acceptance_preflight_checks_spice_pointer_binding(self):
+        source = (ROOT / "business/acceptance.py").read_text(encoding="utf-8")
+        preflight = source.split("def _preflight(", 1)[1]
+        self.assertIn("SpiceInputClient.validate_dependencies()", preflight)
 
     def test_shell_search_provider_oracle_rejects_crash_then_restart(self):
         crashed = self.SEARCH_PROVIDER_PREFLIGHT.replace(
@@ -158,6 +167,10 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
         body = source.split("def _run_shell_driver", 1)[1].split(
             "def _stabilize_shell_search_provider", 1
         )[0]
+        self.assertLess(
+            body.index("self._stabilize_sharing_service"),
+            body.index("preflight_cursors = self._journal_cursors"),
+        )
         self.assertLess(
             body.index("preflight_cursors = self._journal_cursors"),
             body.index("self._stabilize_shell_search_provider"),
@@ -508,6 +521,10 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
         self.assertFalse(_guest_qmp_key_supported("s"))
         self.assertFalse(_guest_qmp_key_supported("ctrl-shift-s"))
 
+    def test_ding_find_uses_one_explicit_supported_shortcut(self):
+        self.assertIn("ctrl-f", _SUPPORTED_GUEST_QMP_KEYS)
+        self.assertTrue(_guest_qmp_key_supported("ctrl-f"))
+
     def test_arcmenu_context_targets_result_before_keyboard_menu_navigation(self):
         source = _source_tree(ROOT / "assertions/guest/ui")
         context_body = source.split("def request_search_result_context", 1)[1].split(
@@ -856,6 +873,23 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
                 '{"event": "qmp-key", "request": "open-fixture-ret", "key": "ret"}'
             ),
         )
+
+    def test_desktop_shortcut_waits_for_ding_state_instead_of_fixed_delay(self):
+        source = (ROOT / "assertions/guest/ui/shell.py").read_text(encoding="utf-8")
+        shortcut = source.split("def exercise_desktop_shortcut", 1)[1].split(
+            "def exercise_spotify_store_search", 1
+        )[0]
+        self.assertNotIn("settle_ms", shortcut)
+        self.assertIn('request="desktop-shortcut-ding-find-open"', shortcut)
+        self.assertIn('find("ding_find_title", timeout=10)', shortcut)
+        self.assertIn('find("dialog_ok", timeout=10, require_enabled=True)', shortcut)
+        self.assertLess(
+            shortcut.index('request="desktop-shortcut-ding-search-accept"'),
+            shortcut.index('request="desktop-shortcut-open-menu"'),
+        )
+        self.assertIn("fileItemMenu.js", shortcut)
+        self.assertIn('action="open-selected-files"', shortcut)
+        self.assertIn('request="desktop-shortcut-launch", key="ret"', shortcut)
 
     def test_nautilus_activation_never_trusts_an_atspi_action_return(self):
         source = _source_tree(ROOT / "assertions/guest/ui")
@@ -1510,6 +1544,28 @@ class VisualOracleTests(unittest.TestCase):
         self.assertIn('role(item) not in {"toggle button", "button"}', body)
         self.assertNotIn('"table cell"', body)
         self.assertIn('selection_method="atspi-action"', body)
+
+    def test_installer_validates_automatic_disk_layout_before_user_page(self):
+        source = (ROOT / "assertions/guest/ui/installer.py").read_text(
+            encoding="utf-8"
+        )
+        after_strategy = source.split('wait_page("strategy")', 1)[1]
+        disk_layout, after_layout = after_strategy.split(
+            'wait_page("user")', 1
+        )
+        self.assertIn("assert_automatic_disk_layout(config, evidence)", disk_layout)
+        self.assertIn('find("recommended_swap", timeout=10)', source)
+        self.assertIn('find("zram_swap_contract", timeout=10)', source)
+        self.assertIn(r're.fullmatch(r"([1-9]\d*) GiB", value)', source)
+        self.assertIn('click("next")', disk_layout)
+        self.assertIn('set_text("full_name"', after_layout)
+
+    def test_installer_accepts_current_passwordless_login_label(self):
+        source = (ROOT / "assertions/guest/ui/core.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn('"Log in to the desktop without a password"', source)
+        self.assertIn('"无需密码登录桌面"', source)
 
     def test_grub_verified_typing_waits_for_every_character_repaint(self):
         editor = object.__new__(_GraphicalGrubMenuEditor)

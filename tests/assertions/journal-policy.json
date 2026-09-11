@@ -106,6 +106,19 @@
       "reason": "GNOME Shell 50 can size its hidden stock Dash while the first application icon is not yet constructed when Settings About starts. The same action must still paint the real AnduinOS identity, match the rendered logo, and leave the Shell and graphical session healthy."
     },
     {
+      "id": "gnome50-super-i-hidden-dash-null-icon",
+      "component_regex": "(^|/)gnome-shell($|[|/])",
+      "message_regex": "^JS ERROR: TypeError: can't access property \"ensure_style\", firstIcon\\.icon is null\\n_adjustIconSize@resource:///org/gnome/shell/ui/dash\\.js:[0-9]+:[0-9]+\\n_redisplay@resource:///org/gnome/shell/ui/dash\\.js:[0-9]+:[0-9]+\\n_runDeferredWork@resource:///org/gnome/shell/ui/main\\.js:[0-9]+:[0-9]+\\n_runAllDeferredWork@resource:///org/gnome/shell/ui/main\\.js:[0-9]+:[0-9]+\\nqueueDeferredWork/_deferredTimeoutId<@resource:///org/gnome/shell/ui/main\\.js:[0-9]+:[0-9]+\\n_init/this\\.timeout_add_seconds_once/id<@resource:///org/gnome/gjs/modules/core/overrides/GLib\\.js:[0-9]+:[0-9]+\\n@resource:///org/gnome/shell/ui/init\\.js:[0-9]+:[0-9]+$",
+      "conditions": {
+        "action_scope": "shortcut-super-i"
+      },
+      "max_occurrences": 1,
+      "package": "gnome-shell",
+      "version_glob": "50.*",
+      "owner": "GNOME Shell",
+      "reason": "GNOME Shell 50 can hit the same hidden-Dash construction race while Super+I opens Settings. The action must still focus Settings, validate its identity, and leave GNOME Shell and the graphical session healthy."
+    },
+    {
       "id": "spice-vdagent-tty-switch-no-active-session",
       "component_regex": "(^|[|/])spice-vdagentd($|[|./])",
       "message_regex": "^Error getting active session: No data available$",

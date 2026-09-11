@@ -86,6 +86,7 @@ from business.desktop import (
     _validate_settings_about_events,
     _validate_swapcontrol_events,
     _validate_same_fixture_process,
+    _validate_sharing_service_preflight,
     _validate_search_provider_preflight,
     _validate_local_search_provider_isolation_configuration,
     _validate_local_search_provider_post_action_isolation,

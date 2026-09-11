@@ -5,12 +5,15 @@ from .shell import _open_arcmenu_search
 
 
 def _wechat_instances() -> list[dict[str, object]]:
+    environment = os.environ.copy()
+    environment["LC_ALL"] = "C"
     result = subprocess.run(
         (
             "flatpak",
             "ps",
             "--columns=instance,pid,child-pid,application,arch,branch,active,background",
         ),
+        env=environment,
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
@@ -41,6 +44,107 @@ def _wechat_instances() -> list[dict[str, object]]:
             }
         )
     return instances
+
+
+def _wechat_shell_taskbar_button() -> dict[str, object] | None:
+    """Return GNOME Shell's visible running-app button for native Wayland WeChat."""
+
+    accepted = {"wechat", "微信"}
+    candidates = []
+    shell_bounds = []
+    for item in visible_nodes():
+        if owning_application(item) != "gnome-shell":
+            continue
+        try:
+            bounds = item.get_extents(Atspi.CoordType.SCREEN)
+        except Exception:
+            continue
+        if bounds.width >= 2 and bounds.height >= 2 and bounds.x >= 0 and bounds.y >= 0:
+            shell_bounds.append(bounds)
+        if name(item).strip().casefold() not in accepted or role(item) != "button":
+            continue
+        if (
+            bounds.x < 0
+            or bounds.y < 0
+            or not 16 <= bounds.width <= 128
+            or not 16 <= bounds.height <= 128
+        ):
+            continue
+        candidates.append(
+            {
+                "accessible_name": name(item),
+                "role": role(item),
+                "application": "gnome-shell",
+                "bounds": [bounds.x, bounds.y, bounds.width, bounds.height],
+            }
+        )
+    if not shell_bounds:
+        return None
+    screen_right = max(item.x + item.width for item in shell_bounds)
+    screen_bottom = max(item.y + item.height for item in shell_bounds)
+    taskbar = []
+    for details in candidates:
+        x, y, width, height = details["bounds"]
+        if y + height / 2 < screen_bottom * 0.75:
+            continue
+        details["screen"] = [screen_right, screen_bottom]
+        details["lower_taskbar"] = True
+        taskbar.append(details)
+    if len(taskbar) != 1:
+        return None
+    return taskbar[0]
+
+
+def _wait_wechat_compositor_window(
+    timeout: float = 90,
+) -> tuple[dict[str, object] | None, list[dict[str, object]], dict[str, object] | None, list[dict[str, object]], int]:
+    """Observe either an Xwayland window or stable native-Wayland launch evidence."""
+
+    deadline = time.monotonic() + timeout
+    last_windows = []
+    last_button = None
+    last_instances = []
+    stable_signature = None
+    stable_observations = 0
+    while time.monotonic() < deadline:
+        try:
+            last_windows = _x11_wechat_windows()
+        except UiFailure:
+            last_windows = []
+        visible = [item for item in last_windows if item["visible"]]
+        if visible:
+            main = max(visible, key=lambda item: int(item["width"]) * int(item["height"]))
+            if int(main["width"]) >= 200 and int(main["height"]) >= 250:
+                return main, last_windows, None, _wechat_instances(), 0
+
+        last_button = _wechat_shell_taskbar_button()
+        last_instances = _wechat_instances()
+        signature = None
+        # Flatpak may stop listing the sandbox after WeChat daemonizes. The
+        # newly appeared Shell button and host-side QR screenshot are the
+        # launch contract; flatpak ps remains diagnostic evidence only.
+        if last_button is not None:
+            signature = (
+                tuple(last_button["bounds"]),
+                last_button["accessible_name"],
+            )
+        if signature is not None and signature == stable_signature:
+            stable_observations += 1
+        elif signature is not None:
+            stable_signature = signature
+            stable_observations = 1
+        else:
+            stable_signature = None
+            stable_observations = 0
+        if stable_observations >= 4:
+            return None, [], last_button, last_instances, stable_observations
+        time.sleep(0.5)
+    raise UiFailure(
+        "WeChat exposed neither a mapped X11 window nor stable native-Wayland "
+        "launch evidence: "
+        f"windows={last_windows!r}, taskbar_button={last_button!r}, "
+        f"flatpak_instances={last_instances!r}, stable={stable_observations}"
+    )
 
 
 def _wechat_process_identity(namespace_pid: int) -> dict[str, object]:
@@ -244,9 +348,12 @@ def _wait_wechat_x11_window(timeout: float = 180) -> tuple[dict[str, object], li
 
 
 def exercise_wechat_install(evidence: Path) -> None:
-    """Launch the installed native WeChat from ArcMenu and observe its window."""
+    """Launch installed WeChat and observe its Xwayland or native Wayland surface."""
 
     dismiss_initial_setup()
+    if _wechat_shell_taskbar_button() is not None:
+        raise UiFailure("WeChat already has a taskbar button before ArcMenu launch")
+    event("wechat-launch-baseline", taskbar_present=False)
     semantic, target, _search_entry = _open_arcmenu_search(
         "WeChat",
         "wechat-search",
@@ -254,21 +361,36 @@ def exercise_wechat_install(evidence: Path) -> None:
     result_name = name(semantic)
     result_role = role(target)
     event("qmp-key", request="wechat-result-activate", key="ret")
-    main_window, windows = _wait_wechat_x11_window(timeout=180)
-    process = _wechat_process_identity(int(main_window["pid"]))
-    flatpak_instances = _wechat_instances()
+    main_window, windows, shell_button, flatpak_instances, stable = (
+        _wait_wechat_compositor_window(timeout=90)
+    )
     dump_accessibility(evidence / "wechat-shell-and-desktop.txt")
+    if main_window is not None:
+        process = _wechat_process_identity(int(main_window["pid"]))
+        event(
+            "wechat-installed-launched",
+            search_result=result_name,
+            result_role=result_role,
+            activation_method="qmp-keyboard",
+            application="com.tencent.WeChat",
+            observation="ewmh-x11",
+            main_window=main_window,
+            windows=windows,
+            process=process,
+            flatpak_instances=flatpak_instances,
+            visible=True,
+        )
+        return
     event(
         "wechat-installed-launched",
         search_result=result_name,
         result_role=result_role,
         activation_method="qmp-keyboard",
         application="com.tencent.WeChat",
-        observation="ewmh-x11",
-        main_window=main_window,
-        windows=windows,
-        process=process,
+        observation="gnome-shell-taskbar+visual",
+        shell_button=shell_button,
         flatpak_instances=flatpak_instances,
+        stable_observations=stable,
         visible=True,
     )
 

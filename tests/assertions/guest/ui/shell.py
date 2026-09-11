@@ -693,24 +693,83 @@ def exercise_desktop_shortcut(evidence: Path) -> None:
     )
     # DING 93 exposes the icon's accessible identity correctly, but reports
     # every desktop label at screen coordinate (0, 0).  Do not turn that GTK
-    # accessibility defect into a bogus click on the Home icon.  Exercise
-    # DING's own keyboard find workflow: typing opens Find Files on Desktop,
-    # the first Return accepts the selected match, and the second opens it.
-    # The real fixture window below is still the authoritative launch oracle.
+    # accessibility defect into a bogus click on the Home icon.  Exercise its
+    # keyboard find workflow, but open it explicitly and synchronize on the
+    # real dialog state instead of racing typed characters against Adw.Dialog.
+    event(
+        "qmp-key",
+        request="desktop-shortcut-ding-find-open",
+        key="ctrl-f",
+    )
+    find("ding_find_title", timeout=10)
     event(
         "qmp-text",
         request="desktop-shortcut-ding-search-text",
     )
+    find("dialog_ok", timeout=10, require_enabled=True)
     event(
         "qmp-key",
         request="desktop-shortcut-ding-search-accept",
         key="ret",
     )
+    deadline = time.monotonic() + 10
+    while time.monotonic() < deadline and find_optional(
+        "ding_find_title", timeout=0.25
+    ):
+        time.sleep(0.1)
+    if find_optional("ding_find_title", timeout=0.25):
+        raise UiFailure("DING Find Files dialog did not close after Return")
+    package = "gnome-shell-extension-desktop-icons-ng-anduinos"
+    version_result = subprocess.run(
+        ("dpkg-query", "-W", "-f=${Version}", package),
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+    )
+    version = version_result.stdout.strip()
+    if version_result.returncode != 0 or not re.fullmatch(
+        r"2\.0\.2-(?:1|2)\+resolute(?:-addon)?", version
+    ):
+        raise UiFailure(
+            "DING file-menu keyboard activation is not validated for "
+            f"installed version {version!r}"
+        )
+    source_path = Path(
+        "/usr/share/gnome-shell/extensions/"
+        "ding@rastersoft.com/app/fileItemMenu.js"
+    )
+    source = source_path.read_text(encoding="utf-8")
+    first_section = source.split("_createMenu(fileItem)", 1)[-1].split(
+        "let keepStacked", 1
+    )[0]
+    if not re.search(
+        r"this\._newMenuElement\(\s*selectedItemsNum > 1 .*?"
+        r"_\('Open'\).*?\"open-selected-files\"",
+        first_section,
+        re.DOTALL,
+    ):
+        raise UiFailure("DING file menu no longer starts with its Open action")
+    open_action = source.split("_addNewAction('open-selected-files'", 1)[-1].split(
+        "this._addNewAction", 1
+    )[0]
+    if "fileItem.doOpen()" not in open_action:
+        raise UiFailure("DING Open action no longer launches every selected file")
+    event(
+        "desktop-shortcut-open-plan",
+        package=package,
+        package_version=version,
+        source=str(source_path),
+        selected_items=1,
+        focus_target="first-menu-row",
+        action="open-selected-files",
+    )
     event(
         "qmp-key",
-        request="desktop-shortcut-launch",
-        key="ret",
+        request="desktop-shortcut-open-menu",
+        key="shift-f10",
     )
+    event("qmp-key", request="desktop-shortcut-launch", key="ret")
     find(PANEL_WINDOW_TITLE, timeout=60)
     event(
         "desktop-shortcut",

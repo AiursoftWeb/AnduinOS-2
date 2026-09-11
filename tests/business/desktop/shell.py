@@ -518,6 +518,7 @@ class ShellChecks:
         if mode in _LOCAL_SEARCH_DRIVER_MODES:
             self._assert_local_search_provider_isolation(vm, artifacts, mode)
         elif mode in _SOFTWARE_SEARCH_DRIVER_MODES:
+            self._stabilize_sharing_service(vm, artifacts)
             preflight_cursors = self._journal_cursors(vm)
             self._stabilize_shell_search_provider(vm, artifacts)
             self._assert_scoped_journal(
@@ -774,3 +775,49 @@ exit 1
             encoding="utf-8",
         )
         _validate_search_provider_preflight(result.stdout, result.returncode)
+
+    def _stabilize_sharing_service(self, vm: QemuVm, artifacts: Path) -> None:
+        """Finish login-time Sharing startup before search-action log cursors."""
+
+        assert vm.serial is not None
+        script = """
+set -uo pipefail
+unit=org.gnome.SettingsDaemon.Sharing.service
+before_pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || printf 0)
+before_restarts=$(systemctl --user show "$unit" -p NRestarts --value 2>/dev/null || printf 0)
+before_active=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+printf 'before_pid=%s before_restarts=%s before_active=%s\n' \
+    "$before_pid" "$before_restarts" "$before_active"
+if test "$before_active" != active || test "$before_pid" = 0 \
+    || test "$before_restarts" != 0; then
+    printf '%s\n' 'sharing-service=unhealthy-before-preflight'
+    exit 1
+fi
+if ! timeout 10 gdbus call --session \
+    --dest org.gnome.SettingsDaemon.Sharing \
+    --object-path /org/gnome/SettingsDaemon/Sharing \
+    --method org.freedesktop.DBus.Peer.Ping; then
+    printf '%s\n' 'sharing-dbus=unavailable'
+    exit 1
+fi
+printf '%s\n' 'sharing-dbus=ready'
+sleep 2
+after_pid=$(systemctl --user show "$unit" -p MainPID --value 2>/dev/null || printf 0)
+after_restarts=$(systemctl --user show "$unit" -p NRestarts --value 2>/dev/null || printf 0)
+after_active=$(systemctl --user is-active "$unit" 2>/dev/null || true)
+printf 'after_pid=%s after_restarts=%s after_active=%s\n' \
+    "$after_pid" "$after_restarts" "$after_active"
+test "$after_active" = active \
+    && test "$after_pid" != 0 \
+    && test "$before_pid" = "$after_pid" \
+    && test "$after_restarts" = 0
+""".strip()
+        result = vm.serial.run(
+            _desktop_command(self.username, ("bash", "-lc", script)),
+            timeout=30,
+            check=False,
+        )
+        (artifacts / "sharing-service-preflight.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+        _validate_sharing_service_preflight(result.stdout, result.returncode)

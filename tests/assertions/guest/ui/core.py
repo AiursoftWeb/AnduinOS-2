@@ -45,6 +45,20 @@ ALIASES = {
     "software": ("Updates and Drivers", "更新和驱动程序"),
     "disk": ("Select Installation Disk", "选择安装磁盘"),
     "strategy": ("Choose Installation Method", "选择安装方式"),
+    "disk_layout": (
+        "Configure storage and swap",
+        "配置存储和交换空间",
+    ),
+    "recommended_swap": (
+        "✓ Best performance — AnduinOS recommended Swap size.",
+        "✓ 最佳性能 — AnduinOS 建议的交换空间大小。",
+    ),
+    "zram_swap_contract": (
+        "ZRAM always remains enabled: 50% of RAM · LZ4 · priority 100. "
+        "Disk Swap uses priority 10.",
+        "ZRAM 始终保持启用：50% 的 RAM · LZ4 · 优先级 100。"
+        "磁盘交换空间使用优先级 10。",
+    ),
     "user": ("User Account", "用户账户"),
     "advanced": ("Advanced Options", "高级选项"),
     "timezone": ("Select Timezone", "选择时区"),
@@ -89,6 +103,8 @@ ALIASES = {
         "执行 sudo 命令时无需密码",
     ),
     "automatic_login": (
+        "Log in to the desktop without a password",
+        "无需密码登录桌面",
         "Log in to the desktop automatically",
         "自动登录桌面",
     ),
@@ -169,6 +185,8 @@ ALIASES = {
     "taskbar_unpin": ("Unpin", "从任务栏中移除"),
     "taskbar_pin": ("Pin to Dash", "添加到任务栏"),
     "desktop_shortcut_create": ("Create Desktop Shortcut", "创建桌面快捷方式"),
+    "ding_find_title": ("Find Files on Desktop", "在桌面上寻找文件"),
+    "dialog_ok": ("OK", "确定"),
     "desktop_open_terminal": (
         "Open in Terminal",
         "在终端中打开",
