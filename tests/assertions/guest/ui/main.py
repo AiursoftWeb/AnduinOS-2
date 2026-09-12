@@ -210,6 +210,27 @@ def main() -> int:
         return 0
     except Exception as error:
         event("failure", error=str(error), type=type(error).__name__)
+        if args.mode == "install":
+            process_log = Path("/tmp/anduinos-installer-ui.stdout")
+            if process_log.is_file():
+                output = process_log.read_text(encoding="utf-8", errors="replace")
+                (args.evidence / "installer-process.txt").write_text(
+                    output,
+                    encoding="utf-8",
+                )
+                event("installer-process", output=output[-8000:])
+            journal = subprocess.run(
+                ("journalctl", "--user", "-b", "--no-pager", "-n", "400"),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+            ).stdout
+            (args.evidence / "installer-user-journal.txt").write_text(
+                journal,
+                encoding="utf-8",
+            )
+            event("installer-user-journal", output=journal[-8000:])
         try:
             dump_accessibility(args.evidence / "last-accessibility-tree.txt")
         except Exception:

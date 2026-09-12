@@ -112,7 +112,7 @@ class ScenarioRunner(
         # they are host safety failures, not product failures.
         assert_disk_storage_ready(
             self.options.disk_storage,
-            disk_gib=self.options.disk_gib,
+            disk_gib=getattr(scenario, "disk_gib", None) or self.options.disk_gib,
             filesystem_reserve_gib=self.options.free_space_reserve_gib,
             memory_mib=self.options.memory_mib,
             additional_bytes=(
@@ -294,7 +294,7 @@ class ScenarioRunner(
             network=scenario.network,
             memory_mib=self.options.memory_mib,
             cpus=self.options.cpus,
-            disk_gib=self.options.disk_gib,
+            disk_gib=getattr(scenario, "disk_gib", None) or self.options.disk_gib,
             ssh_forward_port=allocate_tcp_port(),
             iso=self.inspection.path,
             disk=self.options.disk_storage.root / scenario.id / "target.qcow2",

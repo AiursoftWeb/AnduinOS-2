@@ -133,6 +133,7 @@ from framework.model import (
     LiveRegion,
     Network,
     SshPolicy,
+    StorageMode,
     TestMatrix,
     scenario_live_region,
 )

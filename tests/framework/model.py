@@ -51,6 +51,11 @@ class LiveMode(str, Enum):
     PERSISTENT = "persistent"
 
 
+class StorageMode(str, Enum):
+    AUTOMATIC = "automatic"
+    MANUAL_SMALL_DISK = "manual-small-disk"
+
+
 @dataclass(frozen=True)
 class MatrixDefaults:
     memory_mib: int
@@ -95,6 +100,8 @@ class Scenario:
     desktop_contracts: bool
     snapshots_manager: bool
     mok_enrollment: bool
+    storage_mode: StorageMode = StorageMode.AUTOMATIC
+    disk_gib: int | None = None
 
     def supports(self, architecture: Architecture) -> bool:
         return architecture in self.architectures
@@ -219,7 +226,7 @@ def _load_scenario(value: object) -> Scenario:
         "snapshots_manager",
         "mok_enrollment",
     }
-    optional = {"live_region"}
+    optional = {"live_region", "storage_mode", "disk_gib"}
     if not required <= set(value) or not set(value) <= required | optional:
         raise ConfigurationError("A test case has an invalid shape")
     identifier = value["id"]
@@ -235,6 +242,7 @@ def _load_scenario(value: object) -> Scenario:
         filesystem = Filesystem(value["filesystem"])
         live_mode = LiveMode(value["live_mode"])
         ssh = SshPolicy(value["ssh"])
+        storage_mode = StorageMode(value.get("storage_mode", "automatic"))
     except (TypeError, ValueError) as error:
         raise ConfigurationError(f"{identifier}: invalid enum value") from error
     if len(architectures) != len(set(architectures)):
@@ -274,6 +282,13 @@ def _load_scenario(value: object) -> Scenario:
         raise ConfigurationError(
             f"{identifier}: snapshot-manager policy contradicts filesystem"
         )
+    disk_gib = value.get("disk_gib")
+    if disk_gib is not None and (type(disk_gib) is not int or disk_gib <= 0):
+        raise ConfigurationError(f"{identifier}: disk_gib must be a positive integer")
+    if storage_mode is StorageMode.MANUAL_SMALL_DISK and disk_gib != 23:
+        raise ConfigurationError(
+            f"{identifier}: manual-small-disk requires a 23 GiB target"
+        )
     live_region = None
     if "live_region" in value:
         live_region = _load_live_region(value["live_region"], identifier)
@@ -293,6 +308,8 @@ def _load_scenario(value: object) -> Scenario:
         desktop_contracts=value["desktop_contracts"],
         snapshots_manager=value["snapshots_manager"],
         mok_enrollment=value["mok_enrollment"],
+        storage_mode=storage_mode,
+        disk_gib=disk_gib,
     )
 
 

@@ -3,7 +3,7 @@
   "defaults": {
     "memory_mib": 8192,
     "cpus": 4,
-    "disk_gib": 40,
+    "disk_gib": 50,
     "boot_timeout_seconds": 600,
     "install_timeout_seconds": 10800,
     "command_timeout_seconds": 120,
@@ -215,6 +215,24 @@
       "desktop_contracts": false,
       "snapshots_manager": false,
       "mok_enrollment": true
+    },
+    {
+      "id": "uefi-nosb-offline-manual-small-disk",
+      "architectures": ["amd64"],
+      "firmware": "uefi-nosb",
+      "network": "offline",
+      "filesystem": "btrfs",
+      "live_mode": "temporary",
+      "storage_mode": "manual-small-disk",
+      "disk_gib": 23,
+      "rime": false,
+      "online_features": false,
+      "ssh": "disabled",
+      "passwordless_sudo": false,
+      "automatic_login": false,
+      "desktop_contracts": false,
+      "snapshots_manager": true,
+      "mok_enrollment": false
     }
   ]
 }

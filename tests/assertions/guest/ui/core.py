@@ -45,6 +45,22 @@ ALIASES = {
     "software": ("Updates and Drivers", "更新和驱动程序"),
     "disk": ("Select Installation Disk", "选择安装磁盘"),
     "strategy": ("Choose Installation Method", "选择安装方式"),
+    "advanced_storage": ("Advanced: Manual Partitioning", "高级：手动分区"),
+    "manual_strategy": ("Advanced", "高级"),
+    "edit_storage": ("Edit", "编辑"),
+    "initialize_gpt": ("Initialize New GPT", "初始化新 GPT"),
+    "confirm_initialize_gpt": ("Initialize GPT", "初始化 GPT"),
+    "partition_size": ("Size (MiB)", "大小 (MiB)"),
+    "add_partition": ("Add Partition", "添加分区"),
+    "capacity_minimum": (
+        "25 GiB minimum; 50 GiB recommended.",
+        "最低 25 GiB，推荐 50 GiB。",
+    ),
+    "capacity_below_minimum": (
+        "Below the minimum. Installation or updates may fail. Continue?",
+        "低于最低要求，安装或更新可能失败。仍要继续？",
+    ),
+    "continue": ("Continue", "继续"),
     "disk_layout": (
         "Configure storage and swap",
         "配置存储和交换空间",
@@ -63,8 +79,27 @@ ALIASES = {
     "advanced": ("Advanced Options", "高级选项"),
     "timezone": ("Select Timezone", "选择时区"),
     "summary": ("Ready to Install", "准备安装"),
-    "install": ("Install", "安装"),
-    "confirm": ("Erase Disk and Install", "擦除磁盘并安装"),
+    "manual_layout_confirmation": (
+        "Apply this manual disk layout?",
+        "应用此手动磁盘布局？",
+    ),
+    "erase_disk_confirmation": (
+        "Erase the entire selected disk?",
+        "要擦除整个所选磁盘吗？",
+    ),
+    "progress": ("Installing AnduinOS", "正在安装 AnduinOS"),
+    "detect_boot_environment": (
+        "Detect firmware and Secure Boot",
+        "检测固件和安全启动",
+    ),
+    "install": (
+        "Install", "安装",
+        "Apply Layout and Install", "应用布局并安装",
+    ),
+    "confirm": (
+        "Erase Disk and Install", "擦除磁盘并安装",
+        "Apply Layout and Install", "应用布局并安装",
+    ),
     "complete": ("Installation Complete", "安装完成"),
     "failed": ("Installation failed", "安装失败"),
     "output_tab": ("Output", "输出"),
@@ -433,6 +468,38 @@ def click(key: str, timeout: float = 30) -> None:
     time.sleep(0.35)
 
 
+def click_button(key: str, timeout: float = 30) -> None:
+    """Activate an exact GTK button, never a same-named selectable label."""
+
+    deadline = time.monotonic() + timeout
+    candidates = tuple(item.casefold() for item in aliases(key))
+    while time.monotonic() < deadline:
+        for node in visible_nodes():
+            if role(node) != "button" or name(node).casefold() not in candidates:
+                continue
+            if not enabled(node):
+                continue
+            actions = [
+                action_name(node, index)
+                for index in range(action_count(node))
+            ]
+            try:
+                click_index = actions.index("click")
+            except ValueError:
+                continue
+            if perform_action(node, click_index):
+                event(
+                    "click",
+                    target=key,
+                    accessible_name=name(node),
+                    actions=actions,
+                )
+                time.sleep(0.35)
+                return
+        time.sleep(0.25)
+    raise UiFailure(f"Exact button click remained unavailable: {key!r}")
+
+
 def click_exact_name(value: str, timeout: float = 60) -> None:
     """Focus one exact dynamic row and activate it with real QEMU input."""
 
@@ -525,6 +592,25 @@ def set_text(key: str, value: str, *, occurrence: int = 0) -> None:
                     continue
         time.sleep(0.25)
     raise UiFailure(f"Editable field not found: {key!r}")
+
+
+def set_numeric_value(key: str, value: int, *, timeout: float = 30) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for target in visible_nodes():
+            if not matches(target, aliases(key)) or not enabled(target):
+                continue
+            try:
+                if target.is_value() and target.set_current_value(float(value)):
+                    observed = int(round(target.get_current_value()))
+                    if observed == value:
+                        event("set-numeric", target=key, value=value)
+                        time.sleep(0.3)
+                        return
+            except Exception:
+                continue
+        time.sleep(0.25)
+    raise UiFailure(f"Could not set numeric value for {key!r} to {value}")
 
 
 def editable_control(key: str, *, occurrence: int = 0, timeout: float = 30):
@@ -835,6 +921,35 @@ def control(key: str):
     return actionable(find(key))
 
 
+def dialog_control(dialog_key: str, key: str):
+    """Resolve an exact button only inside one visible modal dialog."""
+
+    dialog_names = {semantic_name(item) for item in aliases(dialog_key)}
+    control_names = {semantic_name(item) for item in aliases(key)}
+    for candidate in visible_nodes():
+        if role(candidate) != "dialog":
+            continue
+        if semantic_name(name(candidate)) not in dialog_names:
+            continue
+        for item in walk(candidate, maximum=500):
+            # GTK4's Adw.MessageDialog buttons can omit SENSITIVE from their
+            # AT-SPI state set even while they are keyboard-focusable.  The
+            # visible modal ancestry and observed focus are the activation
+            # oracle here; do not substitute the same-named background button.
+            if role(item) != "button":
+                continue
+            observed = {
+                semantic_name(name(descendant))
+                for descendant in walk(item, maximum=100)
+                if name(descendant)
+            }
+            if observed & control_names:
+                return item
+    raise UiFailure(
+        f"Button {key!r} was not found inside dialog {dialog_key!r}"
+    )
+
+
 def control_mnemonic(node) -> tuple[str, str] | None:
     source = next(
         (
@@ -956,6 +1071,55 @@ def request_focused_activation(key: str, request: str, timeout: float = 30) -> N
         if time.monotonic() >= deadline:
             break
     raise UiFailure(f"Button did not receive keyboard focus: {key!r}")
+
+
+def request_dialog_focused_activation(
+    dialog_key: str,
+    key: str,
+    request: str,
+    timeout: float = 30,
+) -> None:
+    """Keyboard-activate a button proven to belong to the named modal dialog."""
+
+    deadline = time.monotonic() + timeout
+    for index in range(80):
+        try:
+            target = dialog_control(dialog_key, key)
+        except UiFailure:
+            # Adw.MessageDialog is added on the next GTK main-loop turn after
+            # the summary button action completes.  Wait for that exact modal
+            # instead of falling back to the same-named background control.
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(0.25)
+            continue
+        focused = has_state(target, Atspi.StateType.FOCUSED) or any(
+            has_state(item, Atspi.StateType.FOCUSED)
+            for item in walk(target, maximum=100)
+        )
+        requested_key = "ret" if focused else "tab"
+        event(
+            "qmp-key",
+            request=f"{request}-{index}-{requested_key}",
+            key=requested_key,
+        )
+        if requested_key == "ret":
+            time.sleep(0.5)
+            event(
+                "focused-activation",
+                target=key,
+                dialog=dialog_key,
+                accessible_name=name(target),
+                method="dialog-scoped-keyboard-focus",
+                tab_count=index,
+            )
+            return
+        time.sleep(0.25)
+        if time.monotonic() >= deadline:
+            break
+    raise UiFailure(
+        f"Button {key!r} did not receive keyboard focus in dialog {dialog_key!r}"
+    )
 
 
 def owning_application(node) -> str:

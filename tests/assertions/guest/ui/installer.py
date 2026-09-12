@@ -211,6 +211,25 @@ def assert_step_completed(key: str) -> None:
     raise UiFailure(f"Installer completion page is missing step: {key}")
 
 
+def wait_step_started(key: str, timeout: float = 60) -> None:
+    """Require the privileged executor to advance beyond a pending row."""
+    deadline = time.monotonic() + timeout
+    last_symbol = "missing"
+    while time.monotonic() < deadline:
+        nodes = [item for item in visible_nodes() if name(item)]
+        for index, item in enumerate(nodes):
+            if not matches(item, aliases(key)):
+                continue
+            last_symbol = name(nodes[index - 1]) if index else ""
+            if last_symbol in ("●", "✓", "!", "×"):
+                event("step-started", step=key, status_symbol=last_symbol)
+                return
+        time.sleep(0.25)
+    raise UiFailure(
+        f"Installer executor did not start step {key}: {last_symbol!r}"
+    )
+
+
 def wait_page(key: str, timeout: float = 60) -> None:
     node = find(key, timeout=timeout)
     event("page", page=key, accessible_name=name(node))
@@ -256,6 +275,43 @@ def assert_automatic_disk_layout(config: dict[str, object], evidence: Path) -> N
         zram_algorithm="lz4",
         zram_priority=100,
         disk_swap_priority=10,
+    )
+
+
+def configure_manual_small_disk(config: dict[str, object], evidence: Path) -> None:
+    """Exercise the intentionally undisclosed expert escape hatch on 23 GiB."""
+    assert_toggle("btrfs", sensitive=False, active=False)
+    assert_toggle("ext4", sensitive=False, active=False)
+    if enabled(control("next")):
+        raise UiFailure("Automatic installation continued below 25 GiB")
+    event("automatic-capacity-blocked", disk_gib=config["disk_gib"])
+
+    set_toggle("manual_strategy", True)
+    click("next")
+    wait_page("advanced_storage")
+    click("edit_storage")
+    click("initialize_gpt")
+    click("confirm_initialize_gpt")
+
+    # 1 GiB ESP + 19 GiB Root + 3 GB Swap. The decimal 3 GB value is
+    # 2861 MiB, leaving alignment space inside the 23 GiB virtual disk.
+    for size_mib in (1024, 19 * 1024, 2861):
+        set_numeric_value("partition_size", size_mib)
+        click_button("add_partition")
+    find("next", timeout=30, require_enabled=True)
+    click("next")
+    find("capacity_minimum", timeout=30)
+    find("capacity_below_minimum", timeout=30)
+    dump_accessibility(evidence / "manual-small-disk-warning.txt")
+    click("continue")
+    wait_page("user")
+    event(
+        "manual-small-disk",
+        disk_gib=23,
+        esp_mib=1024,
+        root_mib=19 * 1024,
+        swap_mib=2861,
+        severe_warning_confirmed=True,
     )
 
 
@@ -434,13 +490,14 @@ def install(config: dict[str, object], evidence: Path) -> None:
 
     wait_page("strategy")
     filesystem = str(config["filesystem"])
-    set_toggle(filesystem, True)
-    click("next")
-
-    assert_automatic_disk_layout(config, evidence)
-    click("next")
-
-    wait_page("user")
+    if str(config.get("storage_mode")) == "manual-small-disk":
+        configure_manual_small_disk(config, evidence)
+    else:
+        set_toggle(filesystem, True)
+        click("next")
+        assert_automatic_disk_layout(config, evidence)
+        click("next")
+        wait_page("user")
     set_text("full_name", str(config["full_name"]))
     set_text("username", str(config["username"]))
     set_text("password", str(config["password"]))
@@ -462,8 +519,20 @@ def install(config: dict[str, object], evidence: Path) -> None:
     wait_page("summary")
     assert_summary_plan(config)
     dump_accessibility(evidence / "summary.txt")
-    click("install")
-    click("confirm", timeout=180)
+    click_button("install")
+    confirmation_dialog = (
+        "manual_layout_confirmation"
+        if str(config.get("storage_mode")) == "manual-small-disk"
+        else "erase_disk_confirmation"
+    )
+    request_dialog_focused_activation(
+        confirmation_dialog,
+        "confirm",
+        "installer-confirm-installation",
+        timeout=30,
+    )
+    wait_page("progress", timeout=30)
+    wait_step_started("detect_boot_environment", timeout=60)
 
     deadline = time.monotonic() + float(config["install_timeout_seconds"])
     while time.monotonic() < deadline:

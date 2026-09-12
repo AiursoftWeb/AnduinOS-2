@@ -2,13 +2,47 @@
 
 from unit.support import *  # noqa: F403
 class MatrixTests(unittest.TestCase):
-    def test_matrix_has_the_intended_twelve_unique_scenarios(self):
+    def test_installer_driver_requires_the_executor_to_start(self):
+        installer = (ROOT / "assertions/guest/ui/installer.py").read_text(
+            encoding="utf-8"
+        )
+        after_confirmation = installer.split(
+            '"installer-confirm-installation",', 1
+        )[1]
+        self.assertIn('wait_page("progress", timeout=30)', after_confirmation)
+        self.assertIn(
+            'wait_step_started("detect_boot_environment", timeout=60)',
+            after_confirmation,
+        )
+
+    def test_destructive_actions_require_real_gtk_buttons(self):
+        core = (ROOT / "assertions/guest/ui/core.py").read_text(encoding="utf-8")
+        installer = (ROOT / "assertions/guest/ui/installer.py").read_text(
+            encoding="utf-8"
+        )
+        helper = core.split("def click_button", 1)[1].split(
+            "def click_exact_name", 1
+        )[0]
+        self.assertIn('role(node) != "button"', helper)
+        self.assertIn('actions.index("click")', helper)
+        self.assertIn('click_button("add_partition")', installer)
+        self.assertNotIn('click("add_partition")', installer)
+        self.assertIn('click_button("install")', installer)
+        self.assertNotIn('click("install")', installer)
+        self.assertIn('request_dialog_focused_activation(', installer)
+        self.assertIn('"manual_layout_confirmation"', installer)
+        self.assertIn('"erase_disk_confirmation"', installer)
+        self.assertIn('"installer-confirm-installation",', installer)
+        self.assertNotIn('click("confirm", timeout=180)', installer)
+
+    def test_matrix_has_the_intended_thirteen_unique_scenarios(self):
         matrix = TestMatrix.load(ROOT / "cases/install.json")
-        self.assertEqual(12, len(matrix.scenarios))
-        self.assertEqual(12, len({item.id for item in matrix.scenarios}))
+        self.assertEqual(13, len(matrix.scenarios))
+        self.assertEqual(13, len({item.id for item in matrix.scenarios}))
         self.assertEqual(
             {
                 "bios-offline-btrfs",
+                "uefi-nosb-offline-manual-small-disk",
                 "bios-online-btrfs",
                 "bios-online-ext4",
                 "uefi-nosb-offline-btrfs",
@@ -23,7 +57,7 @@ class MatrixTests(unittest.TestCase):
             },
             {item.id for item in matrix.scenarios},
         )
-        self.assertEqual(12, len(matrix.select(Architecture.AMD64)))
+        self.assertEqual(13, len(matrix.select(Architecture.AMD64)))
         self.assertEqual(7, len(matrix.select(Architecture.ARM64)))
 
         scenarios = matrix.scenarios
@@ -35,12 +69,14 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(3, sum(item.filesystem is Filesystem.EXT4 for item in scenarios))
         self.assertEqual(1, sum(item.ssh is SshPolicy.ENABLED for item in scenarios))
         self.assertEqual(1, sum(item.ssh is SshPolicy.TOGGLE for item in scenarios))
-        self.assertEqual(4, sum(item.network is Network.OFFLINE for item in scenarios))
+        self.assertEqual(5, sum(item.network is Network.OFFLINE for item in scenarios))
         self.assertEqual(1, sum(item.network is Network.WIFI for item in scenarios))
         self.assertEqual(4, sum(item.rime for item in scenarios))
         self.assertEqual(1, sum(item.passwordless_sudo for item in scenarios))
         self.assertEqual(1, sum(item.automatic_login for item in scenarios))
         self.assertEqual(1, sum(item.desktop_contracts for item in scenarios))
+        small = next(item for item in scenarios if item.storage_mode is StorageMode.MANUAL_SMALL_DISK)
+        self.assertEqual(23, small.disk_gib)
         persistent = [
             item for item in scenarios if item.live_mode is LiveMode.PERSISTENT
         ]
