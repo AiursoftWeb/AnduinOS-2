@@ -76,10 +76,18 @@ def verify(workloads, erase_home):
                     key=lambda record: record["created_at"])
     require(len(resets) == len(workloads), "Expected one completed recovery per round")
     for index, record in enumerate(resets):
+        require(record.get("schema_version") in (4, 5), "Unsupported recovery history schema")
         require(record["phase"] == "confirmed" and record["failure"] is None,
                 "Recovery history does not confirm a successful reset")
         require(record["reset_home"] is (index == 1),
                 "Recovery history disagrees with the requested Home policy")
+        if record["schema_version"] == 5:
+            require(record.get("home_only") is False, "Factory recovery must include the system")
+            if record["reset_home"]:
+                require(record.get("fallback_home_snapshot_id"), "Home rollback has no safety snapshot")
+    # Keep the currently running older ISO qualification valid. New-format
+    # transactions MUST preserve history, not merely accept either outcome.
+    preserve_history = resets[-1]["schema_version"] == 5
     for workload in workloads:
         for name, content in workload["files"].items():
             path = Path(name)
@@ -91,16 +99,28 @@ def verify(workloads, erase_home):
         identifier = workload["personal_snapshot_id"]
         snapshot = STORE / "personal/snapshots" / identifier
         metadata = STORE / "personal/metadata" / f"{identifier}.json"
-        if erase_home:
+        if erase_home and not preserve_history:
             require(not os.path.lexists(snapshot) and not os.path.lexists(metadata),
                     "Erased Home data remains accessible through snapshot history")
         else:
             for name, content in workload["files"].items():
                 saved = snapshot / "home" / Path(name).relative_to("/home")
                 require(saved.read_text(encoding="utf-8") == content,
-                        "Preserve mode lost Home snapshot contents")
+                        "Home snapshot history lost its saved contents")
+                if preserve_history:
+                    require(metadata.is_file(), "Home snapshot metadata is missing")
+                    relative = Path(name).relative_to("/home")
+                    account = relative.parts[0]
+                    folder = Path(*relative.parts[1:]).parent.as_posix()
+                    entries = json.loads(run("runuser", "-u", account, "--",
+                                             "/usr/bin/anduinos-btrfs-snapshots-manager-cli",
+                                             "personal-files", identifier,
+                                             "" if folder == "." else folder, "--json"))
+                    require(any(entry.get("name") == Path(name).name for entry in entries),
+                            "Saved Home files are not browsable through the application API")
     print("curl=restored-and-runnable")
-    print("home-workload=" + ("erased-with-history" if erase_home else "content-preserved"))
+    print("home-workload=" + ("rolled-back-history-preserved" if erase_home and preserve_history
+                              else "erased-with-history" if erase_home else "content-preserved"))
 
 
 def main():

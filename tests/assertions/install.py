@@ -861,6 +861,9 @@ for metadata, expected_id, expected_title, scope in expected:
             f"Expected exactly one {scope} factory record, found {len(records)}"
         )
     path, record = records[0]
+    # Older images called the protected Home baseline "New OS Home".
+    if scope == "home" and record.get("title") == "New OS":
+        expected_title = "New OS"
     required = {
         "id": expected_id,
         "kind": "factory",

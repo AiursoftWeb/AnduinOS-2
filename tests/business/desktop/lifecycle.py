@@ -455,7 +455,7 @@ class LifecycleChecks:
             ".state == \"ready\" and .pinned == true and .title == \"New OS\") | .id' "
             "\"$store/metadata/\"*.json)\n"
             "home_factory=$(jq -r 'select(.kind == \"factory\" and "
-            ".state == \"ready\" and .pinned == true and .title == \"New OS Home\") | .id' "
+            ".state == \"ready\" and .pinned == true and (.title == \"New OS\" or .title == \"New OS Home\")) | .id' "
             "\"$store/personal/metadata/\"*.json)\n"
             "test \"$(printf '%s\\n' \"$root_factory\" | grep -c .)\" = 1\n"
             "test \"$(printf '%s\\n' \"$home_factory\" | grep -c .)\" = 1\n"
@@ -466,7 +466,7 @@ class LifecycleChecks:
             + mutation +
             "personal=$(anduinos-btrfs-snapshots-manager-cli personal-create --json "
             "'Factory reset acceptance Home history' "
-            "'Must survive preserve/reset fallback and disappear on erase')\n"
+            "'Home history retained across rollback')\n"
             "personal_id=$(printf '%s\\n' \"$personal\" | jq -er .id)\n"
             f"test -f {shlex.quote(root_sentinel)}\n"
             f"test -f {shlex.quote(home_sentinel)}\n"
@@ -474,7 +474,10 @@ class LifecycleChecks:
             "printf 'factory-root-id=%s\\nfactory-home-id=%s\\n"
             "personal-snapshot-id=%s\\n' "
             "\"$root_factory\" \"$home_factory\" \"$personal_id\"\n"
-            "anduinos-btrfs-snapshots-manager-cli status --json\n",
+            "status=$(anduinos-btrfs-snapshots-manager-cli status --json)\n"
+            "printf '%s\\n' \"$status\"\n"
+            "if printf '%s' \"$status\" | jq -e '.home_rollback_available == true' >/dev/null; then "
+            "printf 'home-history-policy=preserve\\n'; fi\n",
             timeout=300,
         )
         (artifacts / "factory-reset-before.txt").write_text(
@@ -483,6 +486,7 @@ class LifecycleChecks:
         factory_root_id = _last_value(prepared.stdout, "factory-root-id")
         factory_home_id = _last_value(prepared.stdout, "factory-home-id")
         personal_snapshot_id = _last_value(prepared.stdout, "personal-snapshot-id")
+        preserve_history = "home-history-policy=preserve" in prepared.stdout
         if workloads is not None:
             workload = json.loads(_last_value(prepared.stdout, "factory-workload"))
             workload.update(personal_snapshot_id=personal_snapshot_id,
@@ -566,7 +570,7 @@ class LifecycleChecks:
         else:
             expected_root = False
             expected_home = not erase_home
-            expected_history = not erase_home
+            expected_history = preserve_history or not erase_home
             expected_transaction = "confirmed"
 
         health_command = self._factory_reset_health_command(
@@ -706,7 +710,7 @@ class LifecycleChecks:
             ".state == \"ready\" and .pinned == true and .title == \"New OS\")] | length')\" = 1; "
             "sudo -n jq -e --arg id \"$factory_home_id\" "
             "'.id == $id and .kind == \"factory\" and .state == \"ready\" and "
-            ".pinned == true and .title == \"New OS Home\"' "
+            ".pinned == true and (.title == \"New OS\" or .title == \"New OS Home\")' "
             "\"$store/personal/metadata/$factory_home_id.json\" >/dev/null; "
             "sudo -n test -d \"$store/deployments/$factory_root_id/root\"; "
             "sudo -n test -d \"$store/personal/snapshots/$factory_home_id/home\"; "

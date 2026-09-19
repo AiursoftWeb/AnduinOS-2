@@ -40,7 +40,7 @@ ArcMenu launch into a real Qt window. It does not test recording or streaming.
 External catalog/download failures are reported as failures, not skipped passes.
 
 `factory-reset-repeat` removes curl and creates Home files, then resets the same
-disposable VM twice: preserve Home, then erase Home and its snapshot history.
+disposable VM twice: preserve Home, then roll back Home while retaining browsable snapshot history.
 Both boots must restore baseline curl, package health and desktop login, with
 QEMU blocking Internet access. Package edge cases stay in AnduinOS-Packages.
 

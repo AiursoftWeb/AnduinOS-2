@@ -38,7 +38,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             for index in range(2):
                 (records / f"{index}.json").write_text(json.dumps({
                     "target_deployment_id": "factory", "created_at": str(index),
-                    "phase": "confirmed", "failure": None, "reset_home": index == 1,
+                    "phase": "confirmed", "failure": None, "reset_home": index == 1, "schema_version": 4,
                 }))
             workload = {"version": "test", "sha256": "checksum", "boot_id": "previous-boot",
                         "factory_root_id": "factory", "personal_snapshot_id": "personal",
@@ -55,6 +55,45 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                 with patch("sys.stdout", new_callable=io.StringIO) as output:
                     verify([workload, workload], True)
                 self.assertIn("curl=restored-and-runnable", output.getvalue())
+
+    def test_new_factory_workload_requires_retained_browsable_history(self):
+        module = runpy.run_path(str(ROOT / "assertions/guest/factory_reset_workload.py"))
+        verify = module["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory)
+            history = store / "personal/snapshots/personal/home/acceptance-test-user"
+            history.mkdir(parents=True)
+            saved = history / "document"
+            saved.write_text("original")
+            metadata = store / "personal/metadata"
+            metadata.mkdir()
+            (metadata / "personal.json").write_text("{}")
+            records = store / "rollback-history"
+            records.mkdir()
+            for index in range(2):
+                (records / f"{index}.json").write_text(json.dumps({
+                    "schema_version": 5, "target_deployment_id": "factory", "created_at": str(index),
+                    "phase": "confirmed", "failure": None, "reset_home": index == 1,
+                    "home_only": False, "fallback_home_snapshot_id": "safety" if index else None,
+                }))
+            workload = {"version": "test", "sha256": "checksum", "boot_id": "previous-boot",
+                        "factory_root_id": "factory", "personal_snapshot_id": "personal",
+                        "files": {"/home/acceptance-test-user/document": "original"}}
+            def run(*args):
+                if args[0] == "runuser":
+                    return '[{"name":"document"}]'
+                return "install ok installed" if "-f=${Status}" in args else "test"
+            with patch.dict(verify.__globals__, STORE=store, run=run, digest=lambda _: "checksum"), \
+                 patch("os.path.lexists", return_value=False):
+                with patch("sys.stdout", new_callable=io.StringIO) as output:
+                    verify([workload, workload], True)
+                self.assertIn("rolled-back-history-preserved", output.getvalue())
+                saved.write_text("damaged")
+                with self.assertRaisesRegex(RuntimeError, "lost its saved contents"):
+                    verify([workload, workload], True)
+                saved.unlink()
+                with self.assertRaises(FileNotFoundError):
+                    verify([workload, workload], True)
 
     def test_factory_repeat_preparation_is_valid_shell_without_host_mutation(self):
         runner = object.__new__(FeatureSuiteRunner)

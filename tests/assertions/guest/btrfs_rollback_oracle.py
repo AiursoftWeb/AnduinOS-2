@@ -152,10 +152,15 @@ def validate(
     require(len(histories) == 1,
             f"expected one rollback history for {expected_target}, found {len(histories)}")
     transaction = histories[0]
-    require(transaction.get("schema_version") == 4,
+    require(transaction.get("schema_version") in (4, 5),
             f"rollback history schema is unsupported: {transaction.get('schema_version')!r}")
     require(transaction.get("reset_home") is False,
             "ordinary rollback must not reset Home")
+    if transaction["schema_version"] == 5:
+        require(transaction.get("home_only") is False
+                and "fallback_home_snapshot_id" in transaction
+                and transaction["fallback_home_snapshot_id"] is None,
+                "ordinary system rollback must not select a Home-only transaction or Home fallback")
     require("factory_home_snapshot_id" in transaction
             and transaction["factory_home_snapshot_id"] is None
             and "factory_home_snapshot_uuid" in transaction
