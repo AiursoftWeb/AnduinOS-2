@@ -448,99 +448,107 @@ printf 'spotify-public-catalog=current-and-resolved\n'
 """
 
 
-def _wechat_install_command() -> str:
-    """Render the current native WeChat Flatpak installation contract."""
+def _flatpak_install_command(identifier: str, prefix: str, architecture: str = "x86_64") -> str:
+    """Install and verify one public Flatpak without repairing the image configuration."""
 
     remote = shlex.quote(_SPOTIFY_REMOTE)
     remote_url = shlex.quote(_SPOTIFY_REMOTE_URL)
-    app_id = shlex.quote(_WECHAT_APP_ID)
-    arch = shlex.quote(_WECHAT_ARCH)
-    expected_ref = shlex.quote(_WECHAT_REF)
+    app_id = shlex.quote(identifier)
+    arch = shlex.quote(architecture)
+    expected_ref = shlex.quote(f"app/{identifier}/{architecture}/stable")
     return f"""set -uo pipefail
 export LC_ALL=C
-fail_wechat() {{
-    printf 'wechat-failure-reason=%s\n' "$2"
-    printf 'wechat-failure-class=%s\n' "$1"
+fail_{prefix}() {{
+    printf '{prefix}-failure-reason=%s\n' "$2"
+    printf '{prefix}-failure-class=%s\n' "$1"
     exit "$3"
 }}
-printf 'wechat-stage=preflight\n'
+printf '{prefix}-stage=preflight\n'
 command -v flatpak >/dev/null 2>&1 || \
-    fail_wechat product-regression flatpak-missing 81
+    fail_{prefix} product-regression flatpak-missing 81
 if flatpak info --system {app_id} >/dev/null 2>&1; then
-    printf 'wechat-preinstalled=yes\n'
-    fail_wechat product-regression unexpected-preinstalled-app 82
+    printf '{prefix}-preinstalled=yes\n'
+    fail_{prefix} product-regression unexpected-preinstalled-app 82
 fi
-printf 'wechat-preinstalled=no\n'
+printf '{prefix}-preinstalled=no\n'
 remotes=$(flatpak remotes --system --show-disabled --columns=name,url 2>&1) || {{
-    printf 'wechat-remotes-error=%s\n' "$remotes"
-    fail_wechat product-regression remote-list-failed 83
+    printf '{prefix}-remotes-error=%s\n' "$remotes"
+    fail_{prefix} product-regression remote-list-failed 83
 }}
 remote_count=$(printf '%s\n' "$remotes" | awk -F '\t' '$1 == "flathub" {{ count++ }} END {{ print count + 0 }}')
 observed_url=$(printf '%s\n' "$remotes" | awk -F '\t' '$1 == "flathub" {{ print $2 }}')
-printf 'wechat-remote-count=%s\n' "$remote_count"
-printf 'wechat-remote-url=%s\n' "$observed_url"
+printf '{prefix}-remote-count=%s\n' "$remote_count"
+printf '{prefix}-remote-url=%s\n' "$observed_url"
 test "$remote_count" -eq 1 || \
-    fail_wechat product-regression flathub-remote-count 84
+    fail_{prefix} product-regression flathub-remote-count 84
 test "$observed_url" = {remote_url} || \
-    fail_wechat product-regression flathub-remote-url 85
-printf 'wechat-stage=catalog-refresh\n'
+    fail_{prefix} product-regression flathub-remote-url 85
+printf '{prefix}-stage=catalog-refresh\n'
 if ! timeout --signal=TERM 600 flatpak update --appstream --system \
     --noninteractive {remote}; then
-    fail_wechat external-catalog appstream-refresh-failed 86
+    fail_{prefix} external-catalog appstream-refresh-failed 86
 fi
 if ! remote_ref=$(timeout --signal=TERM 180 flatpak remote-info --system \
     --arch={arch} --show-ref {remote} {app_id} 2>&1); then
-    printf 'wechat-remote-info-error=%s\n' "$remote_ref"
-    fail_wechat external-catalog wechat-ref-unavailable 87
+    printf '{prefix}-remote-info-error=%s\n' "$remote_ref"
+    fail_{prefix} external-catalog {prefix}-ref-unavailable 87
 fi
 if ! remote_commit=$(timeout --signal=TERM 180 flatpak remote-info --system \
     --arch={arch} --show-commit {remote} {app_id} 2>&1); then
-    printf 'wechat-remote-info-error=%s\n' "$remote_commit"
-    fail_wechat external-catalog wechat-commit-unavailable 88
+    printf '{prefix}-remote-info-error=%s\n' "$remote_commit"
+    fail_{prefix} external-catalog {prefix}-commit-unavailable 88
 fi
-printf 'wechat-remote-ref=%s\n' "$remote_ref"
-printf 'wechat-remote-commit=%s\n' "$remote_commit"
+printf '{prefix}-remote-ref=%s\n' "$remote_ref"
+printf '{prefix}-remote-commit=%s\n' "$remote_commit"
 test "$remote_ref" = {expected_ref} || \
-    fail_wechat external-catalog wechat-ref-mismatch 89
-printf 'wechat-stage=install\n'
+    fail_{prefix} external-catalog {prefix}-ref-mismatch 89
+printf '{prefix}-stage=install\n'
 if ! timeout --signal=TERM 1200 flatpak install --system --noninteractive \
     --assumeyes --arch={arch} {remote} {app_id}; then
-    fail_wechat external-artifact flatpak-install-failed 90
+    fail_{prefix} external-artifact flatpak-install-failed 90
 fi
 # Third-party bwrap/extra-data helpers may write diagnostics without a trailing
 # newline. Start a fresh protocol record instead of weakening the key parser.
-printf '\nwechat-install-command=passed\n'
+printf '\n{prefix}-install-command=passed\n'
 installed_ref=$(flatpak info --system --arch={arch} --show-ref {app_id} 2>&1) || \
-    fail_wechat product-regression installed-ref-missing 91
+    fail_{prefix} product-regression installed-ref-missing 91
 installed_commit=$(flatpak info --system --arch={arch} --show-commit {app_id} 2>&1) || \
-    fail_wechat product-regression installed-commit-missing 92
+    fail_{prefix} product-regression installed-commit-missing 92
 installed_origin=$(flatpak info --system --arch={arch} --show-origin {app_id} 2>&1) || \
-    fail_wechat product-regression installed-origin-missing 93
+    fail_{prefix} product-regression installed-origin-missing 93
 installed_location=$(flatpak info --system --arch={arch} --show-location {app_id} 2>&1) || \
-    fail_wechat product-regression installed-location-missing 94
-printf 'wechat-installed-ref=%s\n' "$installed_ref"
-printf 'wechat-installed-commit=%s\n' "$installed_commit"
-printf 'wechat-installed-origin=%s\n' "$installed_origin"
-printf 'wechat-installed-location=%s\n' "$installed_location"
+    fail_{prefix} product-regression installed-location-missing 94
+printf '{prefix}-installed-ref=%s\n' "$installed_ref"
+printf '{prefix}-installed-commit=%s\n' "$installed_commit"
+printf '{prefix}-installed-origin=%s\n' "$installed_origin"
+printf '{prefix}-installed-location=%s\n' "$installed_location"
 test "$installed_ref" = "$remote_ref" || \
-    fail_wechat product-regression installed-ref-mismatch 95
+    fail_{prefix} product-regression installed-ref-mismatch 95
 test "$installed_commit" = "$remote_commit" || \
-    fail_wechat product-regression installed-commit-mismatch 96
+    fail_{prefix} product-regression installed-commit-mismatch 96
 test "$installed_origin" = {remote} || \
-    fail_wechat product-regression installed-origin-mismatch 97
-desktop=/var/lib/flatpak/exports/share/applications/com.tencent.WeChat.desktop
+    fail_{prefix} product-regression installed-origin-mismatch 97
+desktop=/var/lib/flatpak/exports/share/applications/{identifier}.desktop
 desktop_resolved=$(readlink -f "$desktop" 2>/dev/null || true)
-printf 'wechat-desktop=%s\n' "$desktop"
-printf 'wechat-desktop-resolved=%s\n' "$desktop_resolved"
+printf '{prefix}-desktop=%s\n' "$desktop"
+printf '{prefix}-desktop-resolved=%s\n' "$desktop_resolved"
 test -s "$desktop_resolved" || \
-    fail_wechat product-regression desktop-export-missing 98
-grep -Eq '^Exec=.*flatpak run .*com[.]tencent[.]WeChat' "$desktop_resolved" || \
-    fail_wechat product-regression desktop-exec-invalid 99
-printf 'wechat-app-id=%s\n' {app_id}
-printf 'wechat-arch=%s\n' {arch}
-printf 'wechat-failure-class=none\n'
-printf 'wechat-install=current-and-verified\n'
+    fail_{prefix} product-regression desktop-export-missing 98
+grep -Eq '^Exec=.*flatpak run .*{identifier.replace('.', '[.]')}' "$desktop_resolved" || \
+    fail_{prefix} product-regression desktop-exec-invalid 99
+printf '{prefix}-app-id=%s\n' {app_id}
+printf '{prefix}-arch=%s\n' {arch}
+printf '{prefix}-failure-class=none\n'
+printf '{prefix}-install=current-and-verified\n'
 """
+
+
+def _wechat_install_command() -> str:
+    return _flatpak_install_command(_WECHAT_APP_ID, "wechat")
+
+
+def _obs_install_command() -> str:
+    return _flatpak_install_command(_OBS_APP_ID, "obs")
 
 
 def _nextcloud_ppa_source_probe_command() -> str:
@@ -787,74 +795,88 @@ def _validate_spotify_public_catalog_evidence(
     }
 
 
-def _validate_wechat_install_evidence(
+def _validate_flatpak_install_evidence(
     output: str,
     returncode: int,
+    identifier: str,
+    prefix: str,
+    label: str,
 ) -> dict[str, str]:
-    """Require the resolved current WeChat ref and its exported launcher."""
+    """Require the selected public ref, commit, origin, and exported launcher."""
+
+    architecture = "x86_64"
+    expected_ref = f"app/{identifier}/{architecture}/stable"
 
     if returncode != 0:
         classification = _safe_failure_class(
             output,
-            "wechat-failure-class",
+            f"{prefix}-failure-class",
             {"external-catalog", "external-artifact", "product-regression"},
         )
         try:
-            reason = _last_value(output, "wechat-failure-reason")
+            reason = _last_value(output, f"{prefix}-failure-reason")
         except TestFailure:
             reason = "malformed-failure-evidence"
         raise TestFailure(
-            f"WeChat installation failure ({classification}, {reason}, "
+            f"{label} installation failure ({classification}, {reason}, "
             f"exit {returncode}):\n{output[-16000:]}"
         )
 
     expected = {
-        "wechat-preinstalled": "no",
-        "wechat-remote-count": "1",
-        "wechat-remote-url": _SPOTIFY_REMOTE_URL,
-        "wechat-remote-ref": _WECHAT_REF,
-        "wechat-install-command": "passed",
-        "wechat-installed-ref": _WECHAT_REF,
-        "wechat-installed-origin": _SPOTIFY_REMOTE,
-        "wechat-desktop": (
+        f"{prefix}-preinstalled": "no",
+        f"{prefix}-remote-count": "1",
+        f"{prefix}-remote-url": _SPOTIFY_REMOTE_URL,
+        f"{prefix}-remote-ref": expected_ref,
+        f"{prefix}-install-command": "passed",
+        f"{prefix}-installed-ref": expected_ref,
+        f"{prefix}-installed-origin": _SPOTIFY_REMOTE,
+        f"{prefix}-desktop": (
             "/var/lib/flatpak/exports/share/applications/"
-            "com.tencent.WeChat.desktop"
+            f"{identifier}.desktop"
         ),
-        "wechat-app-id": _WECHAT_APP_ID,
-        "wechat-arch": _WECHAT_ARCH,
-        "wechat-failure-class": "none",
-        "wechat-install": "current-and-verified",
+        f"{prefix}-app-id": identifier,
+        f"{prefix}-arch": architecture,
+        f"{prefix}-failure-class": "none",
+        f"{prefix}-install": "current-and-verified",
     }
     observed = {key: _last_value(output, key) for key in expected}
     for key, value in expected.items():
         if observed[key] != value:
             raise TestFailure(
-                f"The WeChat install contract returned {key}={observed[key]!r}, "
+                f"The {label} install contract returned {key}={observed[key]!r}, "
                 f"expected {value!r}"
             )
-    remote_commit = _last_value(output, "wechat-remote-commit")
-    installed_commit = _last_value(output, "wechat-installed-commit")
+    remote_commit = _last_value(output, f"{prefix}-remote-commit")
+    installed_commit = _last_value(output, f"{prefix}-installed-commit")
     if (
         re.fullmatch(r"[0-9a-f]{64}", remote_commit) is None
         or installed_commit != remote_commit
     ):
         raise TestFailure(
-            "The installed WeChat deployment does not match the resolved public commit"
+            f"The installed {label} deployment does not match the resolved public commit"
         )
-    location = _last_value(output, "wechat-installed-location")
-    resolved_desktop = _last_value(output, "wechat-desktop-resolved")
+    location = _last_value(output, f"{prefix}-installed-location")
+    resolved_desktop = _last_value(output, f"{prefix}-desktop-resolved")
     if (
-        not location.startswith("/var/lib/flatpak/app/com.tencent.WeChat/")
+        not location.startswith(f"/var/lib/flatpak/app/{identifier}/")
         or not resolved_desktop.startswith(location.rstrip("/") + "/")
-        or not resolved_desktop.endswith("/export/share/applications/com.tencent.WeChat.desktop")
+        or not resolved_desktop.endswith(f"/export/share/applications/{identifier}.desktop")
     ):
-        raise TestFailure("WeChat's desktop export is outside its verified deployment")
+        raise TestFailure(f"{label}'s desktop export is outside its verified deployment")
     return {
         **observed,
         "commit": remote_commit,
         "location": location,
         "resolved_desktop": resolved_desktop,
     }
+
+
+def _validate_wechat_install_evidence(output: str, returncode: int) -> dict[str, str]:
+    return _validate_flatpak_install_evidence(output, returncode, _WECHAT_APP_ID, "wechat", "WeChat")
+
+
+def _validate_obs_install_evidence(output: str, returncode: int) -> dict[str, str]:
+    return _validate_flatpak_install_evidence(output, returncode, _OBS_APP_ID, "obs", "OBS Studio")
 
 
 def _validate_cpu_z_download_evidence(
@@ -960,6 +982,34 @@ def _validate_rollback_health(output: str) -> None:
     if missing:
         raise TestFailure(
             "Rollback evidence is missing required successful oracles: "
+            + ", ".join(missing)
+        )
+
+
+def _validate_factory_reset_health(
+    output: str,
+    *,
+    root_present: bool,
+    home_present: bool,
+    personal_history_present: bool,
+    transaction: str,
+) -> None:
+    required = {
+        f"root-sentinel={'present' if root_present else 'absent'}",
+        f"home-sentinel={'present' if home_present else 'absent'}",
+        f"home-history={'present' if personal_history_present else 'absent'}",
+        "factory-root=healthy",
+        "factory-home=healthy",
+        "recovery-pending=absent",
+        "btrfs-staging-roots=absent",
+        f"factory-transaction={transaction}",
+        "factory-reset-health=ok",
+    }
+    observed = {line.strip() for line in output.splitlines()}
+    missing = sorted(required - observed)
+    if missing:
+        raise TestFailure(
+            "Factory-reset evidence is missing required successful oracles: "
             + ", ".join(missing)
         )
 

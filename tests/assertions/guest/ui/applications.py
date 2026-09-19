@@ -4,7 +4,7 @@ from .core import *  # noqa: F403
 from .shell import _open_arcmenu_search
 
 
-def _wechat_instances() -> list[dict[str, object]]:
+def _flatpak_instances(application: str) -> list[dict[str, object]]:
     environment = os.environ.copy()
     environment["LC_ALL"] = "C"
     result = subprocess.run(
@@ -20,17 +20,17 @@ def _wechat_instances() -> list[dict[str, object]]:
         check=False,
     )
     if result.returncode != 0:
-        raise UiFailure("Could not enumerate the running WeChat Flatpak: " + result.stdout)
+        raise UiFailure("Could not enumerate running Flatpaks: " + result.stdout)
     instances = []
     for raw_line in result.stdout.splitlines():
         fields = raw_line.split("\t")
-        if len(fields) != 8 or fields[3] != "com.tencent.WeChat":
+        if len(fields) != 8 or fields[3] != application:
             continue
         try:
             pid = int(fields[1])
             child_pid = int(fields[2])
         except ValueError as error:
-            raise UiFailure(f"WeChat returned malformed Flatpak PIDs: {raw_line!r}") from error
+            raise UiFailure(f"Flatpak returned malformed PIDs: {raw_line!r}") from error
         instances.append(
             {
                 "instance": fields[0],
@@ -44,6 +44,69 @@ def _wechat_instances() -> list[dict[str, object]]:
             }
         )
     return instances
+
+
+def _wechat_instances() -> list[dict[str, object]]:
+    return _flatpak_instances("com.tencent.WeChat")
+
+
+def _obs_windows() -> list[dict[str, object]]:
+    windows = []
+    for application in children(desktop()):
+        if name(application).casefold() not in {"obs", "obs studio", "com.obsproject.studio"}:
+            continue
+        for window in children(application):
+            if not showing(window) or role(window) not in {"frame", "dialog"}:
+                continue
+            title = name(window)
+            if any(word in title.casefold() for word in ("error", "failed", "错误", "失败")):
+                raise UiFailure(f"OBS showed an error window: {title}")
+            if not any(word in title.casefold() for word in ("obs", "auto-configuration", "自动配置")):
+                continue
+            bounds = window.get_extents(Atspi.CoordType.SCREEN)
+            controls = sum(1 for item in walk(window) if showing(item)
+                           and role(item) in {"push button", "button", "radio button", "menu bar", "combo box"})
+            if bounds.width < 200 or bounds.height < 120 or controls < 3:
+                continue
+            windows.append({"title": title, "role": role(window),
+                            "application": name(application), "visible": True,
+                            "bounds": [bounds.x, bounds.y, bounds.width, bounds.height],
+                            "controls": controls})
+    return windows
+
+
+def exercise_obs_install(evidence: Path) -> None:
+    """Launch the installed Flatpak from ArcMenu and observe its real Qt UI."""
+    dismiss_initial_setup()
+    if _flatpak_instances("com.obsproject.Studio") or _obs_windows():
+        raise UiFailure("OBS was already running before the menu launch")
+    event("obs-launch-baseline", running=False)
+    semantic, _, _ = _open_arcmenu_search("OBS Studio", "obs-search")
+    result_name = name(semantic)
+    event("qmp-key", request="obs-result-activate", key="ret")
+    deadline = time.monotonic() + 90
+    signature = None
+    stable = 0
+    while time.monotonic() < deadline:
+        windows = _obs_windows()
+        instances = _flatpak_instances("com.obsproject.Studio")
+        current = (windows, instances)
+        if windows and len(instances) == 1:
+            stable = stable + 1 if current == signature else 1
+            signature = current
+            if stable >= 4:
+                dump_accessibility(evidence / "obs-window.txt")
+                event("obs-installed-launched", application="com.obsproject.Studio",
+                      search_result=result_name, activation_method="qmp-keyboard",
+                      observation="atspi+flatpak", visible=True,
+                      windows=windows, flatpak_instances=instances,
+                      stable_observations=stable)
+                return
+        else:
+            stable = 0
+            signature = None
+        time.sleep(0.5)
+    raise UiFailure("OBS did not expose a stable window and running Flatpak instance")
 
 
 def _wechat_shell_taskbar_button() -> dict[str, object] | None:

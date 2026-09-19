@@ -1,5 +1,8 @@
 """Ordinary reboot, Btrfs rollback, power transition, and SSH behavior."""
 
+import os
+import tempfile
+
 from .context import *  # noqa: F403
 
 
@@ -344,6 +347,474 @@ class LifecycleChecks:
             timeout=150,
         )
         vm.stop()
+
+    def _exercise_factory_reset_preserve_home(
+        self,
+        vm: QemuVm,
+        base: PromotedBase,
+        artifacts: Path,
+    ) -> None:
+        self._exercise_factory_reset(
+            vm,
+            base,
+            artifacts,
+            suite_id="factory-reset-preserve-home",
+            erase_home=False,
+            interrupt_after_apply=False,
+        )
+
+    def _exercise_factory_reset_erase_home(
+        self,
+        vm: QemuVm,
+        base: PromotedBase,
+        artifacts: Path,
+    ) -> None:
+        self._exercise_factory_reset(
+            vm,
+            base,
+            artifacts,
+            suite_id="factory-reset-erase-home",
+            erase_home=True,
+            interrupt_after_apply=False,
+        )
+
+    def _exercise_factory_reset_power_loss(
+        self,
+        vm: QemuVm,
+        base: PromotedBase,
+        artifacts: Path,
+    ) -> None:
+        self._exercise_factory_reset(
+            vm,
+            base,
+            artifacts,
+            suite_id="factory-reset-power-loss",
+            erase_home=True,
+            interrupt_after_apply=True,
+        )
+
+    def _exercise_factory_reset_repeat(
+        self, vm: QemuVm, base: PromotedBase, artifacts: Path,
+    ) -> None:
+        """Two real UI resets of the same isolated disk, without Internet."""
+        if not vm.config.restrict_network:
+            raise TestFailure("Repeated factory recovery requires QEMU network isolation")
+        (artifacts / "network-isolation.txt").write_text(
+            "QEMU user networking: restrict=on; only explicit SSH forwarding allowed.\n",
+            encoding="utf-8",
+        )
+        workloads: list[dict] = []
+        for erase_home, name in ((False, "preserve"), (True, "erase")):
+            round_artifacts = artifacts / name
+            round_artifacts.mkdir()
+            self._exercise_factory_reset(
+                vm, base, round_artifacts,
+                suite_id=f"factory-reset-repeat-{name}",
+                erase_home=erase_home, interrupt_after_apply=False,
+                workloads=workloads,
+            )
+        vm.stop()
+
+    def _exercise_factory_reset(
+        self,
+        vm: QemuVm,
+        base: PromotedBase,
+        artifacts: Path,
+        *,
+        suite_id: str,
+        erase_home: bool,
+        interrupt_after_apply: bool,
+        workloads: list[dict] | None = None,
+    ) -> None:
+        """Exercise the dedicated factory workflow, including atomic fallback."""
+
+        assert vm.serial is not None and vm.qmp is not None
+        root_sentinel = f"/etc/anduinos-acceptance-{suite_id}"
+        home_sentinel = f"/home/{self.username}/anduinos-acceptance-{suite_id}"
+        remote = f"/run/anduinos-feature-{suite_id}"
+        vm.serial.run(f"install -d -m 0777 {shlex.quote(remote)}/evidence")
+        self.driver.upload(vm.serial, remote)
+        key = self._prepare_power_control(vm, artifacts, remote)
+        workload_source = (
+            Path(__file__).resolve().parents[2]
+            / "assertions/guest/factory_reset_workload.py"
+        ).read_text(encoding="utf-8") if workloads is not None else ""
+        mutation = (
+            "python3 -c " + shlex.quote(workload_source)
+            + " prepare --home " + shlex.quote(home_sentinel + ".d")
+            + ' --factory-root "$root_factory"\n'
+            if workloads is not None else ""
+        )
+
+        prepared = vm.serial.run(
+            "set -euo pipefail\n"
+            "store=/.snapshots/anduinos-btrfs-snapshots-manager\n"
+            "test \"$(findmnt -n -o FSTYPE /)\" = btrfs\n"
+            "test \"$(findmnt -n -o FSROOT /)\" = /@root\n"
+            "root_factory=$(jq -r 'select(.kind == \"factory\" and "
+            ".state == \"ready\" and .pinned == true and .title == \"New OS\") | .id' "
+            "\"$store/metadata/\"*.json)\n"
+            "home_factory=$(jq -r 'select(.kind == \"factory\" and "
+            ".state == \"ready\" and .pinned == true and .title == \"New OS Home\") | .id' "
+            "\"$store/personal/metadata/\"*.json)\n"
+            "test \"$(printf '%s\\n' \"$root_factory\" | grep -c .)\" = 1\n"
+            "test \"$(printf '%s\\n' \"$home_factory\" | grep -c .)\" = 1\n"
+            f"printf 'root mutation must disappear\\n' > {shlex.quote(root_sentinel)}\n"
+            f"printf 'home mutation contract\\n' > {shlex.quote(home_sentinel)}\n"
+            f"chown {shlex.quote(self.username)}:{shlex.quote(self.username)} "
+            f"{shlex.quote(home_sentinel)}\n"
+            + mutation +
+            "personal=$(anduinos-btrfs-snapshots-manager-cli personal-create --json "
+            "'Factory reset acceptance Home history' "
+            "'Must survive preserve/reset fallback and disappear on erase')\n"
+            "personal_id=$(printf '%s\\n' \"$personal\" | jq -er .id)\n"
+            f"test -f {shlex.quote(root_sentinel)}\n"
+            f"test -f {shlex.quote(home_sentinel)}\n"
+            "test -f \"$store/personal/metadata/$personal_id.json\"\n"
+            "printf 'factory-root-id=%s\\nfactory-home-id=%s\\n"
+            "personal-snapshot-id=%s\\n' "
+            "\"$root_factory\" \"$home_factory\" \"$personal_id\"\n"
+            "anduinos-btrfs-snapshots-manager-cli status --json\n",
+            timeout=300,
+        )
+        (artifacts / "factory-reset-before.txt").write_text(
+            prepared.stdout + "\n", encoding="utf-8"
+        )
+        factory_root_id = _last_value(prepared.stdout, "factory-root-id")
+        factory_home_id = _last_value(prepared.stdout, "factory-home-id")
+        personal_snapshot_id = _last_value(prepared.stdout, "personal-snapshot-id")
+        if workloads is not None:
+            workload = json.loads(_last_value(prepared.stdout, "factory-workload"))
+            workload.update(personal_snapshot_id=personal_snapshot_id,
+                            factory_root_id=factory_root_id, factory_home_id=factory_home_id)
+            if workloads and any(workloads[0][field] != workload[field] for field in
+                                 ("factory_root_id", "factory_home_id", "version", "sha256")):
+                raise TestFailure("Second reset does not reuse the original factory baseline")
+            workloads.append(workload)
+
+        command = [
+            "python3",
+            f"{remote}/atspi_driver.py",
+            "factory-reset-arm",
+            "--evidence",
+            f"{remote}/evidence",
+        ]
+        if erase_home:
+            command.append("--erase-home")
+        armed = _run_with_qmp_key_requests(
+            vm,
+            _desktop_command(self.username, tuple(command)),
+            timeout=300,
+            secret_text=self.password,
+        )
+        (artifacts / "factory-reset-atspi-events.jsonl").write_text(
+            armed.stdout + "\n", encoding="utf-8"
+        )
+        _retrieve_tree(vm.serial, remote, artifacts / "guest-factory-reset-evidence")
+        _retrieve_file(
+            vm.serial,
+            "/tmp/anduinos-factory-reset.stdout",
+            artifacts / "factory-reset-app.stdout",
+        )
+        if armed.returncode != 0:
+            raise TestFailure(
+                "The dedicated factory-reset UI could not arm recovery:\n"
+                + armed.stdout[-8000:]
+            )
+
+        self.phase_callback(base.scenario.id, suite_id, "Rebooting into factory recovery")
+        request = self._ssh(
+            vm,
+            key,
+            "sudo -n /usr/local/sbin/anduinos-acceptance-reboot",
+        )
+        (artifacts / "factory-reset-reboot-request.txt").write_text(
+            request + "\n", encoding="utf-8"
+        )
+        self._wait_for_power_transition(
+            vm,
+            key,
+            artifacts,
+            f"{suite_id}-reboot",
+            timeout=150,
+        )
+        vm.stop()
+        vm.start(attach_iso=False, phase=f"{suite_id}-apply")
+
+        if interrupt_after_apply:
+            assert vm.serial is not None
+            vm.serial.wait_for_text(
+                "SNAPSHOTS-MANAGER-CHECKPOINT booted-unconfirmed-recorded",
+                timeout=self.options.boot_timeout_seconds,
+            )
+            (artifacts / "factory-reset-power-loss.txt").write_text(
+                "QEMU stopped immediately after the durable "
+                "booted-unconfirmed-recorded checkpoint.\n",
+                encoding="utf-8",
+            )
+            vm.stop()
+            vm.start(attach_iso=False, phase=f"{suite_id}-revert")
+            assert vm.serial is not None
+            vm.serial.wait_for_text(
+                "SNAPSHOTS-MANAGER-CHECKPOINT reverted-recorded",
+                timeout=self.options.boot_timeout_seconds,
+            )
+            expected_root = True
+            expected_home = True
+            expected_history = True
+            expected_transaction = "reverted"
+        else:
+            expected_root = False
+            expected_home = not erase_home
+            expected_history = not erase_home
+            expected_transaction = "confirmed"
+
+        health_command = self._factory_reset_health_command(
+            root_sentinel=root_sentinel,
+            home_sentinel=home_sentinel,
+            personal_snapshot_id=personal_snapshot_id,
+            factory_root_id=factory_root_id,
+            factory_home_id=factory_home_id,
+            root_present=expected_root,
+            home_present=expected_home,
+            personal_history_present=expected_history,
+            transaction=expected_transaction,
+        )
+        if erase_home and not interrupt_after_apply:
+            health = self._ssh_password_eventually(
+                vm,
+                health_command,
+                timeout=self.options.boot_timeout_seconds * 2,
+            )
+            try:
+                self._ssh(vm, key, "true", timeout=20)
+            except TestFailure:
+                health += "\nold-home-key=absent\n"
+            else:
+                raise TestFailure(
+                    "Factory reset with Home erasure preserved the pre-reset SSH key"
+                )
+        else:
+            health = self._ssh_eventually(
+                vm,
+                key,
+                health_command,
+                timeout=self.options.boot_timeout_seconds * 2,
+            )
+        _validate_factory_reset_health(
+            health,
+            root_present=expected_root,
+            home_present=expected_home,
+            personal_history_present=expected_history,
+            transaction=expected_transaction,
+        )
+        (artifacts / "factory-reset-after.txt").write_text(
+            health + "\n", encoding="utf-8"
+        )
+        if workloads is not None:
+            verify = "sudo -n python3 -c " + shlex.quote(workload_source)
+            verify += " verify --workloads " + shlex.quote(json.dumps(workloads))
+            if erase_home:
+                verify += " --erase-home"
+                evidence = self._ssh_password(vm, verify)
+            else:
+                evidence = self._ssh(vm, key, verify)
+            (artifacts / "factory-workload-after.txt").write_text(
+                evidence + "\n", encoding="utf-8"
+            )
+            # Only after an ordinary boot and successful recovery checks, add
+            # a runtime-only serial channel for GDM input and the next round.
+            tty = "ttyS0" if vm.config.architecture.value == "amd64" else "ttyAMA0"
+            override = ("[Unit]\nConditionPathExists=\nConditionPathExists=/dev/" + tty
+                        + "\n[Service]\nTTYPath=/dev/" + tty + "\n")
+            setup = (
+                "set -e; install -d /run/systemd/system/debug-shell.service.d; "
+                "printf %s " + shlex.quote(override)
+                + " > /run/systemd/system/debug-shell.service.d/acceptance.conf; "
+                f"systemctl stop serial-getty@{tty}.service; "
+                "systemctl daemon-reload; systemctl start debug-shell.service"
+            )
+            setup_command = "sudo -n bash -c " + shlex.quote(setup)
+            if erase_home:
+                self._ssh_password(vm, setup_command)
+            else:
+                self._ssh(vm, key, setup_command)
+            assert vm.serial is not None
+            vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+            _login_gdm(vm, self.username, self.password,
+                       timeout=self.options.boot_timeout_seconds)
+            (artifacts / "desktop-login.txt").write_text(
+                f"graphical-user={_graphical_user(vm.serial)}\n", encoding="utf-8"
+            )
+        vm.screenshot(f"{suite_id}-completed")
+        if erase_home and not interrupt_after_apply:
+            self._ssh_password(vm, "sync", timeout=30)
+        else:
+            self._ssh(vm, key, "sync", timeout=30)
+        if workloads is None:
+            vm.stop()
+
+    @staticmethod
+    def _factory_reset_health_command(
+        *,
+        root_sentinel: str,
+        home_sentinel: str,
+        personal_snapshot_id: str,
+        factory_root_id: str,
+        factory_home_id: str,
+        root_present: bool,
+        home_present: bool,
+        personal_history_present: bool,
+        transaction: str,
+    ) -> str:
+        root_test = "test -f" if root_present else "test ! -e"
+        home_test = "test -f" if home_present else "test ! -e"
+        history_test = "test -f" if personal_history_present else "test ! -e"
+        confirmation = (
+            "test \"$(systemctl show "
+            "anduinos-btrfs-snapshots-manager-confirm.service "
+            "-p Result --value)\" = success; "
+            "test \"$(systemctl show "
+            "anduinos-btrfs-snapshots-manager-confirm.service "
+            "-p ExecMainStatus --value)\" = 0; "
+            if transaction == "confirmed"
+            else ""
+        )
+        return (
+            "set -euo pipefail; "
+            "store=/.snapshots/anduinos-btrfs-snapshots-manager; "
+            f"factory_root_id={shlex.quote(factory_root_id)}; "
+            f"factory_home_id={shlex.quote(factory_home_id)}; "
+            f"personal_id={shlex.quote(personal_snapshot_id)}; "
+            "test \"$(findmnt -n -o FSTYPE /)\" = btrfs; "
+            "test \"$(findmnt -n -o FSROOT /)\" = /@root; "
+            f"{root_test} {shlex.quote(root_sentinel)}; "
+            f"{home_test} {shlex.quote(home_sentinel)}; "
+            f"sudo -n {history_test} \"$store/personal/metadata/$personal_id.json\"; "
+            "test -z \"$(sudo -n dpkg --audit)\"; "
+            "sudo -n apt-get check >/dev/null; "
+            "test -s /boot/grub/grub.cfg; "
+            "sudo -n grub-script-check /boot/grub/grub.cfg; "
+            "test -s /boot/vmlinuz; test -s /boot/initrd.img; "
+            "sudo -n lsinitrd /boot/initrd.img >/dev/null; "
+            "systemctl is-active --quiet graphical.target; "
+            "systemctl is-active --quiet gdm; "
+            "status=$(sudo -n anduinos-btrfs-snapshots-manager-cli status --json); "
+            "test \"$(printf '%s' \"$status\" | jq -r '.pending')\" = null; "
+            "test \"$(printf '%s' \"$status\" | jq -r --arg id \"$factory_root_id\" "
+            "'[.deployments[] | select(.id == $id and .kind == \"factory\" and "
+            ".state == \"ready\" and .pinned == true and .title == \"New OS\")] | length')\" = 1; "
+            "sudo -n jq -e --arg id \"$factory_home_id\" "
+            "'.id == $id and .kind == \"factory\" and .state == \"ready\" and "
+            ".pinned == true and .title == \"New OS Home\"' "
+            "\"$store/personal/metadata/$factory_home_id.json\" >/dev/null; "
+            "sudo -n test -d \"$store/deployments/$factory_root_id/root\"; "
+            "sudo -n test -d \"$store/personal/snapshots/$factory_home_id/home\"; "
+            "subvolumes=$(sudo -n btrfs subvolume list /); "
+            "! printf '%s\\n' \"$subvolumes\" | "
+            "grep -Eq '@(root|home)\\.snapshots-manager-(old|new)-'; "
+            "recovery_env=/boot/efi/EFI/anduinos/btrfs-snapshots-manager-grubenv; "
+            "test -s \"$recovery_env\"; "
+            "test -z \"$(sudo -n grub-editenv \"$recovery_env\" list)\"; "
+            + confirmation
+            + f"printf 'root-sentinel={'present' if root_present else 'absent'}\\n"
+            f"home-sentinel={'present' if home_present else 'absent'}\\n"
+            f"home-history={'present' if personal_history_present else 'absent'}\\n"
+            "factory-root=healthy\\nfactory-home=healthy\\n"
+            "recovery-pending=absent\\nbtrfs-staging-roots=absent\\n"
+            f"factory-transaction={transaction}\\nfactory-reset-health=ok\\n'"
+        )
+
+    def _ssh_password_eventually(
+        self,
+        vm: QemuVm,
+        command: str,
+        *,
+        timeout: float,
+    ) -> str:
+        deadline = time.monotonic() + timeout
+        last = ""
+        while time.monotonic() < deadline:
+            process = getattr(vm, "process", None)
+            if process is not None and process.poll() is not None:
+                raise TestFailure(
+                    "QEMU exited while waiting for password SSH after factory reset"
+                )
+            try:
+                return self._ssh_password(
+                    vm,
+                    command,
+                    timeout=max(1.0, min(20.0, deadline - time.monotonic())),
+                )
+            except (TestFailure, subprocess.TimeoutExpired) as error:
+                last = f"{type(error).__name__}: {error}"
+                time.sleep(2)
+        raise TestFailure(
+            "Password SSH did not become healthy after factory reset: " + last[-4000:]
+        )
+
+    def _ssh_password(
+        self,
+        vm: QemuVm,
+        command: str,
+        *,
+        timeout: float = 60,
+    ) -> str:
+        invocation = (
+            "ssh",
+            "-F",
+            "/dev/null",
+            "-p",
+            str(vm.config.ssh_forward_port),
+            "-o",
+            "StrictHostKeyChecking=no",
+            "-o",
+            "UserKnownHostsFile=/dev/null",
+            "-o",
+            "PreferredAuthentications=password",
+            "-o",
+            "PubkeyAuthentication=no",
+            "-o",
+            "NumberOfPasswordPrompts=1",
+            "-o",
+            "ConnectTimeout=10",
+            "-o",
+            "ConnectionAttempts=1",
+            f"{self.username}@127.0.0.1",
+            command,
+        )
+        with tempfile.TemporaryDirectory(prefix="anduinos-factory-askpass-") as directory:
+            askpass = Path(directory) / "askpass"
+            askpass.write_text(
+                "#!/bin/sh\nprintf '%s\\n' \"$ANDUINOS_ACCEPTANCE_SSH_PASSWORD\"\n",
+                encoding="utf-8",
+            )
+            askpass.chmod(0o700)
+            environment = os.environ.copy()
+            environment.update(
+                {
+                    "DISPLAY": environment.get("DISPLAY") or ":0",
+                    "SSH_ASKPASS": str(askpass),
+                    "SSH_ASKPASS_REQUIRE": "force",
+                    "ANDUINOS_ACCEPTANCE_SSH_PASSWORD": self.password,
+                }
+            )
+            result = subprocess.run(
+                invocation,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+                timeout=timeout,
+                env=environment,
+            )
+        if result.returncode != 0:
+            raise TestFailure(
+                f"Factory-reset password SSH failed with {result.returncode}:\n"
+                + result.stdout[-8000:]
+            )
+        return result.stdout
 
     def _prepare_power_control(
         self,

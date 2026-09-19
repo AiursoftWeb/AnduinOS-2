@@ -56,6 +56,52 @@
       "observation_modes": ["controlled"]
     },
     {
+      "id": "factory-reset-preserve-home",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-enabled",
+        "arm64": "uefi-nosb-online-btrfs-ssh-enabled"
+      },
+      "checks": [
+        "storage.factory-reset-preserve-home"
+      ],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
+      "id": "factory-reset-erase-home",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-enabled",
+        "arm64": "uefi-nosb-online-btrfs-ssh-enabled"
+      },
+      "checks": [
+        "storage.factory-reset-erase-home"
+      ],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
+      "id": "factory-reset-repeat",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-enabled",
+        "arm64": "uefi-nosb-online-btrfs-ssh-enabled"
+      },
+      "checks": ["storage.factory-reset-repeat"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
+      "id": "factory-reset-power-loss",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-enabled",
+        "arm64": "uefi-nosb-online-btrfs-ssh-enabled"
+      },
+      "checks": [
+        "storage.factory-reset-power-loss"
+      ],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "accounts-gdm",
       "source_cases": {
         "amd64": "bios-online-btrfs",
@@ -178,12 +224,12 @@
       "observation_modes": ["controlled"]
     },
     {
-      "id": "public-wechat",
+      "id": "public-obs",
       "source_cases": {
         "amd64": "bios-online-btrfs"
       },
       "checks": [
-        "app.wechat-install"
+        "app.obs-install"
       ],
       "isolation": "overlay",
       "observation_modes": ["controlled"]

@@ -607,7 +607,8 @@ class PublicDesktopOracleTests(FeatureOracleCase):
         self.assertNotIn("def _one_wechat_instance", driver)
         self.assertIn('runtime.glob(".mutter-Xwaylandauth.*")', driver)
         self.assertIn('environment["XAUTHORITY"] = authority', driver)
-        self.assertIn("app.wechat-install", _SHELL_DRIVER_CHECKS)
+        self.assertIn("app.obs-install", _SHELL_DRIVER_CHECKS)
+        self.assertNotIn("app.wechat-install", _SHELL_DRIVER_CHECKS)
         self.assertNotIn("app.wechat-tray", _SHELL_DRIVER_CHECKS)
 
         with tempfile.TemporaryDirectory() as directory:

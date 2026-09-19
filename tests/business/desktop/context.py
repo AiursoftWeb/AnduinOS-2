@@ -76,7 +76,7 @@ _SHELL_DRIVER_CHECKS = frozenset(
         "desktop.create-shortcut",
         "search.spotify-store",
         "store.spotify-public",
-        "app.wechat-install",
+        "app.obs-install",
     }
 )
 _SHORTCUT_FIXTURE_CHECKS = frozenset({"shortcut.alt-tab"})
@@ -106,6 +106,7 @@ _SOFTWARE_SEARCH_DRIVER_MODES = frozenset(
     {
         "shell-spotify-store",
         "public-wechat-install",
+        "public-obs-install",
     }
 )
 

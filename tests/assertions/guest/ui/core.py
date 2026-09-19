@@ -169,6 +169,12 @@ ALIASES = {
         "必须重启 — 回滚已就绪",
     ),
     "snapshot_restart_now": ("Restart Now", "立即重启"),
+    "factory_reset_confirmation": (
+        "Reset AnduinOS to Its Initial State?",
+        "将 AnduinOS 重置为初始状态？",
+    ),
+    "factory_reset_erase_home": ("Erase user files", "抹除用户文件"),
+    "factory_reset_submit": ("Reset and Restart", "重置并重启"),
     "finish_setup": (
         "Start your AnduinOS journey",
         "开始您的 AnduinOS 之旅",

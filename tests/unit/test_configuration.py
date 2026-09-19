@@ -217,6 +217,10 @@ class MatrixTests(unittest.TestCase):
                 "system-lifecycle",
                 "file-integration",
                 "btrfs-rollback",
+                "factory-reset-preserve-home",
+                "factory-reset-erase-home",
+                "factory-reset-repeat",
+                "factory-reset-power-loss",
                 "accounts-gdm",
                 "desktop-theme",
                 "shell-shortcuts",
@@ -225,7 +229,7 @@ class MatrixTests(unittest.TestCase):
                 "shell-desktop-shortcut",
                 "shell-spotify-store",
                 "public-ecosystem",
-                "public-wechat",
+                "public-obs",
             ),
             tuple(item.id for item in suites),
         )
@@ -238,10 +242,10 @@ class MatrixTests(unittest.TestCase):
             ),
             public.checks,
         )
-        wechat = next(item for item in suites if item.id == "public-wechat")
+        obs = next(item for item in suites if item.id == "public-obs")
         self.assertEqual(
-            ("app.wechat-install",),
-            wechat.checks,
+            ("app.obs-install",),
+            obs.checks,
         )
         registry.validate_sources(
             suites,
@@ -249,6 +253,7 @@ class MatrixTests(unittest.TestCase):
             Architecture.AMD64,
             {
                 "bios-online-btrfs",
+                "uefi-nosb-online-btrfs-ssh-enabled",
                 "uefi-nosb-online-btrfs-ssh-toggle",
             },
         )
@@ -719,6 +724,7 @@ class ScenarioCheckPlanTests(unittest.TestCase):
             "installed-boot",
             "installed-contracts",
             *RELEASE_CONTRACT_CHECKS,
+            "factory-recovery-baselines",
             "sudo.passwordless-enabled",
             "login.autologin-enabled",
             "regional.installed-zh-cn",
@@ -797,6 +803,25 @@ class ScenarioCheckPlanTests(unittest.TestCase):
                         installed_index + 1 :
                         installed_index + 1 + len(RELEASE_CONTRACT_CHECKS)
                     ],
+                )
+
+    def test_every_filesystem_declares_factory_recovery_baseline_gate(self):
+        matrix = TestMatrix.load(ROOT / "cases/install.json")
+        for scenario in matrix.scenarios:
+            with self.subTest(scenario=scenario.id):
+                checks = scenario_check_ids(scenario)
+                baseline_index = checks.index("factory-recovery-baselines")
+                self.assertGreater(
+                    baseline_index,
+                    checks.index(RELEASE_CONTRACT_CHECKS[-1]),
+                )
+                self.assertLess(
+                    baseline_index,
+                    checks.index(
+                        "sudo.passwordless-enabled"
+                        if scenario.passwordless_sudo
+                        else "sudo.password-required"
+                    ),
                 )
 
     def test_wifi_plan_declares_credential_migration_boundary(self):

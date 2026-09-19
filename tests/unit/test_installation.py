@@ -102,6 +102,135 @@ class WifiMigrationOracleTests(unittest.TestCase):
                 assert_secret_absent(root, "Z")
 
 
+class FactoryRecoveryContractTests(unittest.TestCase):
+    _ROOT_ID = "aaaaaaaa-1111-4222-8333-bbbbbbbbbbbb"
+    _HOME_ID = "cccccccc-4444-4555-8666-dddddddddddd"
+
+    @staticmethod
+    def _metadata_probe() -> str:
+        script = _snapshots_manager_contract_script(True)
+        return script.split("<<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+
+    def _run_metadata_probe(self, root_record, home_record, *, duplicate=False):
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory)
+            root_metadata = store / "metadata"
+            home_metadata = store / "personal" / "metadata"
+            root_metadata.mkdir(parents=True)
+            home_metadata.mkdir(parents=True)
+            (root_metadata / f"{self._ROOT_ID}.json").write_text(
+                json.dumps(root_record),
+                encoding="utf-8",
+            )
+            (home_metadata / f"{self._HOME_ID}.json").write_text(
+                json.dumps(home_record),
+                encoding="utf-8",
+            )
+            if duplicate:
+                duplicate_record = dict(root_record)
+                duplicate_record["id"] = "eeeeeeee-7777-4888-8999-ffffffffffff"
+                (root_metadata / f"{duplicate_record['id']}.json").write_text(
+                    json.dumps(duplicate_record),
+                    encoding="utf-8",
+                )
+            return subprocess.run(
+                (
+                    "python3",
+                    "-",
+                    str(store),
+                    self._ROOT_ID,
+                    self._HOME_ID,
+                ),
+                input=self._metadata_probe(),
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                check=False,
+            )
+
+    def _factory_records(self):
+        common = {
+            "kind": "factory",
+            "state": "ready",
+            "pinned": True,
+            "snapshot_uuid": "99999999-1111-4222-8333-aaaaaaaaaaaa",
+        }
+        return (
+            {**common, "id": self._ROOT_ID, "title": "New OS"},
+            {**common, "id": self._HOME_ID, "title": "New OS Home"},
+        )
+
+    def test_btrfs_contract_requires_two_verified_factory_baselines(self):
+        script = _snapshots_manager_contract_script(True)
+        syntax = subprocess.run(
+            ("bash", "-n"),
+            input=script,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+        self.assertIn(
+            'factory_status=$("$provisioner" --check)',
+            script,
+        )
+        self.assertIn('"New OS", "system"', script)
+        self.assertIn('"New OS Home", "home"', script)
+        self.assertIn('"kind": "factory"', script)
+        self.assertIn('"state": "ready"', script)
+        self.assertIn('"pinned": True', script)
+        self.assertIn("factory-record-count=2", script)
+        self.assertEqual(2, script.count("btrfs subvolume show --raw"))
+        self.assertNotIn("print $1; exit", script)
+        self.assertNotIn("apt-mark showmanual | grep", script)
+        self.assertEqual(2, script.count("btrfs property get -ts"))
+
+    def test_factory_metadata_probe_accepts_only_the_two_bound_records(self):
+        root, home = self._factory_records()
+        result = self._run_metadata_probe(root, home)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn("factory-record-count=2", result.stdout)
+
+        faults = {
+            "root-title": ({**root, "title": "Almost New OS"}, home, False),
+            "home-state": (root, {**home, "state": "broken"}, False),
+            "home-unpinned": (root, {**home, "pinned": False}, False),
+            "invalid-uuid": (root, {**home, "snapshot_uuid": "invalid"}, False),
+            "duplicate-root": (root, home, True),
+        }
+        for label, (bad_root, bad_home, duplicate) in faults.items():
+            with self.subTest(label=label):
+                result = self._run_metadata_probe(
+                    bad_root,
+                    bad_home,
+                    duplicate=duplicate,
+                )
+                self.assertNotEqual(0, result.returncode)
+
+    def test_ext4_contract_rejects_factory_recovery_artifacts(self):
+        script = _snapshots_manager_contract_script(False)
+        syntax = subprocess.run(
+            ("bash", "-n"),
+            input=script,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+        self.assertIn(
+            "test ! -e /usr/libexec/anduinos-btrfs-snapshots-manager-provision-factory",
+            script,
+        )
+        self.assertIn(
+            "test ! -e /.snapshots/anduinos-btrfs-snapshots-manager/metadata",
+            script,
+        )
+        self.assertIn("factory-record-count=0", script)
+        self.assertNotIn("--check", script)
+
+
 class BootContractTests(unittest.TestCase):
     _GOOD_KERNEL_HASH = "a" * 64
     _ESP_PARTUUID = "b184c004-3eda-4770-a6c9-ba0a38cb71cb"

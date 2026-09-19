@@ -413,6 +413,12 @@ fi
                 artifacts,
             )
         self._assert_installed_release_contracts(vm, scenario, artifacts)
+        with self._check(scenario, "factory-recovery-baselines"):
+            self.status(
+                scenario.id,
+                "Verifying installed factory recovery baselines",
+            )
+            assert_factory_recovery_contract(vm.serial, scenario, artifacts)
         desktop_failures: list[str] = []
         with self._check(scenario, _passwordless_sudo_check_id(scenario)):
             self.status(

@@ -32,6 +32,7 @@ from framework.errors import ConfigurationError, ProtocolError, TestFailure
 from assertions.install import (
     RELEASE_CONTRACT_CHECKS,
     _assert_release_contracts,
+    _snapshots_manager_contract_script,
     _validate_passwordless_sudo_evidence,
     assert_installed_keyboard,
     assert_installed_region,
@@ -59,6 +60,7 @@ from business.desktop import (
     _validate_desktop_icon_events,
     _validate_desktop_terminal_events,
     _validate_distinct_boot_ids,
+    _validate_factory_reset_health,
     _validate_deb_software_events,
     _validate_gdm_cursor_contract,
     _validate_gdm_login_events,

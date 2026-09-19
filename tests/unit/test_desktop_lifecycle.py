@@ -4,6 +4,184 @@ from unit.support import *  # noqa: F403
 
 
 class DesktopLifecycleOracleTests(FeatureOracleCase):
+    def test_factory_network_isolation_survives_every_qemu_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            vm = QemuVm(QemuConfig(
+                architecture=Architecture.AMD64, firmware=Firmware.BIOS,
+                network=Network.ONLINE, memory_mib=4096, cpus=2, disk_gib=40,
+                ssh_forward_port=2222, iso=root / "test.iso", disk=root / "overlay.qcow2",
+                variables=None, firmware_selection=None, artifacts=root,
+                qemu_binary="qemu-system-x86_64", acceleration="tcg", restrict_network=True,
+            ))
+            with tempfile.TemporaryDirectory() as runtime:
+                vm._runtime = SimpleNamespace(name=runtime)
+                for _boot in range(3):
+                    command = vm.command(attach_iso=False)
+                    self.assertEqual("user,id=net0,restrict=on,hostfwd=tcp:127.0.0.1:2222-:22",
+                                     command[command.index("-netdev") + 1])
+                vm._runtime = None
+
+    def test_factory_workload_oracle_rejects_remaining_files_and_history(self):
+        module = runpy.run_path(str(ROOT / "assertions/guest/factory_reset_workload.py"))
+        verify = module["verify"]
+        with tempfile.TemporaryDirectory() as directory:
+            store = Path(directory)
+            home_file = store / "home/user/document"
+            home_file.parent.mkdir(parents=True)
+            home_file.write_text("original")
+            # The erase case checks physical history, not merely a list entry.
+            history = store / "personal/snapshots/personal"
+            history.mkdir(parents=True)
+            records = store / "rollback-history"
+            records.mkdir()
+            for index in range(2):
+                (records / f"{index}.json").write_text(json.dumps({
+                    "target_deployment_id": "factory", "created_at": str(index),
+                    "phase": "confirmed", "failure": None, "reset_home": index == 1,
+                }))
+            workload = {"version": "test", "sha256": "checksum", "boot_id": "previous-boot",
+                        "factory_root_id": "factory", "personal_snapshot_id": "personal",
+                        "files": {str(home_file): "original"}}
+            def run(*args):
+                return "install ok installed" if "-f=${Status}" in args else "test"
+            with patch.dict(verify.__globals__, STORE=store, run=run, digest=lambda _: "checksum"):
+                with self.assertRaisesRegex(RuntimeError, "survived erasure"):
+                    verify([workload, workload], True)
+                home_file.unlink()
+                with self.assertRaisesRegex(RuntimeError, "snapshot history"):
+                    verify([workload, workload], True)
+                history.rmdir()
+                with patch("sys.stdout", new_callable=io.StringIO) as output:
+                    verify([workload, workload], True)
+                self.assertIn("curl=restored-and-runnable", output.getvalue())
+
+    def test_factory_repeat_preparation_is_valid_shell_without_host_mutation(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        runner.username = "test-user"
+        runner.driver = SimpleNamespace(upload=Mock())
+        runner._prepare_power_control = Mock(return_value=Path("unused-key"))
+        serial = Mock()
+        serial.run.side_effect = [None, RuntimeError("capture preparation")]
+        vm = SimpleNamespace(serial=serial, qmp=Mock())
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(RuntimeError, "capture preparation"):
+                runner._exercise_factory_reset(
+                    vm, object(), Path(directory), suite_id="factory-reset-repeat-preserve",
+                    erase_home=False, interrupt_after_apply=False, workloads=[],
+                )
+        preparation = serial.run.call_args.args[0]
+        syntax = subprocess.run(("bash", "-n"), input=preparation,
+                                text=True, capture_output=True)
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
+        self.assertIn("prepare --home", preparation)
+        self.assertLess(preparation.index("prepare --home"), preparation.index("personal-create"))
+
+    def test_factory_repeat_uses_one_vm_and_passes_first_round_evidence_to_second(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        vm = SimpleNamespace(config=SimpleNamespace(restrict_network=True), stop=Mock())
+        base = object()
+        rounds = []
+
+        def exercise(actual_vm, actual_base, artifacts, **kwargs):
+            self.assertIs(actual_vm, vm)
+            self.assertIs(actual_base, base)
+            self.assertTrue(artifacts.is_dir())
+            self.assertFalse(kwargs["interrupt_after_apply"])
+            rounds.append((kwargs["erase_home"], list(kwargs["workloads"])))
+            kwargs["workloads"].append({"round": artifacts.name})
+
+        runner._exercise_factory_reset = exercise
+        with tempfile.TemporaryDirectory() as directory:
+            runner._exercise_factory_reset_repeat(vm, base, Path(directory))
+        self.assertEqual([(False, []), (True, [{"round": "preserve"}])], rounds)
+        vm.stop.assert_called_once()
+
+    def test_factory_repeat_refuses_unrestricted_network(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        vm = SimpleNamespace(config=SimpleNamespace(restrict_network=False))
+        runner._exercise_factory_reset = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(TestFailure, "network isolation"):
+                runner._exercise_factory_reset_repeat(vm, object(), Path(directory))
+        runner._exercise_factory_reset.assert_not_called()
+
+    def test_factory_reset_oracle_distinguishes_all_three_outcomes(self):
+        passing = "\n".join(
+            (
+                "root-sentinel=absent",
+                "home-sentinel=present",
+                "home-history=present",
+                "factory-root=healthy",
+                "factory-home=healthy",
+                "recovery-pending=absent",
+                "btrfs-staging-roots=absent",
+                "factory-transaction=confirmed",
+                "factory-reset-health=ok",
+            )
+        )
+        _validate_factory_reset_health(
+            passing,
+            root_present=False,
+            home_present=True,
+            personal_history_present=True,
+            transaction="confirmed",
+        )
+        with self.assertRaisesRegex(TestFailure, "home-sentinel=absent"):
+            _validate_factory_reset_health(
+                passing,
+                root_present=False,
+                home_present=False,
+                personal_history_present=False,
+                transaction="confirmed",
+            )
+
+    def test_factory_reset_health_command_is_valid_and_self_contained(self):
+        common = dict(
+            root_sentinel="/etc/root-sentinel",
+            home_sentinel="/home/user/home-sentinel",
+            personal_snapshot_id="11111111-1111-4111-8111-111111111111",
+            factory_root_id="22222222-2222-4222-8222-222222222222",
+            factory_home_id="33333333-3333-4333-8333-333333333333",
+            root_present=False,
+            home_present=False,
+            personal_history_present=False,
+        )
+        confirmed = FeatureSuiteRunner._factory_reset_health_command(
+            **common,
+            transaction="confirmed",
+        )
+        reverted = FeatureSuiteRunner._factory_reset_health_command(
+            **common,
+            transaction="reverted",
+        )
+        for command in (confirmed, reverted):
+            syntax = subprocess.run(
+                ("bash", "-n"),
+                input=command,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(0, syntax.returncode, syntax.stdout)
+            self.assertIn("factory-root=healthy", command)
+            self.assertIn("factory-home=healthy", command)
+            self.assertIn(".pending", command)
+            self.assertNotIn("/usr/local/sbin/anduinos-acceptance", command)
+        self.assertIn("confirm.service", confirmed)
+        self.assertNotIn("confirm.service", reverted)
+
+    def test_factory_reset_power_loss_waits_for_durable_apply_and_revert(self):
+        source = inspect.getsource(FeatureSuiteRunner._exercise_factory_reset)
+        apply = source.index("booted-unconfirmed-recorded")
+        cut = source.index("vm.stop()", apply)
+        restart = source.index("vm.start", cut)
+        reverted = source.index("reverted-recorded", restart)
+        self.assertLess(apply, cut)
+        self.assertLess(cut, restart)
+        self.assertLess(restart, reverted)
+
     def test_spice_guest_agent_cannot_stall_reboot_for_the_vendor_timeout(self):
         script = (
             ROOT.parent
@@ -127,6 +305,17 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         self.assertIn('f"回滚到 {title}？"', body)
         self.assertIn("confirmation = find_candidates(", body)
         self.assertIn('"snapshot-rollback-confirmation"', body)
+        click = body.index('"snapshot-rollback-click"')
+        confirmation = body.index("confirmation = find_candidates(")
+        self.assertLess(click, confirmation)
+        self.assertIn(
+            '_authenticate_snapshot_polkit_if_present("preflight")',
+            body[click:confirmation],
+        )
+        self.assertIn(
+            '_authenticate_snapshot_polkit_if_present("prepare-restart")',
+            body[confirmation:],
+        )
 
     def test_spotify_release_check_physically_drops_the_qemu_nic(self):
         runner = object.__new__(FeatureSuiteRunner)
@@ -268,7 +457,10 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             (history / "55555555-5555-4555-8555-555555555555.json").write_text(
                 json.dumps(
                     {
-                        "schema_version": 3,
+                        "schema_version": 4,
+                        "reset_home": False,
+                        "factory_home_snapshot_id": None,
+                        "factory_home_snapshot_uuid": None,
                         "id": "55555555-5555-4555-8555-555555555555",
                         "target_deployment_id": target,
                         "fallback_deployment_id": fallback,
@@ -327,6 +519,17 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             self.assertEqual(0, passing.returncode, passing.stdout)
             self.assertIn("active-root=selected-target", passing.stdout)
             self.assertIn("snapshot-state=ok", passing.stdout)
+
+            history_path = history / "55555555-5555-4555-8555-555555555555.json"
+            valid = json.loads(history_path.read_text())
+            # Guard the acceptance oracle, not the engine's format matrix.
+            # Detailed transaction/migration tests belong to the package.
+            for field, value in (("schema_version", 3), ("reset_home", True)):
+                with self.subTest(field=field, value=value):
+                    history_path.write_text(json.dumps({**valid, field: value}))
+                    rejected = subprocess.run(command, text=True, capture_output=True)
+                    self.assertNotEqual(0, rejected.returncode, rejected.stdout)
+            history_path.write_text(json.dumps(valid))
 
             fallback_record["state"] = "broken"
             fallback_path.write_text(json.dumps(fallback_record), encoding="utf-8")

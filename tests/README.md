@@ -34,6 +34,16 @@ declared desktop check without an implementation is a unit-test failure. The
 runner also fails unless every selected installation and suite produces a
 verdict.
 
+The `public-obs` suite verifies a fresh installation of OBS Studio from the
+configured public Flathub remote, checking commit, origin, desktop entry and
+ArcMenu launch into a real Qt window. It does not test recording or streaming.
+External catalog/download failures are reported as failures, not skipped passes.
+
+`factory-reset-repeat` removes curl and creates Home files, then resets the same
+disposable VM twice: preserve Home, then erase Home and its snapshot history.
+Both boots must restore baseline curl, package health and desktop login, with
+QEMU blocking Internet access. Package edge cases stay in AnduinOS-Packages.
+
 The installation matrix boots temporary Live overlays on the original
 read-only ISO. One amd64/arm64 scenario additionally boots a writable hybrid
 copy through the real Dracut persistent menu entry, writes a sentinel, powers

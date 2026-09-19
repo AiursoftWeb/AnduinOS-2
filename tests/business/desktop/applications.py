@@ -4,6 +4,34 @@ from .context import *  # noqa: F403
 
 
 class PublicApplicationChecks:
+    def _exercise_obs_install(self, vm: QemuVm, base: PromotedBase, artifacts: Path) -> None:
+        """Verify a fresh public Flatpak installation and its start-menu launch."""
+        assert vm.serial is not None
+        installed = vm.serial.run(_obs_install_command(), timeout=1800, check=False)
+        (artifacts / "obs-install.txt").write_text(installed.stdout + "\n", encoding="utf-8")
+        try:
+            _validate_obs_install_evidence(installed.stdout, installed.returncode)
+        except TestFailure as error:
+            classification = _safe_failure_class(
+                installed.stdout, "obs-failure-class",
+                {"external-catalog", "external-artifact", "product-regression"},
+            )
+            (artifacts / "obs-classification.txt").write_text(
+                f"classification={classification}\nphase=install\n", encoding="utf-8")
+            raise TestFailure(f"[{classification}] {error}") from error
+        try:
+            self._run_shell_driver(
+                vm, base, artifacts, mode="public-obs-install",
+                validator=_validate_obs_install_events,
+                text_inputs={"obs-search-text": "OBS Studio"},
+            )
+        except TestFailure as error:
+            (artifacts / "obs-classification.txt").write_text(
+                "classification=product-regression\nphase=launch\n", encoding="utf-8")
+            raise TestFailure(f"OBS installed but failed its desktop launch checks: {error}") from error
+        (artifacts / "obs-classification.txt").write_text(
+            "classification=none\nphase=launched\n", encoding="utf-8")
+
     def _exercise_spotify_public(
         self,
         vm: QemuVm,

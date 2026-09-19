@@ -94,6 +94,7 @@ def arm_snapshot_restore(title: str, evidence: Path) -> None:
         row_role=role(snapshot),
         button=name(rollback_buttons[0]),
     )
+    _authenticate_snapshot_polkit_if_present("preflight")
     confirmation = find_candidates(
         (f"Roll Back to {title}?", f"回滚到 {title}？"),
         label=f"rollback confirmation for {title}",
@@ -106,12 +107,7 @@ def arm_snapshot_restore(title: str, evidence: Path) -> None:
     )
     dump_accessibility(evidence / "snapshot-restore-confirmation.txt")
     click("snapshot_prepare_restart", timeout=30)
-    if find_optional("polkit", timeout=8) is not None:
-        # The password is deliberately never passed into this process or its
-        # serial transcript. The host recognizes this opaque request and types
-        # its in-memory secret directly through QMP.
-        event("qmp-secret", request="snapshot-polkit-password")
-        event("qmp-key", request="snapshot-polkit-submit", key="ret")
+    _authenticate_snapshot_polkit_if_present("prepare-restart")
     find("snapshot_armed", timeout=90)
     find("snapshot_restart_now", timeout=30, require_enabled=True)
     dump_accessibility(evidence / "snapshot-rollback-armed.txt")
@@ -120,6 +116,68 @@ def arm_snapshot_restore(title: str, evidence: Path) -> None:
         title=title,
         restart="automatic-countdown-visible",
     )
+
+
+def arm_factory_reset(erase_home: bool, evidence: Path) -> None:
+    """Arm the dedicated factory-reset path and verify its Home choice."""
+
+    dismiss_initial_setup()
+    subprocess.Popen(
+        ["/usr/bin/anduinos-btrfs-snapshots-manager", "--factory-reset"],
+        stdin=subprocess.DEVNULL,
+        stdout=open("/tmp/anduinos-factory-reset.stdout", "ab"),
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    wait_application(
+        (
+            "Disk Snapshots Manager",
+            "BtrfsSnapshotsManager",
+            "anduinos-btrfs-snapshots-manager",
+        ),
+        timeout=90,
+    )
+    _authenticate_snapshot_polkit_if_present("factory-readiness")
+    find("factory_reset_confirmation", timeout=90)
+    assert_toggle(
+        "factory_reset_erase_home",
+        sensitive=True,
+        active=False,
+    )
+    if erase_home:
+        set_toggle("factory_reset_erase_home", True)
+        assert_toggle(
+            "factory_reset_erase_home",
+            sensitive=True,
+            active=True,
+        )
+    dump_accessibility(evidence / "factory-reset-confirmation.txt")
+    event("factory-reset-confirmation", erase_home=erase_home)
+    click_button("factory_reset_submit", timeout=30)
+    _authenticate_snapshot_polkit_if_present("factory-schedule")
+    find("snapshot_armed", timeout=90)
+    find("snapshot_restart_now", timeout=30, require_enabled=True)
+    dump_accessibility(evidence / "factory-reset-armed.txt")
+    event(
+        "factory-reset-armed",
+        erase_home=erase_home,
+        restart="automatic-countdown-visible",
+    )
+
+
+def _authenticate_snapshot_polkit_if_present(stage: str) -> None:
+    """Complete either privileged transition without exposing the secret."""
+
+    if find_optional("polkit", timeout=8) is None:
+        return
+    event("snapshot-polkit-required", stage=stage)
+    # The password is deliberately never passed into this process or its
+    # serial transcript. The host recognizes this opaque request and types
+    # its in-memory secret directly through QMP.
+    event("qmp-secret", request="snapshot-polkit-password")
+    event("qmp-key", request="snapshot-polkit-submit", key="ret")
+    wait_absent("polkit", timeout=90)
+    event("snapshot-polkit-authenticated", stage=stage)
 
 
 def verify_font_rendering(evidence: Path) -> None:

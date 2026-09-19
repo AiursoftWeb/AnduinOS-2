@@ -21,6 +21,7 @@ from collections.abc import Callable
 
 from assertions.install import (
     RELEASE_CONTRACT_CHECKS,
+    assert_factory_recovery_contract,
     assert_installed_environment,
     assert_installed_keyboard,
     assert_installed_region,

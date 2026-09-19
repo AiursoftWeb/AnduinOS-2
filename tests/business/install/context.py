@@ -62,6 +62,7 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
     checks.extend(
         (
             "installed-contracts",
+            "factory-recovery-baselines",
             _passwordless_sudo_check_id(scenario),
             _automatic_login_check_id(scenario),
             "regional.installed-zh-cn",

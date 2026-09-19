@@ -45,6 +45,7 @@ class QemuConfig:
     file_size_limit_bytes: int | None = None
     backing_disk: Path | None = None
     live_media: Path | None = None
+    restrict_network: bool = False
 
 
 class QemuVm:
@@ -163,7 +164,7 @@ class QemuVm:
             "virtio-blk-pci,drive=target,serial=ANDUINOS-TEST-TARGET,bootindex=2",
             "-netdev",
             (
-                "user,id=net0,restrict=off,"
+                f"user,id=net0,restrict={'on' if cfg.restrict_network else 'off'},"
                 f"hostfwd=tcp:127.0.0.1:{cfg.ssh_forward_port}-:22"
             ),
             "-device",

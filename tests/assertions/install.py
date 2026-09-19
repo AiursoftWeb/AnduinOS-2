@@ -696,7 +696,6 @@ printf 'graphical-target=active\\ngdm=active\\ndpkg-audit=clean\\n'
 """
     _record(console, common, evidence / "installed-common.txt")
     _assert_boot_packages(console, architecture, evidence)
-    _assert_snapshots_manager(console, scenario, evidence)
     _assert_optional_software(console, scenario, username, evidence)
     _assert_automatic_login_configuration(console, scenario, username, evidence)
     _assert_secure_boot(console, scenario, evidence)
@@ -799,18 +798,94 @@ def _assert_boot_packages(
     )
 
 
-def _assert_snapshots_manager(
+def assert_factory_recovery_contract(
     console: SerialConsole,
     scenario: Scenario,
     evidence: Path,
 ) -> None:
-    if scenario.snapshots_manager:
-        script = r"""
-set -e
+    script = _snapshots_manager_contract_script(scenario.snapshots_manager)
+    _record(console, script, evidence / "installed-snapshots-manager.txt")
+
+
+def _snapshots_manager_contract_script(supported: bool) -> str:
+    """Return the installed factory-recovery contract for one filesystem."""
+
+    if supported:
+        return r"""
+set -euo pipefail
 dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' anduinos-btrfs-snapshots-manager | grep '^ii '
-apt-mark showmanual | grep -Fxq 'anduinos-btrfs-snapshots-manager'
+manual_packages=$(apt-mark showmanual)
+grep -Fxq 'anduinos-btrfs-snapshots-manager' <<< "$manual_packages"
 test -f /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
 desktop-file-validate /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
+provisioner=/usr/libexec/anduinos-btrfs-snapshots-manager-provision-factory
+store=/.snapshots/anduinos-btrfs-snapshots-manager
+test -x "$provisioner"
+factory_status=$("$provisioner" --check)
+printf 'factory-status=%s\n' "$factory_status"
+if [[ "$factory_status" =~ ^ready\ root\ ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\;\ home\ ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$ ]]; then
+  root_id=${BASH_REMATCH[1]}
+  home_id=${BASH_REMATCH[2]}
+else
+  echo "Factory recovery status did not identify exactly two baselines" >&2
+  exit 1
+fi
+root_snapshot="$store/deployments/$root_id/root"
+home_snapshot="$store/personal/snapshots/$home_id/home"
+test -d "$root_snapshot"
+test -d "$home_snapshot"
+test "$(btrfs property get -ts "$root_snapshot" ro)" = 'ro=true'
+test "$(btrfs property get -ts "$home_snapshot" ro)" = 'ro=true'
+python3 - "$store" "$root_id" "$home_id" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+store = Path(sys.argv[1])
+expected = (
+    (store / "metadata", sys.argv[2], "New OS", "system"),
+    (store / "personal" / "metadata", sys.argv[3], "New OS Home", "home"),
+)
+uuid_pattern = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
+for metadata, expected_id, expected_title, scope in expected:
+    records = []
+    for path in sorted(metadata.glob("*.json")):
+        record = json.loads(path.read_text(encoding="utf-8"))
+        if record.get("kind") == "factory":
+            records.append((path, record))
+    if len(records) != 1:
+        raise SystemExit(
+            f"Expected exactly one {scope} factory record, found {len(records)}"
+        )
+    path, record = records[0]
+    required = {
+        "id": expected_id,
+        "kind": "factory",
+        "state": "ready",
+        "title": expected_title,
+        "pinned": True,
+    }
+    for field, value in required.items():
+        if record.get(field) != value:
+            raise SystemExit(
+                f"Unexpected {scope} factory {field}: {record.get(field)!r}"
+            )
+    if path.stem != expected_id:
+        raise SystemExit(f"{scope} factory record ID does not match its filename")
+    snapshot_uuid = record.get("snapshot_uuid")
+    if not isinstance(snapshot_uuid, str) or not uuid_pattern.fullmatch(snapshot_uuid):
+        raise SystemExit(f"{scope} factory record has no valid snapshot UUID")
+    print(f"factory-{scope}-id={expected_id}")
+    print(f"factory-{scope}-title={expected_title}")
+    print(f"factory-{scope}-uuid={snapshot_uuid}")
+print("factory-record-count=2")
+PY
+printf '%s\n' 'factory-root-read-only=true' 'factory-home-read-only=true'
+btrfs subvolume show --raw "$root_snapshot"
+btrfs subvolume show --raw "$home_snapshot"
 confirm=/usr/libexec/anduinos-btrfs-snapshots-manager-confirm
 initrd="/boot/initrd.img-$(uname -r)"
 test -x "$confirm"
@@ -818,7 +893,7 @@ test -s "$initrd"
 installed_confirm_sha256=$(sha256sum "$confirm" | awk '{ print $1 }')
 embedded_confirm_sha256=$(lsinitrd -f "$confirm" "$initrd" | sha256sum | awk '{ print $1 }')
 test "$installed_confirm_sha256" = "$embedded_confirm_sha256"
-embedded_confirm_mode=$(lsinitrd "$initrd" | awk '$NF == "usr/libexec/anduinos-btrfs-snapshots-manager-confirm" { print $1; exit }')
+embedded_confirm_mode=$(lsinitrd "$initrd" | awk '$NF == "usr/libexec/anduinos-btrfs-snapshots-manager-confirm" && !found { print $1; found=1 }')
 test -n "$embedded_confirm_mode"
 case "$embedded_confirm_mode" in
   *x*) echo "The initramfs confirmation payload must remain non-executable during Dracut assembly" >&2; exit 1 ;;
@@ -826,14 +901,16 @@ esac
 printf 'installed-confirm-sha256=%s\nembedded-confirm-sha256=%s\nembedded-confirm-mode=%s\n' \
   "$installed_confirm_sha256" "$embedded_confirm_sha256" "$embedded_confirm_mode"
 """
-    else:
-        script = r"""
-set -e
+    return r"""
+set -euo pipefail
 ! dpkg-query -W -f='${db:Status-Abbrev}' anduinos-btrfs-snapshots-manager 2>/dev/null | grep -q '^ii '
 test ! -e /usr/share/applications/org.anduinos.BtrfsSnapshotsManager.desktop
+test ! -e /usr/libexec/anduinos-btrfs-snapshots-manager-provision-factory
+test ! -e /.snapshots/anduinos-btrfs-snapshots-manager/metadata
+test ! -e /.snapshots/anduinos-btrfs-snapshots-manager/personal/metadata
 test -z "$(apt-get --simulate autoremove | sed -n 's/^Remv /Remv /p')"
+printf 'factory-recovery=unsupported\nfactory-record-count=0\n'
 """
-    _record(console, script, evidence / "installed-snapshots-manager.txt")
 
 
 def _assert_optional_software(

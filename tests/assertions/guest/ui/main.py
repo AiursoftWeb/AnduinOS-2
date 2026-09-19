@@ -38,6 +38,7 @@ def main() -> int:
             "rime-input-prepare",
             "rime-input-assert",
             "snapshot-restore-arm",
+            "factory-reset-arm",
             "accounts-create",
             "accounts-change-password",
             "gdm-select-user",
@@ -63,6 +64,7 @@ def main() -> int:
             "shell-desktop-shortcut",
             "shell-spotify-store",
             "public-wechat-install",
+            "public-obs-install",
             "public-wechat-tray",
             "swapcontrol-green",
         ),
@@ -75,6 +77,7 @@ def main() -> int:
     parser.add_argument("--original-account", default="")
     parser.add_argument("--original-full-name", default="")
     parser.add_argument("--filename", default="")
+    parser.add_argument("--erase-home", action="store_true")
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
@@ -128,6 +131,8 @@ def main() -> int:
             if not args.expected:
                 raise UiFailure("Snapshot restore mode requires --expected")
             arm_snapshot_restore(args.expected, args.evidence)
+        elif args.mode == "factory-reset-arm":
+            arm_factory_reset(args.erase_home, args.evidence)
         elif args.mode == "accounts-create":
             if not args.account or not args.full_name:
                 raise UiFailure("Account creation requires account and full name")
@@ -201,6 +206,8 @@ def main() -> int:
             exercise_spotify_store(args.evidence)
         elif args.mode == "public-wechat-install":
             exercise_wechat_install(args.evidence)
+        elif args.mode == "public-obs-install":
+            exercise_obs_install(args.evidence)
         elif args.mode == "public-wechat-tray":
             exercise_wechat_tray(args.evidence)
         elif args.mode == "swapcontrol-green":

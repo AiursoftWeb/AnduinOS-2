@@ -1,5 +1,7 @@
 """Desktop suite scheduling over immutable installed-system overlays."""
 
+from dataclasses import replace
+
 from .context import *  # noqa: F403
 from .accounts import AccountChecks
 from .applications import PublicApplicationChecks
@@ -35,6 +37,10 @@ class FeatureSuiteRunner(
         "input.super-space-rime": "_exercise_rime_input",
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
+        "storage.factory-reset-preserve-home": "_exercise_factory_reset_preserve_home",
+        "storage.factory-reset-erase-home": "_exercise_factory_reset_erase_home",
+        "storage.factory-reset-power-loss": "_exercise_factory_reset_power_loss",
+        "storage.factory-reset-repeat": "_exercise_factory_reset_repeat",
         "account.add-user": "_exercise_account_add_user",
         "account.new-user-login": "_exercise_account_new_user_login",
         "account.change-password": "_exercise_account_change_password",
@@ -73,7 +79,7 @@ class FeatureSuiteRunner(
         "files.cpuz-thumbnail-and-open": "_exercise_public_cpu_z",
         "apt.nextcloud-client-ppa": "_exercise_nextcloud_ppa",
         "store.spotify-public": "_exercise_spotify_public",
-        "app.wechat-install": "_exercise_wechat_install",
+        "app.obs-install": "_exercise_obs_install",
     }
 
     def __init__(
@@ -279,6 +285,10 @@ class FeatureSuiteRunner(
         suite: FeatureSuite,
     ) -> None:
         self.phase_callback(base.scenario.id, suite.id, "Booting verified installation base")
+        if "storage.factory-reset-repeat" in suite.checks:
+            # Block guest Internet access in QEMU throughout both recoveries;
+            # explicit localhost SSH forwarding remains available for evidence.
+            vm.config = replace(vm.config, restrict_network=True)
         vm.start(attach_iso=False, phase="feature")
         assert vm.qmp is not None and vm.serial is not None
         vm.serial.timeout = self.options.command_timeout_seconds
