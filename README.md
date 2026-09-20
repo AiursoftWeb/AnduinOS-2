@@ -95,7 +95,7 @@ included, built, or maintained by AnduinOS.
 
 - [Documentation](https://docs.anduinos.com/)
 - [Discussions](https://github.com/Anduin2017/AnduinOS/discussions)
-- [Bug reports and feature requests](https://github.com/Anduin2017/AnduinOS/issues)
+- [AnduinOS 2 bug reports and feature requests](https://github.com/AiursoftWeb/AnduinOS-2/issues)
 - [Revolt community](https://rvlt.gg/dPwPs8e6)
 
 Code and documentation contributions may be submitted as pull requests to
