@@ -54,7 +54,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                 history.rmdir()
                 with patch("sys.stdout", new_callable=io.StringIO) as output:
                     verify([workload, workload], True)
-                self.assertIn("curl=restored-and-runnable", output.getvalue())
+                self.assertIn("htop=restored-and-runnable", output.getvalue())
 
     def test_new_factory_workload_requires_retained_browsable_history(self):
         module = runpy.run_path(str(ROOT / "assertions/guest/factory_reset_workload.py"))
@@ -84,6 +84,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                     return '[{"name":"document"}]'
                 return "install ok installed" if "-f=${Status}" in args else "test"
             with patch.dict(verify.__globals__, STORE=store, run=run, digest=lambda _: "checksum"), \
+                 patch("pwd.getpwnam", return_value=SimpleNamespace(pw_uid=1000)), \
                  patch("os.path.lexists", return_value=False):
                 with patch("sys.stdout", new_callable=io.StringIO) as output:
                     verify([workload, workload], True)
@@ -114,7 +115,10 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                                 text=True, capture_output=True)
         self.assertEqual(0, syntax.returncode, syntax.stderr)
         self.assertIn("prepare --home", preparation)
-        self.assertLess(preparation.index("prepare --home"), preparation.index("personal-create"))
+        self.assertLess(preparation.index("prepare --home"), preparation.index("CreatePersonalSnapshot"))
+        self.assertIn("busctl --system --timeout=180 --json=short call", preparation)
+        self.assertIn(".data[0] | booleans | tostring", preparation)
+        self.assertIn(".data[1] | fromjson | .id", preparation)
 
     def test_factory_repeat_uses_one_vm_and_passes_first_round_evidence_to_second(self):
         runner = object.__new__(FeatureSuiteRunner)
@@ -216,7 +220,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         apply = source.index("booted-unconfirmed-recorded")
         cut = source.index("vm.stop()", apply)
         restart = source.index("vm.start", cut)
-        reverted = source.index("reverted-recorded", restart)
+        reverted = source.index("_revert_checkpoint_probe_command()", restart)
         self.assertLess(apply, cut)
         self.assertLess(cut, restart)
         self.assertLess(restart, reverted)
@@ -614,7 +618,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         runner = object.__new__(FeatureSuiteRunner)
         runner._ssh = Mock(
             side_effect=(
-                subprocess.TimeoutExpired(("ssh", "true"), 15),
+                subprocess.TimeoutExpired(("ssh", "true"), 30),
                 TestFailure("connection reset during guest boot"),
                 "ready\n",
             )
@@ -626,7 +630,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         self.assertEqual("ready\n", output)
         self.assertEqual(3, runner._ssh.call_count)
         self.assertTrue(
-            all(call.kwargs["timeout"] <= 15 for call in runner._ssh.call_args_list)
+            all(call.kwargs["timeout"] <= 30 for call in runner._ssh.call_args_list)
         )
 
     def test_ssh_eventually_fails_immediately_when_qemu_has_exited(self):
@@ -638,6 +642,18 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             runner._ssh_eventually(vm, Path("control-key"), "true", timeout=1200)
 
         runner._ssh.assert_not_called()
+
+    def test_overlay_ssh_uses_only_its_ephemeral_key(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        runner.username = "anduinostest"
+        vm = SimpleNamespace(config=SimpleNamespace(ssh_forward_port=2222))
+        result = SimpleNamespace(stdout="anduinostest\n", returncode=0)
+        with patch("business.desktop.subprocess.run", return_value=result) as command:
+            self.assertEqual("anduinostest\n", runner._ssh(vm, Path("control-key"), "id -un"))
+        invocation = command.call_args.args[0]
+        self.assertIn("IdentitiesOnly=yes", invocation)
+        self.assertIn("BatchMode=yes", invocation)
+        self.assertIn("control-key", invocation)
 
     def test_stalled_btrfs_power_transition_retains_diagnostics(self):
         class Clock:

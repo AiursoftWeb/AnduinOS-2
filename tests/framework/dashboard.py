@@ -53,6 +53,7 @@ class AcceptanceDashboard:
         "running": ("●", "RUNNING", "\x1b[1;36m"),
         "passed": ("✓", "PASSED", "\x1b[1;32m"),
         "failed": ("✗", "FAILED", "\x1b[1;31m"),
+        "blocked": ("⊘", "BLOCKED", "\x1b[1;33m"),
     }
 
     def __init__(
@@ -234,6 +235,10 @@ class AcceptanceDashboard:
             suite.error = error
             suite.phase = "All checks passed" if status == "passed" else error
             for check in (suite.checks or {}).values():
+                if status == "blocked" and check.state == "pending":
+                    check.state = "blocked"
+                    check.seconds = 0.0
+                    check.detail = error or "Not run: prerequisite failed"
                 if check.state == "running":
                     check.state = "failed"
                     check.seconds = max(
@@ -326,7 +331,7 @@ class AcceptanceDashboard:
             ]
 
     def case_result(self, identifier: str) -> dict[str, object]:
-        """Return the parent verdict exactly as rendered by the dashboard."""
+        """Return the installation verdict, independent of assigned suites."""
 
         with self._lock:
             case = self.cases[identifier]
@@ -387,9 +392,10 @@ class AcceptanceDashboard:
                     suites_passed = sum(item.state == "passed" for item in suites)
                     suites_failed = sum(item.state == "failed" for item in suites)
                     suites_pending = sum(item.state == "pending" for item in suites)
+                    suites_blocked = sum(item.state == "blocked" for item in suites)
                     self._write_output(
                         f"Feature suites: {suites_passed}/{len(suites)} passed, "
-                        f"{suites_failed} failed, {suites_pending} not started\n"
+                        f"{suites_failed} failed, {suites_blocked} blocked, {suites_pending} not started\n"
                     )
                 self._write_output(f"Artifacts: {self.artifacts}\n")
             self._flush_output()
@@ -444,168 +450,11 @@ class AcceptanceDashboard:
                 self._flush_output()
 
     def _render_locked(self) -> None:
+        from .dashboard_render import render_dashboard
+
         terminal = shutil.get_terminal_size((110, 30))
-        width = max(72, min(150, terminal.columns))
-        inner = width - 2
-        case_width = min(45, max(30, width // 3))
-        state_width = 15
-        time_width = 10
-        phase_width = inner - case_width - state_width - time_width - 7
-        elapsed = _duration(time.monotonic() - self.started_at)
-        all_suites = tuple(
-            suite
-            for case in self.cases.values()
-            for suite in (case.suites or {}).values()
-        )
-        all_work = (*self.cases.values(), *all_suites)
-        passed = sum(item.state == "passed" for item in all_work)
-        failed = sum(item.state == "failed" for item in all_work)
-        completed = passed + failed
-        progress_total = len(all_work)
-        bar_width = min(34, max(18, width - 70))
-        filled = round(bar_width * completed / max(1, len(all_work)))
-        bar = "█" * filled + "░" * (bar_width - filled)
-
-        active = (
-            self.cases.get(self._active_identifier)
-            if self._active_identifier is not None
-            else None
-        )
-        active_suite = (
-            self._suite(active, self._active_suite)
-            if active is not None and self._active_suite is not None
-            else None
-        )
-        compact = bool(
-            active is not None
-            and (active.checks or active_suite is not None)
-            and terminal.lines < len(self.cases) + 18
-        )
-
-        if compact:
-            lines = [
-                "┌" + "─" * inner + "┐",
-                _boxed(" AnduinOS ISO Acceptance ", inner, align="center"),
-                "├" + "─" * inner + "┤",
-                _boxed(
-                    _fit(
-                        f" ISO: {self.iso.name}   Arch: {self.architecture}   "
-                        f"Cases: {len(self.cases)}   Suites: {len(all_suites)}   "
-                        f"Elapsed: {elapsed}",
-                        inner,
-                    ),
-                    inner,
-                ),
-                "├" + "─" * inner + "┤",
-            ]
-        else:
-            lines = [
-                "┌" + "─" * inner + "┐",
-                _boxed(" AnduinOS ISO Acceptance ", inner, align="center"),
-                "├" + "─" * inner + "┤",
-                _boxed(f" ISO: {_fit(self.iso.name, inner - 6)}", inner),
-                _boxed(
-                    f" Arch: {self.architecture}   Cases: {len(self.cases)}   "
-                    f"Suites: {len(all_suites)}   Elapsed: {elapsed}",
-                    inner,
-                ),
-                "├" + "─" * inner + "┤",
-                _boxed(
-                    f"  STATE{' ' * (state_width - 7)} "
-                    f"CASE{' ' * (case_width - 4)} "
-                    f"TIME{' ' * (time_width - 4)} PHASE",
-                    inner,
-                ),
-                "├" + "─" * inner + "┤",
-            ]
-        for case in self.cases.values():
-            icon, label, color = self._STYLE[case.state]
-            state = f"{icon} {label}".ljust(state_width)
-            if self.color:
-                state = f"{color}{state}\x1b[0m"
-            duration = self._case_duration(case)
-            phase = case.phase or ""
-            row = (
-                f" {state} {_fit(case.identifier, case_width):<{case_width}} "
-                f"{duration:>{time_width}} {_fit(phase, phase_width)}"
-            )
-            lines.append(_boxed(row, inner, visible_ansi=self.color))
-        if active_suite is not None:
-            visible_suites = tuple((active.suites or {}).values())
-            lines.extend(
-                [
-                    "├" + "─" * inner + "┤",
-                    _boxed(f" Feature suites — {active.identifier}", inner),
-                ]
-            )
-            for suite in visible_suites:
-                icon, label, color = self._STYLE[suite.state]
-                state = f"{icon} {label}".ljust(state_width)
-                if self.color:
-                    state = f"{color}{state}\x1b[0m"
-                row = (
-                    f"   {state} {_fit(suite.identifier, case_width):<{case_width}} "
-                    f"{_fit(suite.phase, max(1, inner - state_width - case_width - 6))}"
-                )
-                lines.append(_boxed(row, inner, visible_ansi=self.color))
-            checks = tuple((active_suite.checks or {}).values())
-            check_owner = active_suite.identifier
-        elif active is not None and active.checks:
-            checks = tuple(active.checks.values())
-            check_owner = active.identifier
-        else:
-            checks = ()
-            check_owner = ""
-        if checks:
-            completed_checks = sum(
-                item.state in {"passed", "failed"} for item in checks
-            )
-            fixed_rows = 11 if compact else 15
-            suite_rows = (
-                len(active.suites or {}) + 2 if active_suite is not None else 0
-            )
-            maximum = max(
-                1,
-                terminal.lines - len(self.cases) - fixed_rows - suite_rows,
-            )
-            visible, first, last = _check_window(checks, maximum)
-            lines.extend(
-                [
-                    "├" + "─" * inner + "┤",
-                    _boxed(
-                        f" Checks — {_fit(check_owner, max(1, inner - 34))} "
-                        f"({completed_checks}/{len(checks)} complete; "
-                        f"showing {first}-{last})",
-                        inner,
-                    ),
-                ]
-            )
-            check_name_width = min(38, max(24, width // 3))
-            check_detail_width = inner - state_width - check_name_width - 6
-            for check in visible:
-                icon, label, color = self._STYLE[check.state]
-                state = f"{icon} {label}".ljust(state_width)
-                if self.color:
-                    state = f"{color}{state}\x1b[0m"
-                row = (
-                    f"   {state} "
-                    f"{_fit(check.identifier, check_name_width):<{check_name_width}} "
-                    f"{_fit(check.detail, check_detail_width)}"
-                )
-                lines.append(_boxed(row, inner, visible_ansi=self.color))
-        lines.extend(
-            [
-                "├" + "─" * inner + "┤",
-                _boxed(
-                    f" Progress [{bar}] {completed}/{progress_total}   "
-                    f"✓ {passed}   ✗ {failed}",
-                    inner,
-                ),
-                _boxed(f" Artifacts: {_fit(str(self.artifacts), inner - 12)}", inner),
-                "└" + "─" * inner + "┘",
-            ]
-        )
-        self._write_output("\x1b[2J\x1b[H" + "\n".join(lines) + "\n")
+        frame = render_dashboard(self, terminal)
+        self._write_output("\x1b[2J\x1b[H" + frame + "\n")
 
     def _case_duration(self, case: CaseView) -> str:
         if case.seconds is not None:
@@ -719,54 +568,3 @@ def _duration(seconds: float) -> str:
     if hours:
         return f"{hours}:{minutes:02d}:{secs:02d}"
     return f"{minutes:02d}:{secs:02d}"
-
-
-def _fit(value: object, width: int) -> str:
-    text = str(value).replace("\n", " ")
-    if len(text) <= width:
-        return text
-    if width <= 1:
-        return text[:width]
-    return text[: width - 1] + "…"
-
-
-def _check_window(
-    checks: tuple[CheckView, ...],
-    maximum: int,
-) -> tuple[tuple[CheckView, ...], int, int]:
-    """Keep the running check visible without overflowing a small terminal."""
-
-    maximum = max(1, min(maximum, len(checks)))
-    focus = next(
-        (index for index, item in enumerate(checks) if item.state == "running"),
-        next(
-            (index for index, item in enumerate(checks) if item.state == "failed"),
-            next(
-                (index for index, item in enumerate(checks) if item.state == "pending"),
-                len(checks) - 1,
-            ),
-        ),
-    )
-    start = max(0, min(focus - maximum // 2, len(checks) - maximum))
-    end = start + maximum
-    return checks[start:end], start + 1, end
-
-
-def _boxed(
-    value: str,
-    inner: int,
-    *,
-    align: str = "left",
-    visible_ansi: bool = False,
-) -> str:
-    visible = len(value)
-    if visible_ansi:
-        visible -= value.count("\x1b[0m") * 4
-        for code in ("\x1b[2;37m", "\x1b[1;36m", "\x1b[1;32m", "\x1b[1;31m"):
-            visible -= value.count(code) * len(code)
-    padding = max(0, inner - visible)
-    if align == "center":
-        left = padding // 2
-        right = padding - left
-        return "│" + " " * left + value + " " * right + "│"
-    return "│" + value + " " * padding + "│"

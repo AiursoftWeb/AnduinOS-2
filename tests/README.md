@@ -6,11 +6,10 @@ Run the complete release test from the repository root:
 make test
 ```
 
-There is one test result. The command first verifies the framework, then boots
-the newest ISO in `dist/`, performs every supported installation, and runs every
-desktop suite. Exit code zero means every declared check ran and passed. A
-failure, interruption, missing prerequisite, unavailable public service, or
-unexecuted check means the ISO is not approved for release.
+The command verifies the framework, then boots the newest ISO in `dist/` and runs
+every installation and desktop suite. Exit zero requires every declared check to pass.
+Failures, interruptions, missing prerequisites, unavailable services and unexecuted
+checks all prevent release approval.
 
 Pass `ISO=/path/to/image.iso` and `ARCH=amd64|arm64` only when the newest image
 cannot be selected automatically. `TEST_ARGS=--no-tui` switches to persistent
@@ -29,20 +28,24 @@ tests/
 └── run.py       Supervised command entry point
 ```
 
-The JSON files under `cases/` are the complete executable inventory. Adding a
-declared desktop check without an implementation is a unit-test failure. The
-runner also fails unless every selected installation and suite produces a
-verdict.
+The JSON files under `cases/` are the executable inventory. Declared checks without
+implementations fail unit tests. Every selected installation and suite must produce a verdict.
 
-The `public-obs` suite verifies a fresh installation of OBS Studio from the
+The `public-ghex` suite verifies a fresh installation of GHex from the
 configured public Flathub remote, checking commit, origin, desktop entry and
-ArcMenu launch into a real Qt window. It does not test recording or streaming.
+application version and ArcMenu launch into a real GTK window; it does not test editing.
 External catalog/download failures are reported as failures, not skipped passes.
+GHex uses an isolated local search; Spotify suites retain the Software provider.
+Plymouth is checked before debug injection and retains failed frames; **BLOCKED** prerequisites prevent release.
 
-`factory-reset-repeat` removes curl and creates Home files, then resets the same
+`factory-reset-repeat` removes htop and creates Home files, then resets the same
 disposable VM twice: preserve Home, then roll back Home while retaining browsable snapshot history.
-Both boots must restore baseline curl, package health and desktop login, with
-QEMU blocking Internet access. Package edge cases stay in AnduinOS-Packages.
+Both boots must restore baseline htop, package health and desktop login, with QEMU blocking Internet access. Dependency-checked `dpkg` removes only htop; the snapshot manager must remain installed. Package edge cases stay in AnduinOS-Packages.
+The power-loss overlay adds serial observation and a temporary confirmation mask to its recovery entry. After cutting QEMU at the durable apply checkpoint, it verifies the fallback checkpoint in the next boot's journal and rollback history (the fallback boots without the injected serial argument); a final clean boot must reconcile the transaction. Normal reset/rollback suites use unmodified recovery boots.
+
+`btrfs-home-rollback` uses the Home GUI and an offline reboot: user files return,
+root/package state stays unchanged, both histories are browsable and login works.
+It requires Home-only support in the ISO; older packages fail, never skip.
 
 The installation matrix boots temporary Live overlays on the original
 read-only ISO. One amd64/arm64 scenario additionally boots a writable hybrid
@@ -52,13 +55,10 @@ credited from GRUB text inspection alone.
 
 ## Results
 
-Each run writes a new directory under `test-results/` containing `summary.json`,
-`junit.xml`, screenshots, serial logs, installer output, journal evidence, and
-per-check diagnostics. Disposable virtual disks and overlays are deleted after
-the run, including the expanded writable Live-media copy and including after
-interruption. Keep the result directory when filing a failure; its evidence
-identifies whether the product, host prerequisites, or an external service
-caused the failure.
+Each run writes `summary.json`, `junit.xml`, screenshots, logs and per-check diagnostics
+under `test-results/`. Disposable disks, overlays and writable Live copies are removed,
+including after interruption. Keep the result directory when reporting failures:
+its evidence distinguishes product, host prerequisite and external service failures.
 
 Before a new matrix starts, `make test` also reclaims disposable disks orphaned
 by an uncatchable `SIGKILL`, power loss, or host reboot. A kernel-backed lease
@@ -73,7 +73,7 @@ Run the same cleanup without starting QEMU through the singular test entrypoint:
 python3 tests/run.py clean-disks
 ```
 
-Preview the reclaimable allocation without changing files with:
+Preview reclaimable allocation without changing files:
 
 ```bash
 python3 tests/run.py clean-disks --dry-run

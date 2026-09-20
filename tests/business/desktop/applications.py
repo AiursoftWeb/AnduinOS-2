@@ -4,32 +4,44 @@ from .context import *  # noqa: F403
 
 
 class PublicApplicationChecks:
-    def _exercise_obs_install(self, vm: QemuVm, base: PromotedBase, artifacts: Path) -> None:
+    def _exercise_ghex_install(self, vm: QemuVm, base: PromotedBase, artifacts: Path) -> None:
         """Verify a fresh public Flatpak installation and its start-menu launch."""
         assert vm.serial is not None
-        installed = vm.serial.run(_obs_install_command(), timeout=1800, check=False)
-        (artifacts / "obs-install.txt").write_text(installed.stdout + "\n", encoding="utf-8")
+        installed = vm.serial.run(_ghex_install_command(), timeout=1800, check=False)
+        (artifacts / "ghex-install.txt").write_text(installed.stdout + "\n", encoding="utf-8")
         try:
-            _validate_obs_install_evidence(installed.stdout, installed.returncode)
+            _validate_ghex_install_evidence(installed.stdout, installed.returncode)
         except TestFailure as error:
             classification = _safe_failure_class(
-                installed.stdout, "obs-failure-class",
+                installed.stdout, "ghex-failure-class",
                 {"external-catalog", "external-artifact", "product-regression"},
             )
-            (artifacts / "obs-classification.txt").write_text(
+            (artifacts / "ghex-classification.txt").write_text(
                 f"classification={classification}\nphase=install\n", encoding="utf-8")
             raise TestFailure(f"[{classification}] {error}") from error
+        launch_verified = False
+
+        def validate_launch(output):
+            nonlocal launch_verified
+            evidence = _validate_ghex_install_events(output)
+            launch_verified = True
+            return evidence
+
         try:
             self._run_shell_driver(
-                vm, base, artifacts, mode="public-obs-install",
-                validator=_validate_obs_install_events,
-                text_inputs={"obs-search-text": "OBS Studio"},
+                vm, base, artifacts, mode="public-ghex-install",
+                validator=validate_launch,
+                text_inputs={"ghex-search-text": "GHex"},
             )
         except TestFailure as error:
-            (artifacts / "obs-classification.txt").write_text(
-                "classification=product-regression\nphase=launch\n", encoding="utf-8")
-            raise TestFailure(f"OBS installed but failed its desktop launch checks: {error}") from error
-        (artifacts / "obs-classification.txt").write_text(
+            classification = "post-launch-check-failed" if launch_verified else "launch-check-failed"
+            phase = "post-launch" if launch_verified else "launch"
+            (artifacts / "ghex-classification.txt").write_text(
+                f"classification={classification}\nphase={phase}\n", encoding="utf-8")
+            description = ("GHex launched, but post-launch desktop checks failed" if launch_verified
+                           else "GHex installed but failed its desktop launch checks")
+            raise TestFailure(f"{description}: {error}") from error
+        (artifacts / "ghex-classification.txt").write_text(
             "classification=none\nphase=launched\n", encoding="utf-8")
 
     def _exercise_spotify_public(

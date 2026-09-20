@@ -164,16 +164,16 @@ def main(argv: list[str] | None = None) -> int:
                                     )
                             else:
                                 for suite in source_suites:
-                                    error = "Source installation scenario failed"
+                                    error = f"Not run: source installation {scenario.id} failed: {result.error}"
                                     dashboard.complete_suite(
                                         scenario.id,
                                         suite.id,
-                                        "failed",
+                                        "blocked",
                                         0.0,
                                         error,
                                     )
                                     suite_results.append(
-                                        _failed_suite_result(
+                                        _blocked_suite_result(
                                             suite.id,
                                             scenario.id,
                                             options.artifacts_root,
@@ -467,7 +467,7 @@ def _preflight(architecture, selected, overrides, suites=()) -> None:
             )
 
 
-def _failed_suite_result(
+def _blocked_suite_result(
     identifier: str,
     source_case: str,
     artifacts_root: Path,
@@ -475,11 +475,11 @@ def _failed_suite_result(
 ) -> FeatureSuiteResult:
     artifacts = artifacts_root / source_case / "feature-suites" / identifier
     artifacts.mkdir(parents=True, exist_ok=True)
-    (artifacts / "failure.txt").write_text(error + "\n", encoding="utf-8")
+    (artifacts / "blocked.txt").write_text(error + "\n", encoding="utf-8")
     return FeatureSuiteResult(
         identifier,
         source_case,
-        "failed",
+        "blocked",
         0.0,
         artifacts,
         error,

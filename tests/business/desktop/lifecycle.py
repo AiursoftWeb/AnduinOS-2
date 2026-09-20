@@ -6,6 +6,22 @@ import tempfile
 from .context import *  # noqa: F403
 
 
+def _revert_checkpoint_probe_command() -> str:
+    history_probe = (
+        "jq -e '.phase == \"reverted\" and "
+        ".checkpoint == \"reverted-recorded\"' "
+        "/.snapshots/anduinos-btrfs-snapshots-manager/"
+        "rollback-history/*.json >/dev/null"
+    )
+    return (
+        "set -e; "
+        "sudo -n journalctl -b -t dracut-pre-mount -o cat --no-pager "
+        "| grep -Fx 'SNAPSHOTS-MANAGER-CHECKPOINT reverted-recorded'; "
+        "sudo -n sh -c " + shlex.quote(history_probe) + "; "
+        "printf 'reverted-history=verified\\n'"
+    )
+
+
 class LifecycleChecks:
     def _exercise_ordinary_reboot(
         self,
@@ -178,6 +194,7 @@ class LifecycleChecks:
                 "--evidence",
                 f"{remote}/evidence",
             ),
+            managed=True,
         )
         armed = _run_with_qmp_key_requests(
             vm,
@@ -464,10 +481,19 @@ class LifecycleChecks:
             f"chown {shlex.quote(self.username)}:{shlex.quote(self.username)} "
             f"{shlex.quote(home_sentinel)}\n"
             + mutation +
-            "personal=$(anduinos-btrfs-snapshots-manager-cli personal-create --json "
+            # This is fixture setup, not the factory-reset action under test.
+            # busctl's implicit 25-second limit can expire during the helper's
+            # durable Btrfs sync on a slow host even when creation completes.
+            # Call the same product D-Bus method with an explicit bounded wait.
+            "personal=$(busctl --system --timeout=180 --json=short call "
+            "org.anduinos.BtrfsSnapshotsManager "
+            "/org/anduinos/BtrfsSnapshotsManager "
+            "org.anduinos.BtrfsSnapshotsManager.Helper "
+            "CreatePersonalSnapshot ssb "
             "'Factory reset acceptance Home history' "
-            "'Home history retained across rollback')\n"
-            "personal_id=$(printf '%s\\n' \"$personal\" | jq -er .id)\n"
+            "'Home history retained across rollback' false)\n"
+            "test \"$(printf '%s\\n' \"$personal\" | jq -er '.data[0] | booleans | tostring')\" = true\n"
+            "personal_id=$(printf '%s\\n' \"$personal\" | jq -er '.data[1] | fromjson | .id')\n"
             f"test -f {shlex.quote(root_sentinel)}\n"
             f"test -f {shlex.quote(home_sentinel)}\n"
             "test -f \"$store/personal/metadata/$personal_id.json\"\n"
@@ -507,7 +533,11 @@ class LifecycleChecks:
             command.append("--erase-home")
         armed = _run_with_qmp_key_requests(
             vm,
-            _desktop_command(self.username, tuple(command)),
+            # The GUI must belong to the desktop user's session manager so
+            # Polkit can reach its real GNOME authentication agent. Merely
+            # copying the session bus into a serial runuser process is not
+            # equivalent to a desktop launch.
+            _desktop_command(self.username, tuple(command), managed=True),
             timeout=300,
             secret_text=self.password,
         )
@@ -526,7 +556,24 @@ class LifecycleChecks:
                 + armed.stdout[-8000:]
             )
 
-        self.phase_callback(base.scenario.id, suite_id, "Rebooting into factory recovery")
+        if interrupt_after_apply:
+            # A normal product boot has no serial console. This fault-only
+            # overlay exposes the durable checkpoint and suppresses userspace
+            # confirmation for this boot, avoiding a host scheduling race.
+            # Do not alter the kernel, initramfs, snapshots, or transaction.
+            fault_source = (Path(__file__).resolve().parents[2]
+                            / "assertions/guest/recovery_power_loss.py").read_text()
+            fault_command = "python3 -c " + shlex.quote(fault_source)
+            fault_arch = shlex.quote(vm.config.architecture.value)
+            observation = vm.serial.run(
+                "set -e; " + fault_command + " prepare " + fault_arch
+                + "; grub-script-check /boot/grub/grub.cfg", timeout=30)
+            (artifacts / "power-loss-instrumentation.txt").write_text(observation.stdout)
+
+        # Repeated recovery has two round-specific artifact/sentinel names,
+        # but both rounds belong to one declared feature suite.
+        progress_suite = "factory-reset-repeat" if workloads is not None else suite_id
+        self.phase_callback(base.scenario.id, progress_suite, "Rebooting into factory recovery")
         request = self._ssh(
             vm,
             key,
@@ -558,11 +605,27 @@ class LifecycleChecks:
             )
             vm.stop()
             vm.start(attach_iso=False, phase=f"{suite_id}-revert")
-            assert vm.serial is not None
-            vm.serial.wait_for_text(
-                "SNAPSHOTS-MANAGER-CHECKPOINT reverted-recorded",
+            # The fallback boots its original GRUB entry, which does not have
+            # the fault-only serial console argument. Read the exact checkpoint
+            # from this boot's durable journal and transaction history instead.
+            reverted = self._ssh_eventually(
+                vm, key, _revert_checkpoint_probe_command(),
                 timeout=self.options.boot_timeout_seconds,
             )
+            (artifacts / "power-loss-revert-evidence.txt").write_text(reverted)
+            restored = self._ssh_eventually(
+                vm, key, "set -e; sudo -n " + fault_command + " restore " + fault_arch
+                + "; sudo -n grub-script-check /boot/grub/grub.cfg",
+                timeout=self.options.boot_timeout_seconds)
+            (artifacts / "power-loss-instrumentation-restored.txt").write_text(restored)
+            # The mask was a boot argument, not a permanent unit override.
+            # A clean boot removes it and lets the normal confirmation service
+            # reconcile the reverted transaction before the health oracle.
+            self._ssh(vm, key, "sudo -n /usr/local/sbin/anduinos-acceptance-reboot")
+            self._wait_for_power_transition(vm, key, artifacts,
+                                            "power-loss-clean-boot", timeout=150)
+            vm.stop()
+            vm.start(attach_iso=False, phase="power-loss-clean-boot")
             expected_root = True
             expected_home = True
             expected_history = True
@@ -616,16 +679,6 @@ class LifecycleChecks:
             health + "\n", encoding="utf-8"
         )
         if workloads is not None:
-            verify = "sudo -n python3 -c " + shlex.quote(workload_source)
-            verify += " verify --workloads " + shlex.quote(json.dumps(workloads))
-            if erase_home:
-                verify += " --erase-home"
-                evidence = self._ssh_password(vm, verify)
-            else:
-                evidence = self._ssh(vm, key, verify)
-            (artifacts / "factory-workload-after.txt").write_text(
-                evidence + "\n", encoding="utf-8"
-            )
             # Only after an ordinary boot and successful recovery checks, add
             # a runtime-only serial channel for GDM input and the next round.
             tty = "ttyS0" if vm.config.architecture.value == "amd64" else "ttyAMA0"
@@ -650,11 +703,23 @@ class LifecycleChecks:
             (artifacts / "desktop-login.txt").write_text(
                 f"graphical-user={_graphical_user(vm.serial)}\n", encoding="utf-8"
             )
+            # History browsing requires the real active local user, not the
+            # remote control session used to check boot/recovery health.
+            verify = "sudo -n python3 -c " + shlex.quote(workload_source)
+            verify += " verify --workloads " + shlex.quote(json.dumps(workloads))
+            if erase_home:
+                verify += " --erase-home"
+                evidence = self._ssh_password(vm, verify)
+            else:
+                evidence = self._ssh(vm, key, verify)
+            (artifacts / "factory-workload-after.txt").write_text(
+                evidence + "\n", encoding="utf-8"
+            )
         vm.screenshot(f"{suite_id}-completed")
         if erase_home and not interrupt_after_apply:
-            self._ssh_password(vm, "sync", timeout=30)
+            self._ssh_password(vm, "sync", timeout=180)
         else:
-            self._ssh(vm, key, "sync", timeout=30)
+            self._ssh(vm, key, "sync", timeout=180)
         if workloads is None:
             vm.stop()
 
@@ -1107,7 +1172,10 @@ class LifecycleChecks:
                         f"(exit code {returncode})"
                     )
             remaining = deadline - time.monotonic()
-            attempt_timeout = max(1.0, min(15.0, remaining))
+            # A restored graphical session can saturate the disposable VM.
+            # Allow SSH key exchange and PAM more time than a TCP connect;
+            # the overall deadline still bounds a genuinely broken boot.
+            attempt_timeout = max(1.0, min(30.0, remaining))
             try:
                 return self._ssh(vm, key, command, timeout=attempt_timeout)
             except (TestFailure, subprocess.TimeoutExpired) as error:
@@ -1134,6 +1202,8 @@ class LifecycleChecks:
             str(vm.config.ssh_forward_port),
             "-o",
             "BatchMode=yes",
+            "-o",
+            "IdentitiesOnly=yes",
             "-o",
             "StrictHostKeyChecking=no",
             "-o",

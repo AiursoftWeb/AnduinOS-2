@@ -108,7 +108,7 @@ def _testcase(
             case,
             "error",
             {
-                "type": "IncompleteAcceptanceCheck",
+                "type": "BlockedByPrerequisite" if status == "blocked" else "IncompleteAcceptanceCheck",
                 "message": detail or f"Check ended in state {status}",
             },
         )

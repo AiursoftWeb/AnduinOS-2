@@ -1,10 +1,11 @@
-"""Disposable-VM workload: remove curl, then observe real factory recovery."""
+"""Disposable-VM workload: remove htop, then observe real factory recovery."""
 
 import argparse
 import hashlib
 import json
 import os
 from pathlib import Path
+import pwd
 import shutil
 import subprocess
 
@@ -28,13 +29,18 @@ def require(condition, message):
 def prepare(home, factory_root):
     baseline = STORE / "deployments" / factory_root / "root"
     query = ("dpkg-query", f"--admindir={baseline}/var/lib/dpkg", "-W")
-    require(run(*query, "-f=${Status}", "curl") == "install ok installed",
-            "Factory baseline must contain installed curl")
-    version = run(*query, "-f=${Version}", "curl")
-    checksum = digest(baseline / "usr/bin/curl")
-    require(run("dpkg-query", "-W", "-f=${Status}", "curl") == "install ok installed",
-            "curl must be installed before each mutation")
-    run("/usr/bin/curl", "--version")
+    require(run(*query, "-f=${Status}", "htop") == "install ok installed",
+            "Factory baseline must contain installed htop")
+    version = run(*query, "-f=${Version}", "htop")
+    checksum = digest(baseline / "usr/bin/htop")
+    require(run("dpkg-query", "-W", "-f=${Status}", "htop") == "install ok installed",
+            "htop must be installed before each mutation")
+    run("/usr/bin/htop", "--version")
+    require(run("dpkg-query", "-W", "-f=${Status}", "anduinos-btrfs-snapshots-manager")
+            == "install ok installed", "Recovery manager must be installed before mutation")
+    # Refuse dependency conflicts before mutation. dpkg removes only this
+    # package; never let APT remove the recovery stack as a reverse dependant.
+    run("dpkg", "--no-act", "--remove", "htop")
     files = {
         str(home / "documents" / "keep-me.txt"): "Acceptance document: original contents\n",
         str(home / ".config" / "settings.ini"): "[acceptance]\nmodified=true\n",
@@ -46,13 +52,14 @@ def prepare(home, factory_root):
         path.write_text(content, encoding="utf-8")
         for entry in (home, path.parent, path):
             os.chown(entry, owner.st_uid, owner.st_gid)
-    # No autoremove, dependency overrides, or package download is allowed.
-    run("dpkg", "--remove", "curl")
-    require(not Path("/usr/bin/curl").exists() and shutil.which("curl") is None,
-            "Removing curl did not make it unavailable")
-    status = subprocess.run(("dpkg-query", "-W", "-f=${Status}", "curl"),
+    run("dpkg", "--remove", "htop")
+    require(not Path("/usr/bin/htop").exists() and shutil.which("htop") is None,
+            "Removing htop did not make it unavailable")
+    status = subprocess.run(("dpkg-query", "-W", "-f=${Status}", "htop"),
                             text=True, capture_output=True)
-    require(status.stdout.strip() != "install ok installed", "curl is still installed")
+    require(status.stdout.strip() != "install ok installed", "htop is still installed")
+    require(run("dpkg-query", "-W", "-f=${Status}", "anduinos-btrfs-snapshots-manager")
+            == "install ok installed", "Mutation removed the recovery manager")
     require(not run("dpkg", "--audit"), "Package database is damaged before recovery")
     run("apt-get", "check")
     return {"version": version, "sha256": checksum, "files": files,
@@ -61,13 +68,13 @@ def prepare(home, factory_root):
 
 def verify(workloads, erase_home):
     latest = workloads[-1]
-    require(run("dpkg-query", "-W", "-f=${Status}", "curl") == "install ok installed",
-            "Recovery did not restore the curl package")
-    require(run("dpkg-query", "-W", "-f=${Version}", "curl") == latest["version"],
-            "Restored curl version differs from the factory baseline")
-    require(digest(Path("/usr/bin/curl")) == latest["sha256"],
-            "Restored curl binary differs from the factory baseline")
-    run("/usr/bin/curl", "--version")
+    require(run("dpkg-query", "-W", "-f=${Status}", "htop") == "install ok installed",
+            "Recovery did not restore the htop package")
+    require(run("dpkg-query", "-W", "-f=${Version}", "htop") == latest["version"],
+            "Restored htop version differs from the factory baseline")
+    require(digest(Path("/usr/bin/htop")) == latest["sha256"],
+            "Restored htop binary differs from the factory baseline")
+    run("/usr/bin/htop", "--version")
     require(Path("/proc/sys/kernel/random/boot_id").read_text().strip() != latest["boot_id"],
             "Recovery did not boot a new system")
     histories = [json.loads(path.read_text()) for path in (STORE / "rollback-history").glob("*.json")]
@@ -111,14 +118,18 @@ def verify(workloads, erase_home):
                     require(metadata.is_file(), "Home snapshot metadata is missing")
                     relative = Path(name).relative_to("/home")
                     account = relative.parts[0]
+                    uid = pwd.getpwnam(account).pw_uid
                     folder = Path(*relative.parts[1:]).parent.as_posix()
                     entries = json.loads(run("runuser", "-u", account, "--",
+                                             "env", f"XDG_RUNTIME_DIR=/run/user/{uid}",
+                                             f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
+                                             "systemd-run", "--user", "--wait", "--pipe", "--collect", "--quiet", "--",
                                              "/usr/bin/anduinos-btrfs-snapshots-manager-cli",
                                              "personal-files", identifier,
                                              "" if folder == "." else folder, "--json"))
                     require(any(entry.get("name") == Path(name).name for entry in entries),
                             "Saved Home files are not browsable through the application API")
-    print("curl=restored-and-runnable")
+    print("htop=restored-and-runnable")
     print("home-workload=" + ("rolled-back-history-preserved" if erase_home and preserve_history
                               else "erased-with-history" if erase_home else "content-preserved"))
 

@@ -3,55 +3,55 @@
 import re
 
 from framework.errors import TestFailure
-from .catalog import _OBS_APP_ID, _WECHAT_APP_ID
+from .catalog import _GHEX_APP_ID, _WECHAT_APP_ID
 from .events import _all_event_objects, _event_objects, _one_event
 
 
-def _validate_obs_install_events(output: str) -> dict[str, object]:
+def _validate_ghex_install_events(output: str) -> dict[str, object]:
     events = _all_event_objects(output)
     sequence = []
     for fields in (
-        dict(event="obs-launch-baseline", running=False),
-        dict(event="qmp-key", request="obs-search-open", key="meta_l"),
-        dict(event="qmp-text", request="obs-search-text"),
-        dict(event="start-search-result", query="OBS Studio", accessible_name="OBS Studio",
+        dict(event="ghex-launch-baseline", running=False),
+        dict(event="qmp-key", request="ghex-search-open", key="meta_l"),
+        dict(event="qmp-text", request="ghex-search-text"),
+        dict(event="start-search-result", query="GHex", accessible_name="GHex",
              application="gnome-shell", stable_observations=4),
-        dict(event="search-entry-focus", query="OBS Studio", application="gnome-shell", focused=True),
-        dict(event="qmp-key", request="obs-result-activate", key="ret"),
-        dict(event="obs-installed-launched", application=_OBS_APP_ID, search_result="OBS Studio",
+        dict(event="search-entry-focus", query="GHex", application="gnome-shell", focused=True),
+        dict(event="qmp-key", request="ghex-result-activate", key="ret"),
+        dict(event="ghex-installed-launched", application=_GHEX_APP_ID, search_result="GHex",
              activation_method="qmp-keyboard", observation="atspi+flatpak", visible=True,
              stable_observations=4),
     ):
-        index, value = _one_event(events, context="OBS Studio ArcMenu launch", **fields)
+        index, value = _one_event(events, context="GHex ArcMenu launch", **fields)
         sequence.append(index)
     if sequence != sorted(set(sequence)):
-        raise TestFailure("OBS launch evidence is out of order")
+        raise TestFailure("GHex launch evidence is out of order")
     windows = value.get("windows")
     if not isinstance(windows, list) or not windows:
-        raise TestFailure("OBS launch lacks a visible application window")
+        raise TestFailure("GHex launch lacks a visible application window")
     for window in windows:
         if not isinstance(window, dict):
-            raise TestFailure("OBS window evidence is malformed")
+            raise TestFailure("GHex window evidence is malformed")
         bounds = window.get("bounds")
         title = str(window.get("title", "")).casefold()
         if (window.get("visible") is not True
                 or window.get("role") not in {"frame", "dialog"}
-                or str(window.get("application", "")).casefold() not in {"obs", "obs studio", "com.obsproject.studio"}
-                or not any(word in title for word in ("obs", "auto-configuration", "自动配置"))
+                or str(window.get("application", "")).casefold() not in {"ghex", "org.gnome.ghex"}
+                or "ghex" not in title
                 or any(word in title for word in ("error", "failed", "错误", "失败"))
                 or not isinstance(bounds, list) or len(bounds) != 4
                 or any(type(item) is not int for item in bounds)
                 or bounds[2] < 200 or bounds[3] < 120
-                or type(window.get("controls")) is not int or window["controls"] < 3):
-            raise TestFailure("OBS window evidence is invalid")
+                or type(window.get("controls")) is not int or window["controls"] < 2):
+            raise TestFailure("GHex window evidence is invalid")
     instances = value.get("flatpak_instances")
     if not isinstance(instances, list) or len(instances) != 1 or not isinstance(instances[0], dict):
-        raise TestFailure("OBS launch requires exactly one running Flatpak instance")
+        raise TestFailure("GHex launch requires exactly one running Flatpak instance")
     instance = instances[0]
-    if (instance.get("application") != _OBS_APP_ID or instance.get("arch") != "x86_64"
+    if (instance.get("application") != _GHEX_APP_ID or instance.get("arch") != "x86_64"
             or instance.get("branch") != "stable" or not instance.get("instance")
             or any(type(instance.get(key)) is not int or instance[key] <= 1 for key in ("pid", "child_pid"))):
-        raise TestFailure("OBS Flatpak identity is invalid")
+        raise TestFailure("GHex Flatpak identity is invalid")
     return value
 
 

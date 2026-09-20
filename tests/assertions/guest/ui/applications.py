@@ -24,8 +24,11 @@ def _flatpak_instances(application: str) -> list[dict[str, object]]:
     instances = []
     for raw_line in result.stdout.splitlines():
         fields = raw_line.split("\t")
-        if len(fields) != 8 or fields[3] != application:
+        # Flatpak omits trailing empty active/background cells in plain output.
+        # Identity columns are required; absent optional flags mean false/empty.
+        if not 6 <= len(fields) <= 8 or fields[3] != application:
             continue
+        fields.extend([""] * (8 - len(fields)))
         try:
             pid = int(fields[1])
             child_pid = int(fields[2])
@@ -50,23 +53,23 @@ def _wechat_instances() -> list[dict[str, object]]:
     return _flatpak_instances("com.tencent.WeChat")
 
 
-def _obs_windows() -> list[dict[str, object]]:
+def _ghex_windows() -> list[dict[str, object]]:
     windows = []
     for application in children(desktop()):
-        if name(application).casefold() not in {"obs", "obs studio", "com.obsproject.studio"}:
+        if name(application).casefold() not in {"ghex", "org.gnome.ghex"}:
             continue
         for window in children(application):
             if not showing(window) or role(window) not in {"frame", "dialog"}:
                 continue
             title = name(window)
             if any(word in title.casefold() for word in ("error", "failed", "错误", "失败")):
-                raise UiFailure(f"OBS showed an error window: {title}")
-            if not any(word in title.casefold() for word in ("obs", "auto-configuration", "自动配置")):
+                raise UiFailure(f"GHex showed an error window: {title}")
+            if "ghex" not in title.casefold():
                 continue
             bounds = window.get_extents(Atspi.CoordType.SCREEN)
             controls = sum(1 for item in walk(window) if showing(item)
                            and role(item) in {"push button", "button", "radio button", "menu bar", "combo box"})
-            if bounds.width < 200 or bounds.height < 120 or controls < 3:
+            if bounds.width < 200 or bounds.height < 120 or controls < 2:
                 continue
             windows.append({"title": title, "role": role(window),
                             "application": name(application), "visible": True,
@@ -75,28 +78,28 @@ def _obs_windows() -> list[dict[str, object]]:
     return windows
 
 
-def exercise_obs_install(evidence: Path) -> None:
-    """Launch the installed Flatpak from ArcMenu and observe its real Qt UI."""
+def exercise_ghex_install(evidence: Path) -> None:
+    """Launch the installed Flatpak from ArcMenu and observe its real GTK UI."""
     dismiss_initial_setup()
-    if _flatpak_instances("com.obsproject.Studio") or _obs_windows():
-        raise UiFailure("OBS was already running before the menu launch")
-    event("obs-launch-baseline", running=False)
-    semantic, _, _ = _open_arcmenu_search("OBS Studio", "obs-search")
+    if _flatpak_instances("org.gnome.GHex") or _ghex_windows():
+        raise UiFailure("GHex was already running before the menu launch")
+    event("ghex-launch-baseline", running=False)
+    semantic, _, _ = _open_arcmenu_search("GHex", "ghex-search")
     result_name = name(semantic)
-    event("qmp-key", request="obs-result-activate", key="ret")
+    event("qmp-key", request="ghex-result-activate", key="ret")
     deadline = time.monotonic() + 90
     signature = None
     stable = 0
     while time.monotonic() < deadline:
-        windows = _obs_windows()
-        instances = _flatpak_instances("com.obsproject.Studio")
+        windows = _ghex_windows()
+        instances = _flatpak_instances("org.gnome.GHex")
         current = (windows, instances)
         if windows and len(instances) == 1:
             stable = stable + 1 if current == signature else 1
             signature = current
             if stable >= 4:
-                dump_accessibility(evidence / "obs-window.txt")
-                event("obs-installed-launched", application="com.obsproject.Studio",
+                dump_accessibility(evidence / "ghex-window.txt")
+                event("ghex-installed-launched", application="org.gnome.GHex",
                       search_result=result_name, activation_method="qmp-keyboard",
                       observation="atspi+flatpak", visible=True,
                       windows=windows, flatpak_instances=instances,
@@ -106,7 +109,8 @@ def exercise_obs_install(evidence: Path) -> None:
             stable = 0
             signature = None
         time.sleep(0.5)
-    raise UiFailure("OBS did not expose a stable window and running Flatpak instance")
+    event("ghex-launch-timeout", windows=windows, flatpak_instances=instances)
+    raise UiFailure("GHex did not expose a stable window and running Flatpak instance")
 
 
 def _wechat_shell_taskbar_button() -> dict[str, object] | None:

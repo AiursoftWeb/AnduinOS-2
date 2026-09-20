@@ -1,6 +1,7 @@
 """Accounts, GDM, password, and theme oracles."""
 
 from unit.support import *  # noqa: F403
+from assertions.guest.ui import core as guest_ui
 
 
 class DesktopAccountOracleTests(FeatureOracleCase):
@@ -150,6 +151,33 @@ class DesktopAccountOracleTests(FeatureOracleCase):
             )
         with self.assertRaisesRegex(TestFailure, "real browser"):
             _validate_theme_marker(passing.replace("firefox", "text-editor"), "FIREFOX LIGHT")
+
+    def test_firefox_theme_marker_waits_for_the_exact_browser_page_node(self):
+        # Firefox exposes the new document title in its window name before
+        # the exact page/tab marker becomes available to AT-SPI.
+        window = SimpleNamespace(label="FIREFOX DARK — Mozilla Firefox",
+                                 kind="frame", application="Firefox")
+        foreign = SimpleNamespace(label="FIREFOX DARK", kind="status",
+                                  application="Other")
+        page = SimpleNamespace(label="FIREFOX DARK", kind="page tab",
+                               application="Firefox")
+        with patch.object(guest_ui, "visible_nodes", return_value=(window, foreign, page)) as nodes, \
+             patch.object(guest_ui, "name", side_effect=lambda item: item.label), \
+             patch.object(guest_ui, "role", side_effect=lambda item: item.kind), \
+             patch.object(guest_ui, "owning_application",
+                          side_effect=lambda item: item.application), \
+             patch.object(guest_ui, "dump_accessibility"), \
+             patch.object(guest_ui, "event") as emit:
+            guest_ui.assert_theme_marker("FIREFOX DARK", Path("/unused"))
+            emit.assert_called_once_with(
+                "theme-marker", expected="FIREFOX DARK", observed="FIREFOX DARK",
+                application="Firefox")
+            nodes.return_value = (window, foreign)
+            with patch.object(guest_ui.time, "monotonic", side_effect=[0, 0, 61]), \
+                 patch.object(guest_ui.time, "sleep"), \
+                 self.assertRaisesRegex(guest_ui.UiFailure, "exact page marker"):
+                guest_ui.assert_theme_marker("FIREFOX DARK", Path("/unused"))
+            emit.assert_called_once()
 
     def test_live_theme_oracle_rejects_a_restarted_qt_fixture(self):
         _validate_same_fixture_process(42, 42, "Qt")

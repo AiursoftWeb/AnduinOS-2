@@ -515,6 +515,12 @@ class ShellChecks:
 
         assert vm.serial is not None
         remote = self._prepare_shell_fixture(vm, launch_windows=False)
+        if mode == "localization-zh-cn":
+            # This is the first probe after manual login. Establish Sharing
+            # readiness before attributing subsequent logs to UI interaction,
+            # just as the Software search probes do. Do not whitelist faults
+            # or restart the service to obtain a healthy baseline.
+            self._stabilize_sharing_service(vm, artifacts)
         if mode in _LOCAL_SEARCH_DRIVER_MODES:
             self._assert_local_search_provider_isolation(vm, artifacts, mode)
         elif mode in _SOFTWARE_SEARCH_DRIVER_MODES:

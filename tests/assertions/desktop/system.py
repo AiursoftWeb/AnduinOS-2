@@ -514,12 +514,15 @@ installed_ref=$(flatpak info --system --arch={arch} --show-ref {app_id} 2>&1) ||
     fail_{prefix} product-regression installed-ref-missing 91
 installed_commit=$(flatpak info --system --arch={arch} --show-commit {app_id} 2>&1) || \
     fail_{prefix} product-regression installed-commit-missing 92
+installed_version=$(flatpak info --system --arch={arch} {app_id} 2>&1 | sed -n 's/^[[:space:]]*Version:[[:space:]]*//p' | head -n 1) || \
+    fail_{prefix} product-regression installed-version-missing 92
 installed_origin=$(flatpak info --system --arch={arch} --show-origin {app_id} 2>&1) || \
     fail_{prefix} product-regression installed-origin-missing 93
 installed_location=$(flatpak info --system --arch={arch} --show-location {app_id} 2>&1) || \
     fail_{prefix} product-regression installed-location-missing 94
 printf '{prefix}-installed-ref=%s\n' "$installed_ref"
 printf '{prefix}-installed-commit=%s\n' "$installed_commit"
+printf '{prefix}-installed-version=%s\n' "$installed_version"
 printf '{prefix}-installed-origin=%s\n' "$installed_origin"
 printf '{prefix}-installed-location=%s\n' "$installed_location"
 test "$installed_ref" = "$remote_ref" || \
@@ -547,8 +550,8 @@ def _wechat_install_command() -> str:
     return _flatpak_install_command(_WECHAT_APP_ID, "wechat")
 
 
-def _obs_install_command() -> str:
-    return _flatpak_install_command(_OBS_APP_ID, "obs")
+def _ghex_install_command() -> str:
+    return _flatpak_install_command(_GHEX_APP_ID, "ghex")
 
 
 def _nextcloud_ppa_source_probe_command() -> str:
@@ -856,6 +859,9 @@ def _validate_flatpak_install_evidence(
             f"The installed {label} deployment does not match the resolved public commit"
         )
     location = _last_value(output, f"{prefix}-installed-location")
+    version = _last_value(output, f"{prefix}-installed-version") if prefix == "ghex" else ""
+    if prefix == "ghex" and not version:
+        raise TestFailure("GHex installation did not report an application version")
     resolved_desktop = _last_value(output, f"{prefix}-desktop-resolved")
     if (
         not location.startswith(f"/var/lib/flatpak/app/{identifier}/")
@@ -866,6 +872,7 @@ def _validate_flatpak_install_evidence(
     return {
         **observed,
         "commit": remote_commit,
+        "version": version,
         "location": location,
         "resolved_desktop": resolved_desktop,
     }
@@ -875,8 +882,8 @@ def _validate_wechat_install_evidence(output: str, returncode: int) -> dict[str,
     return _validate_flatpak_install_evidence(output, returncode, _WECHAT_APP_ID, "wechat", "WeChat")
 
 
-def _validate_obs_install_evidence(output: str, returncode: int) -> dict[str, str]:
-    return _validate_flatpak_install_evidence(output, returncode, _OBS_APP_ID, "obs", "OBS Studio")
+def _validate_ghex_install_evidence(output: str, returncode: int) -> dict[str, str]:
+    return _validate_flatpak_install_evidence(output, returncode, _GHEX_APP_ID, "ghex", "GHex")
 
 
 def _validate_cpu_z_download_evidence(

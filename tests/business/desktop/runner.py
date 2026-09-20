@@ -7,6 +7,7 @@ from .accounts import AccountChecks
 from .applications import PublicApplicationChecks
 from .input import InputChecks
 from .lifecycle import LifecycleChecks
+from .home_recovery import HomeRecoveryChecks
 from .session import SessionChecks
 from .shell import ShellChecks
 from .theme import ThemeChecks
@@ -27,6 +28,7 @@ class FeatureSuiteRunner(
     PublicApplicationChecks,
     InputChecks,
     LifecycleChecks,
+    HomeRecoveryChecks,
     SessionChecks,
     ShellChecks,
     ThemeChecks,
@@ -37,6 +39,7 @@ class FeatureSuiteRunner(
         "input.super-space-rime": "_exercise_rime_input",
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
+        "storage.btrfs-home-rollback": "_exercise_btrfs_home_rollback",
         "storage.factory-reset-preserve-home": "_exercise_factory_reset_preserve_home",
         "storage.factory-reset-erase-home": "_exercise_factory_reset_erase_home",
         "storage.factory-reset-power-loss": "_exercise_factory_reset_power_loss",
@@ -79,7 +82,7 @@ class FeatureSuiteRunner(
         "files.cpuz-thumbnail-and-open": "_exercise_public_cpu_z",
         "apt.nextcloud-client-ppa": "_exercise_nextcloud_ppa",
         "store.spotify-public": "_exercise_spotify_public",
-        "app.obs-install": "_exercise_obs_install",
+        "app.ghex-install": "_exercise_ghex_install",
     }
 
     def __init__(
@@ -188,6 +191,13 @@ class FeatureSuiteRunner(
                         "printf '%s\\n' '--- loginctl ---'; loginctl list-sessions; "
                         "printf '%s\\n' '--- gdm ---'; "
                         "systemctl --no-pager --full status gdm.service; "
+                        "printf '%s\\n' '--- ssh control ---'; "
+                        "systemctl --no-pager --full status ssh.service; "
+                        f"name={shlex.quote(self.username)}; "
+                        "home=$(getent passwd \"$name\" | cut -d: -f6); "
+                        "stat -c '%a %U:%G %n' \"$home\" \"$home/.ssh\" "
+                        "\"$home/.ssh/authorized_keys\"; "
+                        "ssh-keygen -lf \"$home/.ssh/authorized_keys\"; "
                         "printf '%s\\n' '--- journal ---'; "
                         "journalctl -b --no-pager -n 1200",
                         timeout=90,
@@ -285,7 +295,7 @@ class FeatureSuiteRunner(
         suite: FeatureSuite,
     ) -> None:
         self.phase_callback(base.scenario.id, suite.id, "Booting verified installation base")
-        if "storage.factory-reset-repeat" in suite.checks:
+        if {"storage.factory-reset-repeat", "storage.btrfs-home-rollback"}.intersection(suite.checks):
             # Block guest Internet access in QEMU throughout both recoveries;
             # explicit localhost SSH forwarding remains available for evidence.
             vm.config = replace(vm.config, restrict_network=True)
@@ -295,7 +305,7 @@ class FeatureSuiteRunner(
         vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
         restoration = vm.serial.run(
             render_installed_grub_restoration(),
-            timeout=30,
+            timeout=180,
         )
         (vm.config.artifacts / "grub-restoration.txt").write_text(
             restoration.stdout + "\n",

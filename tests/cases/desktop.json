@@ -56,6 +56,16 @@
       "observation_modes": ["controlled"]
     },
     {
+      "id": "btrfs-home-rollback",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-toggle",
+        "arm64": "uefi-nosb-online-btrfs-ssh-toggle"
+      },
+      "checks": ["storage.btrfs-home-rollback"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "factory-reset-preserve-home",
       "source_cases": {
         "amd64": "uefi-nosb-online-btrfs-ssh-enabled",
@@ -224,12 +234,12 @@
       "observation_modes": ["controlled"]
     },
     {
-      "id": "public-obs",
+      "id": "public-ghex",
       "source_cases": {
         "amd64": "bios-online-btrfs"
       },
       "checks": [
-        "app.obs-install"
+        "app.ghex-install"
       ],
       "isolation": "overlay",
       "observation_modes": ["controlled"]

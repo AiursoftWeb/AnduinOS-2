@@ -31,7 +31,7 @@ _WECHAT_APP_ID = "com.tencent.WeChat"
 _WECHAT_ARCH = "x86_64"
 _WECHAT_REF = f"app/{_WECHAT_APP_ID}/{_WECHAT_ARCH}/stable"
 
-_OBS_APP_ID = "com.obsproject.Studio"
+_GHEX_APP_ID = "org.gnome.GHex"
 
 
 __all__ = tuple(name for name in globals() if name.startswith("_"))

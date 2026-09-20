@@ -180,8 +180,16 @@ def _login_gdm(vm: QemuVm, username: str, password: str, timeout: float) -> None
             # into that partially started session; wait for the real desktop
             # boundary checked above.
             if last_state != "active" and attempts < 3:
-                vm.qmp.send_key("ret")
-                time.sleep(1)
+                if attempts == 0:
+                    # The first Return selects the account from GDM's picker.
+                    vm.qmp.send_key("ret")
+                    time.sleep(2)
+                else:
+                    # On an authentication failure GDM keeps the password
+                    # entry open. Another Return would submit an empty
+                    # password while the retry is still being typed.
+                    vm.qmp.send_key("ctrl-a")
+                    time.sleep(1)
                 vm.qmp.type_text(password, interval=0.06)
                 vm.qmp.send_key("ret")
                 attempts += 1
@@ -334,7 +342,7 @@ def _power_off(vm: QemuVm) -> None:
 
     assert vm.serial is not None and vm.qmp is not None
     try:
-        vm.serial.run("sync", timeout=30)
+        vm.serial.run("sync", timeout=180)
         # The harness exits the Live VM through QMP instead of asking the
         # desktop session to shut down.  Flush the named target block node
         # explicitly so the next QEMU process cannot observe acknowledged

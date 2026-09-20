@@ -1413,7 +1413,37 @@ def set_desktop_theme(expected: str, evidence: Path) -> None:
 
 
 def assert_theme_marker(expected: str, evidence: Path) -> None:
-    marker = find(expected, timeout=60)
+    if expected.startswith("FIREFOX "):
+        # The browser window is named "FIREFOX DARK — Mozilla Firefox" as
+        # soon as its title changes. Generic find() accepts that substring
+        # before the exact page marker appears in the accessibility tree.
+        # Wait for a browser-owned page/tab marker produced by matchMedia.
+        deadline = time.monotonic() + 60
+        seen = []
+        marker = None
+        while time.monotonic() < deadline:
+            for item in visible_nodes():
+                observed = name(item)
+                if expected not in observed:
+                    continue
+                if owning_application(item).casefold() != "firefox":
+                    continue
+                seen.append((role(item), observed))
+                if observed == expected and role(item) not in {
+                    "application", "frame", "window", "dialog"
+                }:
+                    marker = item
+                    break
+            if marker is not None:
+                break
+            time.sleep(0.25)
+        if marker is None:
+            raise UiFailure(
+                f"Firefox did not expose exact page marker {expected!r}; "
+                f"browser nodes={seen[-12:]!r}"
+            )
+    else:
+        marker = find(expected, timeout=60)
     dump_accessibility(evidence / "theme-marker.txt")
     event(
         "theme-marker",

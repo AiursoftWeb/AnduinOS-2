@@ -326,9 +326,11 @@ printf 'input-sources=%s\n' "$sources"
         (artifacts / "plymouth-analysis.json").write_text(
             json.dumps(report, indent=2) + "\n", encoding="utf-8"
         )
-        probe.unlink(missing_ok=True)
         if matched is None:
+            if probe.exists():
+                probe.replace(artifacts / "plymouth-last-frame.png")
             raise TestFailure(
                 "An ordinary installed boot never displayed the installed "
                 "AnduinOS Plymouth watermark"
             )
+        probe.unlink(missing_ok=True)

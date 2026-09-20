@@ -379,7 +379,7 @@ fi
             vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
             restoration = vm.serial.run(
                 render_installed_grub_restoration(),
-                timeout=30,
+                timeout=180,
             )
             (artifacts / "installed-grub-restoration.txt").write_text(
                 restoration.stdout + "\n",
@@ -566,7 +566,7 @@ fi
                 "/usr/share/plymouth/themes/anduinos/watermark.png",
                 artifacts / "plymouth-watermark.png",
             )
-        if prepare_overlay_base:
+        if prepare_overlay_base and not scenario.desktop_contracts:
             # Every overlay boots the product's generated default menuentry.
             # The immutable run-local base carries a byte-for-byte backup plus
             # a command-line-only debug edit; each writable overlay restores
@@ -598,6 +598,40 @@ fi
                 "Installed desktop checks failed:\n- "
                 + "\n- ".join(desktop_failures)
             )
+        if prepare_overlay_base and scenario.desktop_contracts:
+            # The passive boot must observe the restored product GRUB, not the
+            # debug command line needed by later feature overlays. Only after
+            # that gate passes, use Live to prepare the now-stopped base.
+            self._prepare_feature_base_after_passive(vm, scenario, artifacts)
+
+    def _prepare_feature_base_after_passive(self, vm, scenario, artifacts):
+        self.status(scenario.id, "Preparing feature control after unmodified boot checks")
+        self._boot_live_session(
+            vm, self._live_grub_entry(scenario),
+            scenario_live_region(self.defaults, scenario),
+            persistent=False, phase="feature-base-preparation",
+        )
+        assert vm.serial is not None
+        filesystem = scenario.filesystem.value
+        options = "-o subvol=@root" if filesystem == "btrfs" else ""
+        script = f"""
+set -euo pipefail
+root_device=$(lsblk -pnro NAME,FSTYPE,TYPE | awk '$2 == "{filesystem}" && $3 == "part" {{ print $1 }}')
+test "$(printf '%s\\n' "$root_device" | grep -c .)" = 1
+test -b "$root_device"
+mountpoint=$(mktemp -d /run/anduinos-target.XXXXXX)
+cleanup() {{ umount "$mountpoint"; rmdir "$mountpoint"; }}
+trap cleanup EXIT
+mount {options} "$root_device" "$mountpoint"
+{render_installed_grub_instrumentation(self.architecture, mounted_target=True)}
+"""
+        result = vm.serial.run(script, timeout=120)
+        (artifacts / "feature-base-grub-instrumentation.txt").write_text(
+            result.stdout + "\n", encoding="utf-8")
+        cleanup_artifacts = artifacts / "feature-base-preparation"
+        cleanup_artifacts.mkdir()
+        self._assert_live_cleanup(vm, cleanup_artifacts)
+        _power_off(vm)
 
     def _collect_gate_failure(
         self,

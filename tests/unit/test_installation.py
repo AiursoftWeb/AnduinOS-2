@@ -1,6 +1,25 @@
 """Installation, firmware, storage, and Wi-Fi tests."""
 
+import ast
+
 from unit.support import *  # noqa: F403
+
+
+class GrubRestorationDeadlineTests(unittest.TestCase):
+    def test_durable_restoration_is_not_cut_off_by_short_serial_deadline(self):
+        for relative in ("business/install/phases.py", "business/desktop/runner.py"):
+            with self.subTest(relative=relative):
+                tree = ast.parse((ROOT / relative).read_text())
+                calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)
+                         and node.args and isinstance(node.args[0], ast.Call)
+                         and isinstance(node.args[0].func, ast.Name)
+                         and node.args[0].func.id == "render_installed_grub_restoration"]
+                self.assertEqual(1, len(calls))
+                timeout = next(item.value for item in calls[0].keywords if item.arg == "timeout")
+                self.assertIsInstance(timeout, ast.Constant)
+                self.assertGreaterEqual(timeout.value, 120)
+
+
 class WifiMigrationOracleTests(unittest.TestCase):
     _UUID = "a356839e-2ef2-4f56-abb0-294873676e41"
 
@@ -662,6 +681,26 @@ class BootContractTests(unittest.TestCase):
         self.assertGreaterEqual(clock[0], 19)
         self.assertEqual([call("ret"), call("ret")], qmp.send_key.call_args_list)
         qmp.type_text.assert_called_once_with("secret", interval=0.06)
+
+    def test_gdm_retry_replaces_password_without_submitting_empty_entry(self):
+        clock = [0.0]
+        serial = Mock()
+        serial.run.return_value = CommandResult("inactive\n", 0)
+        qmp = Mock()
+        vm = SimpleNamespace(serial=serial, qmp=qmp)
+
+        with (
+            patch("business.install.guest._graphical_user_optional",
+                  side_effect=lambda _console: "anduinostest" if qmp.type_text.call_count == 3 else ""),
+            patch("business.install.guest.time.monotonic", side_effect=lambda: clock[0]),
+            patch("business.install.guest.time.sleep",
+                  side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+        ):
+            _login_gdm(vm, "anduinostest", "secret", timeout=120)
+
+        self.assertEqual(3, qmp.type_text.call_count)
+        self.assertEqual([call("ret"), call("ret"), call("ctrl-a"), call("ret"),
+                          call("ctrl-a"), call("ret")], qmp.send_key.call_args_list)
 
     def test_installed_region_requires_configuration_and_real_gnome_process(self):
         console = Mock()

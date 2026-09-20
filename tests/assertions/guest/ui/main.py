@@ -38,6 +38,7 @@ def main() -> int:
             "rime-input-prepare",
             "rime-input-assert",
             "snapshot-restore-arm",
+            "home-restore-arm",
             "factory-reset-arm",
             "accounts-create",
             "accounts-change-password",
@@ -64,7 +65,7 @@ def main() -> int:
             "shell-desktop-shortcut",
             "shell-spotify-store",
             "public-wechat-install",
-            "public-obs-install",
+            "public-ghex-install",
             "public-wechat-tray",
             "swapcontrol-green",
         ),
@@ -127,10 +128,11 @@ def main() -> int:
             if not args.expected:
                 raise UiFailure("Rime assertion mode requires --expected")
             assert_rime_input(args.expected, args.evidence)
-        elif args.mode == "snapshot-restore-arm":
+        elif args.mode in {"snapshot-restore-arm", "home-restore-arm"}:
             if not args.expected:
                 raise UiFailure("Snapshot restore mode requires --expected")
-            arm_snapshot_restore(args.expected, args.evidence)
+            arm_snapshot_restore(args.expected, args.evidence,
+                                 home_only=args.mode == "home-restore-arm")
         elif args.mode == "factory-reset-arm":
             arm_factory_reset(args.erase_home, args.evidence)
         elif args.mode == "accounts-create":
@@ -206,8 +208,8 @@ def main() -> int:
             exercise_spotify_store(args.evidence)
         elif args.mode == "public-wechat-install":
             exercise_wechat_install(args.evidence)
-        elif args.mode == "public-obs-install":
-            exercise_obs_install(args.evidence)
+        elif args.mode == "public-ghex-install":
+            exercise_ghex_install(args.evidence)
         elif args.mode == "public-wechat-tray":
             exercise_wechat_tray(args.evidence)
         elif args.mode == "swapcontrol-green":

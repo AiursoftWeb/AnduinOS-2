@@ -26,7 +26,17 @@ def verify_snapshots_manager(evidence: Path) -> None:
     event("snapshots-manager", application=application)
 
 
-def arm_snapshot_restore(title: str, evidence: Path) -> None:
+def _snapshot_rows(title: str) -> list:
+    """Count accessible row objects, not repeated paths through the AT-SPI graph."""
+    rows = []
+    for item in visible_nodes():
+        if (role(item) == "list item" and name(item) == title and showing(item)
+                and item not in rows):
+            rows.append(item)
+    return rows
+
+
+def arm_snapshot_restore(title: str, evidence: Path, *, home_only: bool = False) -> None:
     """Choose one exact deployment in the real GUI and arm its rollback."""
 
     dismiss_initial_setup()
@@ -45,17 +55,18 @@ def arm_snapshot_restore(title: str, evidence: Path) -> None:
         ),
         timeout=90,
     )
+    if home_only:
+        tab = find_candidates(("Personal Files Recovery", "恢复个人文件"),
+                              label="Home recovery tab", timeout=30)
+        if not perform_action(actionable(tab), 0):
+            raise UiFailure("Could not open Home recovery tab")
+        event("snapshot-scope-selected", scope="home")
     deadline = time.monotonic() + 90
     snapshot = None
     while time.monotonic() < deadline:
-        # GTK exposes a list item's title twice: once as the semantic list
-        # item name and again as its implementation label.  Count only the
-        # owning rows so one real snapshot cannot look like two deployments.
-        rows = [
-            item
-            for item in visible_nodes()
-            if role(item) == "list item" and name(item) == title and showing(item)
-        ]
+        # Ignore implementation labels and repeated references to the same
+        # accessible object. Distinct same-title rows remain ambiguous.
+        rows = _snapshot_rows(title)
         if len(rows) == 1:
             snapshot = rows[0]
             break

@@ -76,7 +76,7 @@ _SHELL_DRIVER_CHECKS = frozenset(
         "desktop.create-shortcut",
         "search.spotify-store",
         "store.spotify-public",
-        "app.obs-install",
+        "app.ghex-install",
     }
 )
 _SHORTCUT_FIXTURE_CHECKS = frozenset({"shortcut.alt-tab"})
@@ -90,12 +90,14 @@ _PANEL_FIXTURE_CHECKS = frozenset(
 _INDICATOR_FIXTURE_CHECKS = frozenset({"shell.appindicator-roundtrip"})
 _LOCAL_ARCMENU_SEARCH_CHECKS = frozenset(
     {
+        "app.ghex-install",
         "panel.pin-application",
         "desktop.create-shortcut",
     }
 )
 _LOCAL_SEARCH_DRIVER_MODES = frozenset(
     {
+        "public-ghex-install",
         "shell-panel-pin",
         "shell-panel-pin-persisted",
         "shell-panel-remove",
@@ -106,7 +108,6 @@ _SOFTWARE_SEARCH_DRIVER_MODES = frozenset(
     {
         "shell-spotify-store",
         "public-wechat-install",
-        "public-obs-install",
     }
 )
 

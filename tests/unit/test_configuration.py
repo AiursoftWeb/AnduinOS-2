@@ -217,6 +217,7 @@ class MatrixTests(unittest.TestCase):
                 "system-lifecycle",
                 "file-integration",
                 "btrfs-rollback",
+                "btrfs-home-rollback",
                 "factory-reset-preserve-home",
                 "factory-reset-erase-home",
                 "factory-reset-repeat",
@@ -229,7 +230,7 @@ class MatrixTests(unittest.TestCase):
                 "shell-desktop-shortcut",
                 "shell-spotify-store",
                 "public-ecosystem",
-                "public-obs",
+                "public-ghex",
             ),
             tuple(item.id for item in suites),
         )
@@ -242,10 +243,10 @@ class MatrixTests(unittest.TestCase):
             ),
             public.checks,
         )
-        obs = next(item for item in suites if item.id == "public-obs")
+        ghex = next(item for item in suites if item.id == "public-ghex")
         self.assertEqual(
-            ("app.obs-install",),
-            obs.checks,
+            ("app.ghex-install",),
+            ghex.checks,
         )
         registry.validate_sources(
             suites,
@@ -501,7 +502,7 @@ class DashboardTests(unittest.TestCase):
         output = stream.getvalue()
         self.assertIn("AnduinOS ISO Acceptance", output)
         self.assertIn("NOT STARTED", output)
-        self.assertIn("RUNNING", output)
+        self.assertIn("INSTALLING", output)
         self.assertIn("FAILED", output)
         self.assertIn("example failure", output)
         self.assertIn("Checks — one", output)
