@@ -165,22 +165,6 @@ class DesktopSessionOracleTests(FeatureOracleCase):
                 "bounds": [0, 0, 1280, 752],
             },
             {
-                "event": "desktop-context-menu-plan",
-                "target": "desktop_open_terminal",
-                "package": "gnome-shell-extension-desktop-icons-ng-anduinos",
-                "package_version": "2.0.2-2+resolute",
-                "source": "/usr/share/gnome-shell/extensions/ding@rastersoft.com/app/desktopMenu.js",
-                "action_tail": [
-                    "open-in-terminal-desktop",
-                    "change-background",
-                    "show-settings",
-                    "display-settings",
-                ],
-                "focus_origin": "first-menu-row",
-                "up_presses": 4,
-                "atspi_rows_exposed": False,
-            },
-            {
                 "event": "qmp-key",
                 "request": "desktop-terminal-menu-up-1",
                 "key": "up",
@@ -213,7 +197,7 @@ class DesktopSessionOracleTests(FeatureOracleCase):
                 "windows": [["ptyxis", "frame", "Desktop"]],
                 "directory": "/home/anduinostest/Desktop",
                 "observed_cwds": ["/home/anduinostest/Desktop"],
-                "activation": "desktop-context-menu-versioned-keyboard",
+                "activation": "desktop-context-menu-keyboard",
             },
             {
                 "event": "qmp-key",
@@ -230,10 +214,9 @@ class DesktopSessionOracleTests(FeatureOracleCase):
         mutations = (
             (1, "target", "主目录", "exactly one semantic event"),
             (1, "application", "gnome-shell", "target DING"),
-            (2, "package_version", "2.0.2-3+resolute", "unvalidated DING"),
-            (3, "key", "down", "exactly one semantic event"),
-            (8, "application", "org.gnome.Nautilus", "open Ptyxis"),
-            (8, "observed_cwds", [], "open Ptyxis"),
+            (2, "key", "down", "exactly one semantic event"),
+            (7, "application", "org.gnome.Nautilus", "open Ptyxis"),
+            (7, "observed_cwds", [], "open Ptyxis"),
         )
         for index, key, replacement, message in mutations:
             values = [json.loads(line) for line in passing.splitlines()]

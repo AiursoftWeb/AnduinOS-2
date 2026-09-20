@@ -446,80 +446,6 @@ def _terminal_windows() -> list[tuple[str, str, str]]:
     return values
 
 
-def _desktop_terminal_keyboard_plan(evidence: Path) -> int:
-    """Validate the exact DING menu whose inaccessible GTK row we navigate."""
-
-    package = "gnome-shell-extension-desktop-icons-ng-anduinos"
-    version_result = subprocess.run(
-        ("dpkg-query", "-W", "-f=${Version}", package),
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    version = version_result.stdout.strip()
-    if version_result.returncode != 0 or not re.fullmatch(
-        r"2\.0\.2-(?:1|2)\+resolute(?:-addon)?", version
-    ):
-        raise UiFailure(
-            "DING keyboard fallback is not validated for installed version "
-            f"{version!r}"
-        )
-    source_path = Path(
-        "/usr/share/gnome-shell/extensions/"
-        "ding@rastersoft.com/app/desktopMenu.js"
-    )
-    source = source_path.read_text(encoding="utf-8")
-    menu_body = source.split("async _createDesktopBackgroundMenu()", 1)[-1].split(
-        "return menuContainer", 1
-    )[0]
-    actions = re.findall(
-        r"_newMenuElement\([^,]+,\s*[\"']([^\"']+)[\"']",
-        menu_body,
-    )
-    expected_tail = [
-        "open-in-terminal-desktop",
-        "change-background",
-        "show-settings",
-        "display-settings",
-    ]
-    if actions[-4:] != expected_tail:
-        raise UiFailure(
-            "DING desktop menu order changed; semantic keyboard fallback must "
-            f"be reviewed: {actions!r}"
-        )
-    dump_accessibility(evidence / "desktop-context-menu-atspi.txt")
-    exposed = [
-        [role(item), name(item)]
-        for item in visible_nodes()
-        if owning_application(item) == "gjs"
-        and name(item).casefold()
-        in {value.casefold() for value in aliases("desktop_open_terminal")}
-    ]
-    if exposed:
-        raise UiFailure(
-            "DING now exposes Open in Terminal through AT-SPI; replace the "
-            f"versioned keyboard fallback with semantic pointer input: {exposed!r}"
-        )
-    # GTK focuses the first row when the popup opens.  Up wraps to the final
-    # row; three more presses traverse the exact source-validated tail to the
-    # desired action.  The observed Ptyxis child CWD below remains the product
-    # oracle, so an input/focus drift fails closed.
-    up_presses = len(expected_tail)
-    event(
-        "desktop-context-menu-plan",
-        target="desktop_open_terminal",
-        package=package,
-        package_version=version,
-        source=str(source_path),
-        action_tail=expected_tail,
-        focus_origin="first-menu-row",
-        up_presses=up_presses,
-        atspi_rows_exposed=False,
-    )
-    return up_presses
-
-
 def _ptyxis_descendant_cwds() -> list[str]:
     process_rows = subprocess.run(
         ("ps", "-eo", "pid=,ppid=,comm="),
@@ -578,8 +504,10 @@ def exercise_desktop_terminal(evidence: Path) -> None:
         button="right",
         semantic_target="desktop-background",
     )
-    up_presses = _desktop_terminal_keyboard_plan(evidence)
-    for number in range(1, up_presses + 1):
+    dump_accessibility(evidence / "desktop-context-menu-atspi.txt")
+    # DING's context-menu rows are not reliably exposed through AT-SPI.
+    # Try the keyboard route and judge it by the opened terminal's real CWD.
+    for number in range(1, 5):
         event(
             "qmp-key",
             request=f"desktop-terminal-menu-up-{number}",
@@ -615,7 +543,7 @@ def exercise_desktop_terminal(evidence: Path) -> None:
         visible=True,
         application=windows[0][0],
         windows=windows,
-        activation="desktop-context-menu-versioned-keyboard",
+        activation="desktop-context-menu-keyboard",
         directory=desktop_directory,
         observed_cwds=observed_cwds,
     )
@@ -719,51 +647,6 @@ def exercise_desktop_shortcut(evidence: Path) -> None:
         time.sleep(0.1)
     if find_optional("ding_find_title", timeout=0.25):
         raise UiFailure("DING Find Files dialog did not close after Return")
-    package = "gnome-shell-extension-desktop-icons-ng-anduinos"
-    version_result = subprocess.run(
-        ("dpkg-query", "-W", "-f=${Version}", package),
-        check=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-    )
-    version = version_result.stdout.strip()
-    if version_result.returncode != 0 or not re.fullmatch(
-        r"2\.0\.2-(?:1|2)\+resolute(?:-addon)?", version
-    ):
-        raise UiFailure(
-            "DING file-menu keyboard activation is not validated for "
-            f"installed version {version!r}"
-        )
-    source_path = Path(
-        "/usr/share/gnome-shell/extensions/"
-        "ding@rastersoft.com/app/fileItemMenu.js"
-    )
-    source = source_path.read_text(encoding="utf-8")
-    first_section = source.split("_createMenu(fileItem)", 1)[-1].split(
-        "let keepStacked", 1
-    )[0]
-    if not re.search(
-        r"this\._newMenuElement\(\s*selectedItemsNum > 1 .*?"
-        r"_\('Open'\).*?\"open-selected-files\"",
-        first_section,
-        re.DOTALL,
-    ):
-        raise UiFailure("DING file menu no longer starts with its Open action")
-    open_action = source.split("_addNewAction('open-selected-files'", 1)[-1].split(
-        "this._addNewAction", 1
-    )[0]
-    if "fileItem.doOpen()" not in open_action:
-        raise UiFailure("DING Open action no longer launches every selected file")
-    event(
-        "desktop-shortcut-open-plan",
-        package=package,
-        package_version=version,
-        source=str(source_path),
-        selected_items=1,
-        focus_target="first-menu-row",
-        action="open-selected-files",
-    )
     event(
         "qmp-key",
         request="desktop-shortcut-open-menu",

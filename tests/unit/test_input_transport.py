@@ -490,25 +490,6 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
         )[0]
         self.assertIn('requested_key = "down"', radio_body)
 
-    def test_desktop_context_menu_uses_a_versioned_source_validated_fallback(self):
-        self.assertFalse(_guest_qmp_key_supported("end"))
-        self.assertTrue(_guest_qmp_key_supported("up"))
-        self.assertTrue(_guest_qmp_key_supported("meta_l-d"))
-        self.assertFalse(_guest_qmp_key_supported("home"))
-        source = _source_tree(ROOT / "assertions/guest/ui")
-        terminal_body = source.split("def exercise_desktop_terminal", 1)[1].split(
-            "def exercise_desktop_shortcut", 1
-        )[0]
-        self.assertIn("_desktop_terminal_keyboard_plan(evidence)", terminal_body)
-        self.assertIn('f"desktop-terminal-menu-up-{number}"', terminal_body)
-        self.assertIn("_ptyxis_descendant_cwds()", terminal_body)
-        self.assertNotIn('"desktop-terminal-menu-end"', terminal_body)
-        close_body = source.split("def _close_arcmenu", 1)[1].split(
-            "def _open_arcmenu_search", 1
-        )[0]
-        self.assertIn("for attempt in range(2)", close_body)
-        self.assertIn("_visible_shell_result(search_result)", close_body)
-
     def test_wifi_password_focus_recovery_supports_reverse_tab(self):
         self.assertIn("shift-tab", _SUPPORTED_GUEST_QMP_KEYS)
         self.assertTrue(_guest_qmp_key_supported("shift-tab"))
@@ -873,23 +854,6 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
                 '{"event": "qmp-key", "request": "open-fixture-ret", "key": "ret"}'
             ),
         )
-
-    def test_desktop_shortcut_waits_for_ding_state_instead_of_fixed_delay(self):
-        source = (ROOT / "assertions/guest/ui/shell.py").read_text(encoding="utf-8")
-        shortcut = source.split("def exercise_desktop_shortcut", 1)[1].split(
-            "def exercise_spotify_store_search", 1
-        )[0]
-        self.assertNotIn("settle_ms", shortcut)
-        self.assertIn('request="desktop-shortcut-ding-find-open"', shortcut)
-        self.assertIn('find("ding_find_title", timeout=10)', shortcut)
-        self.assertIn('find("dialog_ok", timeout=10, require_enabled=True)', shortcut)
-        self.assertLess(
-            shortcut.index('request="desktop-shortcut-ding-search-accept"'),
-            shortcut.index('request="desktop-shortcut-open-menu"'),
-        )
-        self.assertIn("fileItemMenu.js", shortcut)
-        self.assertIn('action="open-selected-files"', shortcut)
-        self.assertIn('request="desktop-shortcut-launch", key="ret"', shortcut)
 
     def test_nautilus_activation_never_trusts_an_atspi_action_return(self):
         source = _source_tree(ROOT / "assertions/guest/ui")

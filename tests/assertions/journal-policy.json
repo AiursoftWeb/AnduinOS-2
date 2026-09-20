@@ -80,7 +80,7 @@
       "reason": "GNOME 50 can emit this transient window-stack diagnostic while the Shell remains healthy. Separate checks cover window activation, extension state, SPICE resize, and the live Shell process."
     },
     {
-      "id": "ding93-gtk422-transient-a11y-toplevel",
+      "id": "ding-gtk422-transient-a11y-toplevel",
       "component_regex": "(^|/)gnome-shell($|[|/])",
       "message_regex": "^DING: \\(gjs:[0-9]+\\): Gdk-CRITICAL \\*\\*: [0-9:.]+: gdk_wayland_toplevel_set_a11y_properties: assertion 'GDK_IS_WAYLAND_TOPLEVEL \\(toplevel\\)' failed$",
       "conditions": {
@@ -88,9 +88,8 @@
       },
       "max_occurrences": 1,
       "package": "gnome-shell-extension-desktop-icons-ng-anduinos",
-      "version_glob": "2.0.2-[12]+resolute",
       "owner": "GNOME Desktop Icons NG / GTK",
-      "reason": "DING 93 on GTK 4.22 can emit this one transient accessibility assertion while closing or replacing a GTK popover. Separate UI checks require DING to remain alive and verify icons, background actions, desktop shortcuts, extension state, and GNOME Shell health."
+      "reason": "DING on GTK 4.22 can emit this one transient accessibility assertion while closing or replacing a GTK popover. The same diagnostic was observed with DING 97; its desktop context menu and Open in Terminal were verified on the host. Separate ISO UI checks require DING to remain alive and verify icons, background actions, desktop shortcuts, extension state, and GNOME Shell health."
     },
     {
       "id": "gnome50-hidden-dash-null-icon",

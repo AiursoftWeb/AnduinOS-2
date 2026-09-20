@@ -61,7 +61,7 @@ class KnownDiagnostic:
     conditions: dict[str, object]
     max_occurrences: int
     package: str
-    version_glob: str
+    version_glob: str | None
     owner: str
     reason: str
 
@@ -88,7 +88,13 @@ class KnownDiagnostic:
             if actual != expected:
                 return False
         version = package_versions.get(self.package, "")
-        return bool(version and fnmatch.fnmatchcase(version, self.version_glob))
+        return bool(
+            version
+            and (
+                self.version_glob is None
+                or fnmatch.fnmatchcase(version, self.version_glob)
+            )
+        )
 
 
 @dataclass(frozen=True)
@@ -468,11 +474,10 @@ def _load_known_diagnostic(value: object) -> KnownDiagnostic:
         "conditions",
         "max_occurrences",
         "package",
-        "version_glob",
         "owner",
         "reason",
     }
-    if not isinstance(value, dict) or set(value) != required:
+    if not isinstance(value, dict) or not required <= set(value) or set(value) - required - {"version_glob"}:
         raise ConfigurationError("Journal diagnostic has an invalid shape")
     string_names = required - {"conditions", "max_occurrences"}
     for name in string_names:
@@ -480,6 +485,12 @@ def _load_known_diagnostic(value: object) -> KnownDiagnostic:
             raise ConfigurationError(
                 f"Journal diagnostic {name} must be a non-empty string"
             )
+    if "version_glob" in value and (
+        not isinstance(value["version_glob"], str) or not value["version_glob"]
+    ):
+        raise ConfigurationError(
+            "Journal diagnostic version_glob must be a non-empty string"
+        )
     conditions = value["conditions"]
     if not isinstance(conditions, dict) or not conditions:
         raise ConfigurationError("Journal diagnostic conditions must be an object")
@@ -511,7 +522,7 @@ def _load_known_diagnostic(value: object) -> KnownDiagnostic:
         conditions=dict(conditions),
         max_occurrences=maximum,
         package=value["package"],
-        version_glob=value["version_glob"],
+        version_glob=value.get("version_glob"),
         owner=value["owner"],
         reason=value["reason"],
     )
@@ -538,9 +549,14 @@ def _unmatched_reason(
         details = []
         for rule in near:
             version = package_versions.get(rule.package, "<missing>")
+            allowed = (
+                rule.version_glob
+                if rule.version_glob is not None
+                else "any installed version"
+            )
             details.append(
                 f"{rule.id} does not apply to this scenario/action scope or "
-                f"{rule.package}={version} (allowed {rule.version_glob})"
+                f"{rule.package}={version} (allowed {allowed})"
             )
         return "; ".join(details)
     if entry.priority <= 3:

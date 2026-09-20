@@ -638,38 +638,7 @@ def _validate_desktop_terminal_events(output: str) -> None:
         raise TestFailure("Desktop context click did not target DING's desktop frame")
     if context <= foreground:
         raise TestFailure("Desktop terminal clicked before DING was unobstructed")
-    plan_index, plan = _one_event(
-        events,
-        context="Desktop terminal",
-        event="desktop-context-menu-plan",
-        target="desktop_open_terminal",
-        package="gnome-shell-extension-desktop-icons-ng-anduinos",
-        focus_origin="first-menu-row",
-        atspi_rows_exposed=False,
-    )
-    if (
-        not re.fullmatch(
-            r"2\.0\.2-(?:1|2)\+resolute(?:-addon)?",
-            str(plan.get("package_version", "")),
-        )
-        or plan.get("action_tail")
-        != [
-            "open-in-terminal-desktop",
-            "change-background",
-            "show-settings",
-            "display-settings",
-        ]
-        or plan.get("up_presses") != 4
-        or not str(plan.get("source", "")).endswith(
-            "/ding@rastersoft.com/app/desktopMenu.js"
-        )
-    ):
-        raise TestFailure(
-            "Desktop terminal reported an unvalidated DING keyboard plan"
-        )
-    if plan_index <= context:
-        raise TestFailure("Desktop terminal planned navigation before opening the menu")
-    previous = plan_index
+    previous = context
     for number in range(1, 5):
         key_index, _ = _one_event(
             events,
@@ -689,7 +658,7 @@ def _validate_desktop_terminal_events(output: str) -> None:
         key="ret",
     )
     if activate <= previous:
-        raise TestFailure("Desktop terminal did not activate its validated menu row")
+        raise TestFailure("Desktop terminal did not activate its context menu")
     opened, terminal = _one_event(
         events,
         context="Desktop terminal",
@@ -712,7 +681,7 @@ def _validate_desktop_terminal_events(output: str) -> None:
         or not isinstance(observed_cwds, list)
         or directory not in observed_cwds
         or terminal.get("activation")
-        != "desktop-context-menu-versioned-keyboard"
+        != "desktop-context-menu-keyboard"
     ):
         raise TestFailure("Desktop context action did not open Ptyxis in the desktop")
     close_key, _ = _one_event(

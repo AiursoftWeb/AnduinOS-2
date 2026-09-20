@@ -75,7 +75,7 @@ def entry(
 
 
 class JournalPolicyShapeTests(unittest.TestCase):
-    def test_repository_policy_is_narrow_versioned_and_owned(self):
+    def test_repository_policy_is_narrow_and_owned(self):
         policy = JournalPolicy.load(POLICY_PATH)
         self.assertEqual(
             {
@@ -84,7 +84,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gnome50-gdm-media-keys-null-table",
                 "gnome50-sharing-closed-dbus",
                 "gnome50-transient-stack-position",
-                "ding93-gtk422-transient-a11y-toplevel",
+                "ding-gtk422-transient-a11y-toplevel",
                 "gnome50-hidden-dash-null-icon",
                 "gnome50-super-i-hidden-dash-null-icon",
                 "spice-vdagent-tty-switch-no-active-session",
@@ -103,7 +103,11 @@ class JournalPolicyShapeTests(unittest.TestCase):
             policy.packages,
         )
         for item in policy.known_diagnostics:
-            self.assertNotEqual("*", item.version_glob)
+            if item.id == "ding-gtk422-transient-a11y-toplevel":
+                self.assertIsNone(item.version_glob)
+            else:
+                self.assertTrue(item.version_glob)
+                self.assertNotEqual("*", item.version_glob)
             self.assertTrue(item.owner)
             self.assertGreater(len(item.reason), 40)
             expected_budget = {
@@ -302,7 +306,7 @@ class JournalClassificationTests(unittest.TestCase):
         self.assertFalse(excessive.passed)
         self.assertEqual("diagnostic-budget-exceeded", excessive.blockers[0].kind)
 
-    def test_ding_a11y_diagnostic_is_exact_versioned_and_budgeted(self):
+    def test_ding_a11y_diagnostic_is_exact_and_budgeted_across_package_versions(self):
         message = (
             "DING: (gjs:1766): Gdk-CRITICAL **: 00:07:12.605: "
             "gdk_wayland_toplevel_set_a11y_properties: assertion "
@@ -326,29 +330,43 @@ class JournalClassificationTests(unittest.TestCase):
             scenario(),
             VERSIONS,
         )
-        expired = self.policy.classify(
+        newer = self.policy.classify(
             (item,),
             scenario(),
             dict(
                 VERSIONS,
                 **{
                     "gnome-shell-extension-desktop-icons-ng-anduinos": (
-                        "2.0.2-3+resolute"
+                        "2.0.3-1+resolute"
                     )
                 },
             ),
         )
+        missing = self.policy.classify(
+            (item,),
+            scenario(),
+            {
+                name: version
+                for name, version in VERSIONS.items()
+                if name != "gnome-shell-extension-desktop-icons-ng-anduinos"
+            },
+        )
+        wrong_scenario = self.policy.classify(
+            (item,), scenario(desktop_contracts=False), VERSIONS
+        )
         self.assertTrue(accepted.passed)
         self.assertEqual(
-            "ding93-gtk422-transient-a11y-toplevel",
+            "ding-gtk422-transient-a11y-toplevel",
             accepted.known_diagnostics[0].rule_id,
         )
+        self.assertTrue(newer.passed)
         self.assertFalse(changed.passed)
         self.assertEqual("unexpected-journal-error", changed.blockers[0].kind)
         self.assertFalse(excessive.passed)
         self.assertEqual("diagnostic-budget-exceeded", excessive.blockers[0].kind)
-        self.assertFalse(expired.passed)
-        self.assertIn("allowed 2.0.2-[12]+resolute", expired.blockers[0].reason)
+        self.assertFalse(missing.passed)
+        self.assertIn("<missing>", missing.blockers[0].reason)
+        self.assertFalse(wrong_scenario.passed)
 
     def test_similar_but_unrecognized_error_cannot_use_exception(self):
         item = entry(
