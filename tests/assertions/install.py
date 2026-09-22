@@ -784,9 +784,16 @@ def _assert_boot_packages(
     _record(
         console,
         "set -e\n"
-        f"for package in anduinos-core-system dracut dracut-core dracut-install grub-common grub2-common {architecture_packages}; do\n"
+        f"for package in anduinos-core-system dracut dracut-core dracut-install grub2-common {architecture_packages}; do\n"
         "  dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\\n' \"$package\" | grep '^ii '\n"
         "done\n"
+        "if ! dpkg-query -W -f='${db:Status-Abbrev}' grub-common 2>/dev/null | grep -q '^ii '; then\n"
+        "  dpkg-query -W -f='${db:Status-Abbrev}\\t${Provides}\\n' | "
+        "awk -F '\\t' '$1 ~ /^ii / { n=split($2, values, \",\"); "
+        "for (i=1; i<=n; i++) { gsub(/^[[:space:]]+/, \"\", values[i]); "
+        "if (values[i] ~ /^grub-common([[:space:](]|$)/) found=1 } } "
+        "END { exit !found }'\n"
+        "fi\n"
         "kernel=$(find /boot -maxdepth 1 -type f -name 'vmlinuz-*' -printf '%f\\n' | sort -V | tail -n1)\n"
         "test -n \"$kernel\"\n"
         "version=${kernel#vmlinuz-}\n"
