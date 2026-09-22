@@ -47,6 +47,8 @@ The power-loss overlay adds serial observation and a temporary confirmation mask
 root/package state stays unchanged, both histories are browsable and login works.
 It requires Home-only support in the ISO; older packages fail, never skip.
 
+`rescue-center-offline-restore` takes a system snapshot, uninstalls GNOME Shell, proves the installed desktop cannot start, then boots the tested Live ISO and drives the real Rescue Center UI with host QMP pointer clicks. It selects the damaged installation and baseline, keeps the default safety snapshot enabled, restores offline, removes the Live ISO, and requires a healthy graphical boot, restored package state, preserved newer Home data, and an archived transaction.
+
 The installation matrix boots temporary Live overlays on the original
 read-only ISO. One amd64/arm64 scenario additionally boots a writable hybrid
 copy through the real Dracut persistent menu entry, writes a sentinel, powers

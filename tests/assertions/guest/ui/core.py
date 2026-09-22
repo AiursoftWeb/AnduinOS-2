@@ -60,6 +60,10 @@ ALIASES = {
         "Below the minimum. Installation or updates may fail. Continue?",
         "低于最低要求，安装或更新可能失败。仍要继续？",
     ),
+    "capacity_below_recommended": (
+        "Below the recommended capacity. Space may run out quickly. Continue?",
+        "低于推荐容量，空间可能很快耗尽。仍要继续？",
+    ),
     "continue": ("Continue", "继续"),
     "disk_layout": (
         "Configure storage and swap",

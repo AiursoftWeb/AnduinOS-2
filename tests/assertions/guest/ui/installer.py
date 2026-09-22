@@ -278,6 +278,25 @@ def assert_automatic_disk_layout(config: dict[str, object], evidence: Path) -> N
     )
 
 
+def confirm_supported_disk_capacity(
+    config: dict[str, object], evidence: Path
+) -> None:
+    """Accept the installer's warning for supported but sub-recommended disks."""
+    disk_gib = int(config["disk_gib"])
+    if not 25 <= disk_gib < 50:
+        return
+    find("capacity_minimum", timeout=30)
+    find("capacity_below_recommended", timeout=30)
+    dump_accessibility(evidence / "automatic-disk-capacity-warning.txt")
+    click("continue")
+    event(
+        "automatic-capacity-warning-confirmed",
+        disk_gib=disk_gib,
+        minimum_gib=25,
+        recommended_gib=50,
+    )
+
+
 def configure_manual_small_disk(config: dict[str, object], evidence: Path) -> None:
     """Exercise the intentionally undisclosed expert escape hatch on 23 GiB."""
     assert_toggle("btrfs", sensitive=False, active=False)
@@ -495,6 +514,7 @@ def install(config: dict[str, object], evidence: Path) -> None:
     else:
         set_toggle(filesystem, True)
         click("next")
+        confirm_supported_disk_capacity(config, evidence)
         assert_automatic_disk_layout(config, evidence)
         click("next")
         wait_page("user")

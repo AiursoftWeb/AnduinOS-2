@@ -274,6 +274,11 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
         config_path = artifacts / "installer-driver-config.json"
         config = {
             **_scenario_json(scenario),
+            # The scenario value is only an optional per-case override.  The
+            # guest driver must see the size actually assigned to this VM so
+            # global --disk-size runs handle the installer's capacity dialog
+            # correctly as well.
+            "disk_gib": vm.config.disk_gib,
             "username": self.defaults.username,
             "full_name": self.defaults.full_name,
             "hostname": self.defaults.hostname,

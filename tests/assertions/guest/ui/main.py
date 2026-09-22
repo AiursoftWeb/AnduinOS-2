@@ -5,6 +5,7 @@ from .applications import *  # noqa: F403
 from .core import *  # noqa: F403
 from .files import *  # noqa: F403
 from .installer import *  # noqa: F403
+from .rescue import *  # noqa: F403
 from .session import *  # noqa: F403
 from .shell import *  # noqa: F403
 
@@ -40,6 +41,7 @@ def main() -> int:
             "snapshot-restore-arm",
             "home-restore-arm",
             "factory-reset-arm",
+            "rescue-center-offline-restore",
             "accounts-create",
             "accounts-change-password",
             "gdm-select-user",
@@ -73,6 +75,7 @@ def main() -> int:
     parser.add_argument("--config", type=Path)
     parser.add_argument("--evidence", type=Path, required=True)
     parser.add_argument("--expected", default="")
+    parser.add_argument("--system-name", default="")
     parser.add_argument("--account", default="")
     parser.add_argument("--full-name", default="")
     parser.add_argument("--original-account", default="")
@@ -135,6 +138,12 @@ def main() -> int:
                                  home_only=args.mode == "home-restore-arm")
         elif args.mode == "factory-reset-arm":
             arm_factory_reset(args.erase_home, args.evidence)
+        elif args.mode == "rescue-center-offline-restore":
+            if not args.expected or not args.system_name:
+                raise UiFailure(
+                    "Rescue Center restore requires --expected and --system-name"
+                )
+            restore_offline_system(args.system_name, args.expected, args.evidence)
         elif args.mode == "accounts-create":
             if not args.account or not args.full_name:
                 raise UiFailure("Account creation requires account and full name")

@@ -40,6 +40,7 @@ class FeatureSuiteRunner(
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
         "storage.btrfs-home-rollback": "_exercise_btrfs_home_rollback",
+        "storage.rescue-center-offline-restore": "_exercise_rescue_center_offline_restore",
         "storage.factory-reset-preserve-home": "_exercise_factory_reset_preserve_home",
         "storage.factory-reset-erase-home": "_exercise_factory_reset_erase_home",
         "storage.factory-reset-power-loss": "_exercise_factory_reset_power_loss",
@@ -295,7 +296,11 @@ class FeatureSuiteRunner(
         suite: FeatureSuite,
     ) -> None:
         self.phase_callback(base.scenario.id, suite.id, "Booting verified installation base")
-        if {"storage.factory-reset-repeat", "storage.btrfs-home-rollback"}.intersection(suite.checks):
+        if {
+            "storage.factory-reset-repeat",
+            "storage.btrfs-home-rollback",
+            "storage.rescue-center-offline-restore",
+        }.intersection(suite.checks):
             # Block guest Internet access in QEMU throughout both recoveries;
             # explicit localhost SSH forwarding remains available for evidence.
             vm.config = replace(vm.config, restrict_network=True)

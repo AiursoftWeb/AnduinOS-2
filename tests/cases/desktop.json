@@ -66,6 +66,15 @@
       "observation_modes": ["controlled"]
     },
     {
+      "id": "rescue-center-offline-restore",
+      "source_cases": {
+        "amd64": "bios-online-btrfs"
+      },
+      "checks": ["storage.rescue-center-offline-restore"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "factory-reset-preserve-home",
       "source_cases": {
         "amd64": "uefi-nosb-online-btrfs-ssh-enabled",

@@ -1,9 +1,141 @@
 """Reboot, Btrfs rollback, and SSH recovery oracles."""
 
 from unit.support import *  # noqa: F403
+from business.desktop.lifecycle import _validate_rescue_pointer_trace
 
 
 class DesktopLifecycleOracleTests(FeatureOracleCase):
+    def test_rescue_center_workflow_is_offline_safe_and_shell_valid(self):
+        deployment_id = "11111111-2222-4333-8444-555555555555"
+        commands = []
+
+        class Serial:
+            timeout = 30
+
+            def run(self, command, **_kwargs):
+                commands.append(command)
+                if "snapshots-manager-cli create" in command:
+                    stdout = json.dumps({"id": deployment_id})
+                elif "PRETTY_NAME" in command:
+                    stdout = "AnduinOS Test\n"
+                else:
+                    stdout = ""
+                return SimpleNamespace(stdout=stdout, returncode=0)
+
+            def wait_for_shell(self, _timeout):
+                return None
+
+        serial = Serial()
+        vm = SimpleNamespace(
+            serial=serial,
+            qmp=object(),
+            spice_socket=Path("/tmp/rescue-test-spice.sock"),
+            start=Mock(),
+            stop=Mock(),
+            screenshot=Mock(),
+        )
+        base = SimpleNamespace(
+            architecture=Architecture.AMD64,
+            scenario=SimpleNamespace(id="bios-online-btrfs"),
+        )
+        runner = object.__new__(FeatureSuiteRunner)
+        runner.username = "acceptance"
+        runner.password = "secret"
+        runner.options = SimpleNamespace(
+            firmware_delay_seconds=1,
+            command_timeout_seconds=30,
+            boot_timeout_seconds=120,
+        )
+        runner.phase_callback = Mock()
+        runner.driver = SimpleNamespace(upload=Mock())
+        runner._prepare_power_control = Mock(return_value=Path("/tmp/control-key"))
+        runner._ssh = Mock(return_value="poweroff-requested")
+        runner._wait_for_power_transition = Mock()
+        restored_commands = []
+        runner._ssh_eventually = Mock(
+            side_effect=lambda _vm, _key, command, **_kwargs: (
+                restored_commands.append(command) or "restored"
+            )
+        )
+
+        with tempfile.TemporaryDirectory() as directory:
+            pointer_trace = Path(directory) / "rescue-center-pointer-requests.jsonl"
+
+            def run_ui(_vm, _command, **kwargs):
+                commands.append(_command)
+                self.assertEqual(pointer_trace, kwargs["request_trace"])
+                with pointer_trace.open("w", encoding="utf-8") as stream:
+                    for request in (
+                        "rescue-select-installation",
+                        "rescue-open-snapshots",
+                        "rescue-select-snapshot",
+                        "rescue-confirm-restore",
+                    ):
+                        stream.write(json.dumps({
+                            "event": "host-qmp-request",
+                            "kind": "click",
+                            "request": request,
+                            "completed": True,
+                        }) + "\n")
+                return SimpleNamespace(stdout="gui-restored", returncode=0)
+
+            with (
+                patch("business.desktop.lifecycle._power_off"),
+                patch("business.desktop.lifecycle.boot_iso_with_debug_shell"),
+                patch("business.desktop.lifecycle._login_gdm"),
+                patch("business.desktop.lifecycle._run_with_qmp_key_requests", side_effect=run_ui),
+                patch("business.desktop.lifecycle._retrieve_tree"),
+                patch(
+                    "business.desktop.lifecycle._graphical_user",
+                    return_value="acceptance",
+                ),
+            ):
+                runner._exercise_rescue_center_offline_restore(
+                    vm, base, Path(directory)
+                )
+
+        for command in [*commands, *restored_commands]:
+            syntax = subprocess.run(
+                ("bash", "-n"),
+                input=command,
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            self.assertEqual(0, syntax.returncode, syntax.stderr)
+        joined = "\n".join(commands)
+        self.assertIn("/usr/libexec/anduinos-rescue-center-live-helper", joined)
+        self.assertNotIn("restore-snapshot", joined)
+        self.assertIn("dpkg --force-depends --remove gnome-shell", joined)
+        self.assertIn("rescue-center-offline-restore", joined)
+        self.assertIn("--system-name 'AnduinOS Test'", joined)
+        self.assertIn("home data must survive rescue", "\n".join(restored_commands))
+        runner.driver.upload.assert_called_once()
+        vm.start.assert_any_call(attach_iso=True, phase="rescue-live")
+        vm.start.assert_any_call(attach_iso=False, phase="rescue-damaged-boot")
+        vm.start.assert_any_call(attach_iso=False, phase="rescue-restored")
+
+    def test_rescue_center_requires_every_real_pointer_action(self):
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / "trace.jsonl"
+            trace.write_text(json.dumps({
+                "event": "host-qmp-request",
+                "kind": "click",
+                "request": "rescue-select-installation",
+                "completed": True,
+            }) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(TestFailure, "required real pointer"):
+                _validate_rescue_pointer_trace(trace)
+
+    def test_rescue_center_guest_driver_uses_pointer_and_checks_safety_default(self):
+        source = (ROOT / "assertions/guest/ui/rescue.py").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(4, source.count("request_node_click("))
+        self.assertNotIn("do_action(", source)
+        self.assertIn("if not checked(protect):", source)
+        self.assertIn('"System restore complete"', source)
+
     def test_factory_network_isolation_survives_every_qemu_command(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -1518,11 +1518,24 @@ class VisualOracleTests(unittest.TestCase):
             'wait_page("user")', 1
         )
         self.assertIn("assert_automatic_disk_layout(config, evidence)", disk_layout)
+        self.assertIn("confirm_supported_disk_capacity(config, evidence)", disk_layout)
+        self.assertIn('find("capacity_below_recommended", timeout=30)', source)
+        self.assertIn('click("continue")', source)
+        self.assertIn('"automatic-capacity-warning-confirmed"', source)
         self.assertIn('find("recommended_swap", timeout=10)', source)
         self.assertIn('find("zram_swap_contract", timeout=10)', source)
         self.assertIn(r're.fullmatch(r"([1-9]\d*) GiB", value)', source)
         self.assertIn('click("next")', disk_layout)
         self.assertIn('set_text("full_name"', after_layout)
+
+    def test_installer_driver_receives_effective_vm_disk_capacity(self):
+        source = (ROOT / "business/install/phases.py").read_text(
+            encoding="utf-8"
+        )
+        driver = source.split("def _run_installer_driver", 1)[1].split(
+            "def ", 1
+        )[0]
+        self.assertIn('"disk_gib": vm.config.disk_gib', driver)
 
     def test_installer_accepts_current_passwordless_login_label(self):
         source = (ROOT / "assertions/guest/ui/core.py").read_text(

@@ -4,6 +4,7 @@ import os
 import tempfile
 
 from .context import *  # noqa: F403
+from framework.grub import boot_iso_with_debug_shell
 
 
 def _revert_checkpoint_probe_command() -> str:
@@ -22,7 +23,274 @@ def _revert_checkpoint_probe_command() -> str:
     )
 
 
+def _validate_rescue_pointer_trace(path: Path) -> None:
+    required = {
+        "rescue-select-installation",
+        "rescue-open-snapshots",
+        "rescue-select-snapshot",
+        "rescue-confirm-restore",
+    }
+    completed = set()
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        event = json.loads(line)
+        if event.get("event") != "host-qmp-request":
+            continue
+        if event.get("kind") == "click" and event.get("completed") is True:
+            completed.add(str(event.get("request") or ""))
+    missing = sorted(required - completed)
+    if missing:
+        raise TestFailure(
+            "Rescue Center was not driven through every required real pointer "
+            f"action: missing {missing!r}"
+        )
+
+
 class LifecycleChecks:
+    def _exercise_rescue_center_offline_restore(
+        self,
+        vm: QemuVm,
+        base: PromotedBase,
+        artifacts: Path,
+    ) -> None:
+        """Damage an installed desktop and restore it from the real Live ISO."""
+
+        assert vm.serial is not None and vm.qmp is not None
+        suite_id = "rescue-center-offline-restore"
+        title = "Rescue Center acceptance baseline"
+        root_sentinel = "/etc/anduinos-rescue-center-damaged"
+        home_sentinel = f"/home/{self.username}/anduinos-rescue-home-survives"
+        remote = "/run/anduinos-feature-rescue-center"
+        vm.serial.run(f"install -d -m 0777 {remote}")
+        key = self._prepare_power_control(vm, artifacts, remote)
+        system_name = vm.serial.run(
+            ". /etc/os-release; printf '%s\\n' \"$PRETTY_NAME\""
+        ).stdout.strip().splitlines()[-1]
+        if not system_name:
+            raise TestFailure("The installed system has no PRETTY_NAME")
+
+        created = vm.serial.run(
+            "set -euo pipefail\n"
+            "test \"$(findmnt -n -o FSTYPE /)\" = btrfs\n"
+            "test \"$(findmnt -n -o FSROOT /)\" = /@root\n"
+            "test -x /usr/bin/gnome-shell\n"
+            "! dpkg-query -W -f='${db:Status-Abbrev}' anduinos-rescue-center "
+            "2>/dev/null | grep -q '^ii '\n"
+            "anduinos-btrfs-snapshots-manager-cli create --json "
+            f"{shlex.quote(title)} "
+            f"{shlex.quote('Baseline for Live Rescue Center acceptance')}\n",
+            timeout=300,
+        )
+        deployment = _json_object(created.stdout)
+        deployment_id = str(
+            deployment.get("id") or deployment.get("deployment_id") or ""
+        )
+        if not re.fullmatch(
+            r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+            deployment_id,
+        ):
+            raise TestFailure("Rescue baseline did not return a deployment ID")
+        (artifacts / "rescue-baseline-created.json").write_text(
+            created.stdout + "\n", encoding="utf-8"
+        )
+
+        damaged = vm.serial.run(
+            "set -euo pipefail\n"
+            f"printf '%s\\n' 'root damage must disappear' > {root_sentinel}\n"
+            f"printf '%s\\n' 'home data must survive rescue' > {home_sentinel}\n"
+            f"chown {shlex.quote(self.username)}:{shlex.quote(self.username)} "
+            f"{home_sentinel}\n"
+            "dpkg --force-depends --remove gnome-shell\n"
+            "! dpkg-query -W -f='${db:Status-Abbrev}' gnome-shell "
+            "2>/dev/null | grep -q '^ii '\n"
+            "test ! -e /usr/bin/gnome-shell\n"
+            f"test -f {root_sentinel}\n"
+            f"test -f {home_sentinel}\n"
+            "sync\n"
+            "printf 'critical-package=gnome-shell\\n'\n"
+            "printf 'desktop-damage=package-removed\\n'\n"
+            f"printf 'deployment-id=%s\\n' {shlex.quote(deployment_id)}\n"
+        )
+        (artifacts / "rescue-damaged-system.txt").write_text(
+            damaged.stdout + "\n", encoding="utf-8"
+        )
+        _power_off(vm)
+
+        self.phase_callback(
+            base.scenario.id,
+            suite_id,
+            "Proving the damaged installation cannot start GNOME",
+        )
+        vm.start(attach_iso=False, phase="rescue-damaged-boot")
+        broken = self._ssh_eventually(
+            vm,
+            key,
+            "set -euo pipefail; "
+            "! dpkg-query -W -f='${db:Status-Abbrev}' gnome-shell "
+            "2>/dev/null | grep -q '^ii '; "
+            "test ! -e /usr/bin/gnome-shell; "
+            "sleep 15; "
+            "! pgrep -x gnome-shell >/dev/null; "
+            "printf 'critical-package=absent\\n"
+            "graphical-shell=unavailable\\n'",
+            timeout=self.options.boot_timeout_seconds,
+        )
+        (artifacts / "rescue-damaged-boot.txt").write_text(
+            broken + "\n", encoding="utf-8"
+        )
+        vm.screenshot("rescue-damaged-boot")
+        self._ssh(
+            vm,
+            key,
+            "sudo -n /usr/local/sbin/anduinos-acceptance-poweroff",
+        )
+        self._wait_for_power_transition(
+            vm,
+            key,
+            artifacts,
+            "rescue-damaged-poweroff",
+            timeout=150,
+        )
+        vm.stop()
+
+        self.phase_callback(
+            base.scenario.id,
+            suite_id,
+            "Booting the Live ISO and restoring the damaged installation",
+        )
+        vm.start(attach_iso=True, phase="rescue-live")
+        assert vm.qmp is not None and vm.serial is not None
+        boot_iso_with_debug_shell(
+            vm.qmp,
+            vm.serial,
+            base.architecture,
+            firmware_delay=self.options.firmware_delay_seconds,
+            spice_socket=vm.spice_socket,
+        )
+        vm.serial.timeout = self.options.command_timeout_seconds
+        vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+        live_preflight = vm.serial.run(
+            "set -euo pipefail\n"
+            "test -s /run/anduinos-live/environment\n"
+            "dpkg-query -W -f='${db:Status-Abbrev} ${Version}\\n' "
+            "anduinos-rescue-center | grep '^ii '\n"
+            "test -x /usr/bin/anduinos-rescue-center\n"
+            "helper=/usr/libexec/anduinos-rescue-center-live-helper\n"
+            "test -x \"$helper\"\n"
+            "probe=$(\"$helper\" probe)\n"
+            "printf 'probe=%s\\n' \"$probe\"\n"
+            "test \"$(printf '%s' \"$probe\" | jq '[.disks[].partitions[] "
+            "| select(.os_kind == \"anduinos\")] | length')\" = 1\n"
+            "printf 'live-rescue-preflight=ready\\n'\n",
+            timeout=300,
+        )
+        (artifacts / "rescue-live-preflight.txt").write_text(
+            live_preflight.stdout + "\n", encoding="utf-8"
+        )
+        live_user = _graphical_user(vm.serial)
+        live_remote = "/run/anduinos-live-rescue-acceptance"
+        vm.serial.run(f"install -d -m 0777 {live_remote}/evidence")
+        self.driver.upload(vm.serial, live_remote)
+        launched = vm.serial.run(
+            _desktop_command(
+                live_user,
+                (
+                    "sh",
+                    "-c",
+                    "exec setsid --fork anduinos-rescue-center "
+                    ">/tmp/anduinos-rescue-center-acceptance.log 2>&1",
+                ),
+            ),
+            timeout=120,
+        )
+        (artifacts / "rescue-center-launch.txt").write_text(
+            launched.stdout + "\n", encoding="utf-8"
+        )
+        pointer_trace = artifacts / "rescue-center-pointer-requests.jsonl"
+        driver_command = _desktop_command(
+            live_user,
+            (
+                "python3",
+                f"{live_remote}/atspi_driver.py",
+                "rescue-center-offline-restore",
+                "--expected",
+                title,
+                "--system-name",
+                system_name,
+                "--evidence",
+                f"{live_remote}/evidence",
+            ),
+            managed=True,
+        )
+        restored_by_ui = _run_with_qmp_key_requests(
+            vm,
+            driver_command,
+            timeout=1200,
+            request_trace=pointer_trace,
+        )
+        (artifacts / "rescue-center-ui-events.jsonl").write_text(
+            restored_by_ui.stdout + "\n", encoding="utf-8"
+        )
+        _retrieve_tree(
+            vm.serial,
+            live_remote,
+            artifacts / "guest-rescue-center-evidence",
+        )
+        if restored_by_ui.returncode != 0:
+            raise TestFailure(
+                "The Rescue Center GUI could not restore the damaged system:\n"
+                + restored_by_ui.stdout[-8000:]
+            )
+        _validate_rescue_pointer_trace(pointer_trace)
+        vm.screenshot("rescue-live-after-restore")
+        _power_off(vm)
+
+        self.phase_callback(
+            base.scenario.id,
+            suite_id,
+            "Booting the restored installation and verifying GNOME",
+        )
+        vm.start(attach_iso=False, phase="rescue-restored")
+        restored = self._ssh_eventually(
+            vm,
+            key,
+            "set -euo pipefail; "
+            "systemctl is-active --quiet graphical.target; "
+            "systemctl is-active --quiet gdm; "
+            "test \"$(dpkg-query -W -f='${db:Status-Abbrev}' gnome-shell)\" = 'ii '; "
+            "test -x /usr/bin/gnome-shell; "
+            f"test ! -e {shlex.quote(root_sentinel)}; "
+            f"test \"$(cat {shlex.quote(home_sentinel)})\" = "
+            "'home data must survive rescue'; "
+            "! dpkg-query -W -f='${db:Status-Abbrev}' anduinos-rescue-center "
+            "2>/dev/null | grep -q '^ii '; "
+            "test \"$(findmnt -n -o FSTYPE /)\" = btrfs; "
+            "test \"$(findmnt -n -o FSROOT /)\" = /@root; "
+            "store=/.snapshots/anduinos-btrfs-snapshots-manager; "
+            f"test \"$(jq -r .current_head_id \"$store/system-lineage.json\")\" = {shlex.quote(deployment_id)}; "
+            "test ! -e \"$store/offline-transactions/pending.json\"; "
+            "test \"$(jq -r .phase \"$store/offline-transactions/history/\"*.json | "
+            "grep -c '^completed$')\" -ge 1; "
+            "test \"$(jq -r 'select(.kind == \"pre-rollback\" and "
+            ".state == \"ready\") | .id' \"$store/metadata/\"*.json | "
+            "grep -c .)\" -ge 1; "
+            "! btrfs subvolume list / | grep -Eq '@root[.]rescue-center-(old|new)-'; "
+            "sudo -n /usr/local/sbin/anduinos-acceptance-package-health; "
+            "printf 'root-repaired=yes\\nhome-preserved=yes\\n"
+            "offline-transaction=archived\\ngraphical-boot=ready\\n'",
+            timeout=self.options.boot_timeout_seconds * 2,
+        )
+        (artifacts / "rescue-restored-system.txt").write_text(
+            restored + "\n", encoding="utf-8"
+        )
+        assert vm.qmp is not None and vm.serial is not None
+        _login_gdm(vm, self.username, self.password, timeout=120)
+        if _graphical_user(vm.serial) != self.username:
+            raise TestFailure("The Rescue Center restored an unusable GNOME session")
+        vm.screenshot("rescue-restored-gnome")
+        _power_off(vm)
+
     def _exercise_ordinary_reboot(
         self,
         vm: QemuVm,
