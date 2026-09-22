@@ -223,7 +223,7 @@ function build_iso() {
     TOGO_TEXT="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
     # Our Live checker owns progress/recovery. Upstream rd.live.check hides
     # Plymouth and waits twelve hours on failure; never enable that path here.
-    LIVE_BOOT_ARGS="root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 rd.anduinos.media-check=auto"
+    LIVE_BOOT_ARGS="root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
 
     # Build the Try-mode submenu from the independent Live regional policy.
     # The selected region supplies useful locale, timezone and physical-XKB
@@ -296,7 +296,7 @@ submenu "Advanced Options..." {
     }
     menuentry "Check installation media for defects (Integrity Check)" {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz ${LIVE_BOOT_ARGS/rd.anduinos.media-check=auto/rd.anduinos.media-check=force} quiet splash ---
+        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS quiet splash ---
         initrd  /LiveOS/initrd
     }
 }

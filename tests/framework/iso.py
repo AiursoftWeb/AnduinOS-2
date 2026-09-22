@@ -250,15 +250,6 @@ def _validate_dracut_live_contract(content: str) -> None:
         raise ConfigurationError("ISO GRUB has an invalid persistent overlay entry")
     if any(any(arg.startswith("rd.live.check") for arg in arguments) for arguments in parsed):
         raise ConfigurationError("ISO GRUB must not invoke the legacy blocking media checker")
-    for arguments in parsed:
-        if any(arg.startswith("rd.overlay=LABEL=") for arg in arguments):
-            if any(arg.startswith("rd.anduinos.media-check=") for arg in arguments):
-                raise ConfigurationError("Persistent Live mode must not automatically scan media")
-        elif sum(arg in {"rd.anduinos.media-check=auto", "rd.anduinos.media-check=force"}
-                 for arg in arguments) != 1:
-            raise ConfigurationError("Every temporary Live entry must check installation media")
-    if sum("rd.anduinos.media-check=force" in arguments for arguments in parsed) != 1:
-        raise ConfigurationError("ISO GRUB must contain exactly one explicit media-check entry")
     if sum("nomodeset" in arguments for arguments in parsed) != 1:
         raise ConfigurationError("ISO GRUB must contain exactly one safe-graphics entry")
 

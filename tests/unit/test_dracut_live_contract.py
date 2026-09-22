@@ -25,14 +25,14 @@ class DracutLiveContractTests(unittest.TestCase):
         common = (
             "root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS "
             "rd.live.squashimg=rootfs.squashfs rd.overlay "
-            "rd.anduinos.live=1 rd.anduinos.media-check=auto"
+            "rd.anduinos.live=1"
         )
         self.assertIn(f'LIVE_BOOT_ARGS="{common}"', build)
         self.assertIn("rd.overlay=LABEL=ANDUINOS-PERSIST", build)
         self.assertNotIn("ANDUINOS-PERSISTENCE", build)
         self.assertIn("rd.live.overlay.cowfs=ext4", build)
         self.assertNotIn("rd.live.check=1", build)
-        self.assertIn("rd.anduinos.media-check=force", build)
+        self.assertNotIn("rd.anduinos.media-check=", build)
         self.assertEqual(build.count("-partition_offset 16"), 2)
         self.assertIn("implantisomd5 --force", build)
         self.assertNotIn("boot=casper", build)
@@ -114,18 +114,18 @@ class DracutLiveContractTests(unittest.TestCase):
             "rd.live.squashimg=rootfs.squashfs rd.anduinos.live=1"
         )
         entries = [
-            f"linux /LiveOS/vmlinuz {common} rd.overlay rd.anduinos.media-check=auto locale=l{index}\n"
+            f"linux /LiveOS/vmlinuz {common} rd.overlay locale=l{index}\n"
             "initrd /LiveOS/initrd"
             for index in range(28)
         ]
         entries.extend(
             (
-                f"linux /LiveOS/vmlinuz {common} rd.overlay rd.anduinos.media-check=auto nomodeset\n"
+                f"linux /LiveOS/vmlinuz {common} rd.overlay nomodeset\n"
                 "initrd /LiveOS/initrd",
                 f"linux /LiveOS/vmlinuz {common} "
                 "rd.overlay=LABEL=ANDUINOS-PERSIST "
                 "rd.live.overlay.cowfs=ext4\ninitrd /LiveOS/initrd",
-                f"linux /LiveOS/vmlinuz {common} rd.overlay rd.anduinos.media-check=force\n"
+                f"linux /LiveOS/vmlinuz {common} rd.overlay\n"
                 "initrd /LiveOS/initrd",
             )
         )
