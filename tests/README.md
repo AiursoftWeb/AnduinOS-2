@@ -28,11 +28,9 @@ tests/
 └── run.py       Supervised command entry point
 ```
 
-The JSON files under `cases/` are the executable inventory. Declared checks without
-implementations fail unit tests. Every selected installation and suite must produce a verdict.
+The JSON files under `cases/` are the executable inventory. Declared checks without implementations fail unit tests. Every selected installation and suite must produce a verdict.
 
-The `public-ghex` suite verifies a fresh installation of GHex from the
-configured public Flathub remote, checking commit, origin, desktop entry and
+The `public-ghex` suite verifies a fresh installation of GHex from the configured public Flathub remote, checking commit, origin, desktop entry,
 application version and ArcMenu launch into a real GTK window; it does not test editing.
 External catalog/download failures are reported as failures, not skipped passes.
 GHex uses an isolated local search; Spotify suites retain the Software provider.
