@@ -2,6 +2,17 @@
 
 from unit.support import *  # noqa: F403
 class AcceptanceWiringTests(unittest.TestCase):
+    def test_iso_carries_rescue_center_only_for_the_live_session(self):
+        composition = Path(
+            "mods/05-live-kernel-apps-installer/install.sh"
+        ).read_text(encoding="utf-8")
+        rescue_install = composition.split(
+            "Installing AnduinOS Rescue Center for the Live session", 1
+        )[1].split('judge "Install anduinos-rescue-center"', 1)[0]
+        self.assertIn("apt install -y anduinos-rescue-center", rescue_install)
+        self.assertIn("--no-install-recommends", rescue_install)
+        self.assertIn("anduinos-rescue-center", LIVE_ONLY_PACKAGES)
+
     def test_iso_carries_snapshots_manager_for_offline_btrfs_installation(self):
         composition = Path(
             "mods/05-live-kernel-apps-installer/install.sh"

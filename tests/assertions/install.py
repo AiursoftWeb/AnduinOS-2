@@ -13,6 +13,7 @@ from framework.serial import SerialConsole
 
 LIVE_ONLY_PACKAGES = (
     "anduinos-live-layers",
+    "anduinos-rescue-center",
     "discover",
     "laptop-detect",
     "gparted",
@@ -253,6 +254,10 @@ dpkg-query -W -f='${db:Status-Abbrev}' spice-vdagent | grep -q '^ii '
 dpkg-query -W -f='${db:Status-Abbrev}' openssh-server | grep -q '^ii '
 installer_version=$(dpkg-query -W -f='${Version}' anduinos-installer-beta)
 dpkg --compare-versions "$installer_version" ge '2.0.1-66'
+dpkg-query -W -f='${db:Status-Abbrev}' anduinos-rescue-center | grep -q '^ii '
+test -x /usr/bin/anduinos-rescue-center
+test -x /usr/libexec/anduinos-rescue-center-helper
+test -s /usr/share/applications/com.anduinos.RescueCenter.desktop
 test "$(systemctl is-enabled ssh.service 2>/dev/null || true)" = disabled
 test "$(systemctl is-enabled ssh.socket 2>/dev/null || true)" = disabled
 test -z "$(find /etc/ssh -maxdepth 1 \

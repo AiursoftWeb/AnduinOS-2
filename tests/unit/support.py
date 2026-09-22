@@ -30,6 +30,7 @@ from PIL import Image, ImageDraw
 from framework.base import PromotedBase, discard_overlay
 from framework.errors import ConfigurationError, ProtocolError, TestFailure
 from assertions.install import (
+    LIVE_ONLY_PACKAGES,
     RELEASE_CONTRACT_CHECKS,
     _assert_release_contracts,
     _snapshots_manager_contract_script,

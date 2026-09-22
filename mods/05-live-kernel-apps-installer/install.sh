@@ -50,6 +50,11 @@ apt install -y anduinos-installer-beta \
     --no-install-recommends
 judge "Install anduinos-installer-beta"
 
+print_ok "Installing AnduinOS Rescue Center for the Live session..."
+apt install -y anduinos-rescue-center \
+    --no-install-recommends
+judge "Install anduinos-rescue-center"
+
 # Carry the Btrfs recovery UI inside the ISO without making it a desktop
 # metapackage dependency. The native installer retains this package for Btrfs
 # targets and purges it from ext4 targets through its explicit cleanup policy.
