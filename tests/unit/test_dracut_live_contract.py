@@ -42,6 +42,7 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertIn("--no-hostonly", script)
         self.assertIn("--no-hostonly-cmdline", script)
         for module in (
+            "drm",
             "dmsquash-live",
             "dmsquash-live-autooverlay",
             "overlayfs",
