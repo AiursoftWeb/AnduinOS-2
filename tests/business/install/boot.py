@@ -16,11 +16,10 @@ class BootChecks:
             raise TestFailure("UEFI registration check used for a BIOS case")
         assert vm.serial is not None
         suffix = "x64" if self.architecture is Architecture.AMD64 else "aa64"
-        executable = (
-            f"shim{suffix}.efi"
-            if scenario.firmware.secure_boot
-            else f"grub{suffix}.efi"
-        )
+        # The native installer always registers shim, including when Secure
+        # Boot is disabled.  It provides one consistent vendor boot path and
+        # allows Secure Boot to be enabled later without reinstalling GRUB.
+        executable = f"shim{suffix}.efi"
         registrar = "fbx64.efi" if suffix == "x64" else "fbaa64.efi"
         relative_loader = f"EFI/AnduinOS/{executable}"
         expected_loader = "\\" + relative_loader.replace("/", "\\")

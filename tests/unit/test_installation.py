@@ -389,7 +389,7 @@ class BootContractTests(unittest.TestCase):
             (
                 Architecture.AMD64,
                 Firmware.UEFI_NO_SECURE_BOOT,
-                "grubx64.efi",
+                "shimx64.efi",
                 "fbx64.efi",
             ),
             (
@@ -401,7 +401,7 @@ class BootContractTests(unittest.TestCase):
             (
                 Architecture.ARM64,
                 Firmware.UEFI_NO_SECURE_BOOT,
-                "grubaa64.efi",
+                "shimaa64.efi",
                 "fbaa64.efi",
             ),
             (
