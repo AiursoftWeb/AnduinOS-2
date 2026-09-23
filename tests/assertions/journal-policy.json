@@ -129,6 +129,19 @@
       "version_glob": "0.23.*",
       "owner": "SPICE vdagent",
       "reason": "Switching away from the graphical VT deliberately creates a brief interval with no active graphical logind session. The same action independently proves tty6 contents, restores the exact Wayland VT, and requires the graphical session, GDM, and graphical.target to remain healthy."
+    },
+    {
+      "id": "polkit-subject-exited-during-panel-session-recreation",
+      "component_regex": "^polkitd[|]polkit[.]service[|]/usr/lib/polkit-1/polkitd$",
+      "message_regex": "^Error converting subject to JS object: Process [0-9]+ terminated$",
+      "conditions": {
+        "action_scope": "shell-panel-pin"
+      },
+      "max_occurrences": 1,
+      "package": "polkitd",
+      "version_glob": "127-2ubuntu1.1",
+      "owner": "polkit",
+      "reason": "The panel-pin acceptance action deliberately logs out and recreates the graphical session, so a transient authorization subject can exit before polkit converts it. The same action separately requires the pinned launcher to survive the new session and checks the GNOME Shell user session."
     }
   ]
 }

@@ -29,6 +29,7 @@ VERSIONS = {
     "gnome-shell": "50.1-0ubuntu1.2",
     "gnome-settings-daemon": "50.0-1ubuntu1",
     "mutter-common": "50.1-0ubuntu2.2",
+    "polkitd": "127-2ubuntu1.1",
     "spice-vdagent": "0.23.0-1",
 }
 
@@ -88,6 +89,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gnome50-hidden-dash-null-icon",
                 "gnome50-super-i-hidden-dash-null-icon",
                 "spice-vdagent-tty-switch-no-active-session",
+                "polkit-subject-exited-during-panel-session-recreation",
             },
             {item.id for item in policy.known_diagnostics},
         )
@@ -98,6 +100,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gnome-shell",
                 "gnome-shell-extension-desktop-icons-ng-anduinos",
                 "mutter-common",
+                "polkitd",
                 "spice-vdagent",
             ),
             policy.packages,
@@ -184,6 +187,25 @@ class JournalClassificationTests(unittest.TestCase):
             "does not apply",
             verdict.blockers[0].reason,
         )
+
+    def test_polkit_exited_subject_is_limited_to_panel_pin_session_recreation(self):
+        subject = entry(
+            "Error converting subject to JS object: Process 1040 terminated",
+            "polkitd|polkit.service|/usr/lib/polkit-1/polkitd",
+            priority=3,
+        )
+        accepted = self.policy.classify(
+            (subject,), scenario(), VERSIONS, action_scope="shell-panel-pin"
+        )
+        self.assertTrue(accepted.passed)
+        self.assertEqual(
+            "polkit-subject-exited-during-panel-session-recreation",
+            accepted.known_diagnostics[0].rule_id,
+        )
+        rejected = self.policy.classify(
+            (subject,), scenario(), VERSIONS, action_scope="shell-panel-remove"
+        )
+        self.assertFalse(rejected.passed)
 
     def test_known_diagnostic_expires_when_package_version_changes(self):
         item = entry(
