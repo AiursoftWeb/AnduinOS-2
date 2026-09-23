@@ -237,12 +237,29 @@ wpa_supplicant -B -D nl80211 -i "$ap_device" \
     -c /run/anduinos-wifi-lab/ap.conf \
     -P /run/anduinos-wifi-lab/wpa.pid \
     -f /run/anduinos-wifi-lab/wpa.log
-ip address add "$gateway/24" dev "$ap_device"
-dnsmasq --interface="$ap_device" --bind-interfaces --port=0 \
-    --dhcp-range=10.77.0.10,10.77.0.99,255.255.255.0,1h \
-    --dhcp-option=3 --dhcp-option=6 \
-    --pid-file=/run/anduinos-wifi-lab/dnsmasq.pid \
-    --log-facility=/run/anduinos-wifi-lab/dnsmasq.log
+# systemd-networkd is part of the base system and can serve DHCP on this
+# disposable AP.  dnsmasq-base is only a recommended package, so relying on
+# its binary made the acceptance lab depend on an optional ISO package.
+install -d -m 0755 /run/systemd/network
+{{
+    printf '%s\n' '[Match]'
+    printf 'Name=%s\n' "$ap_device"
+    printf '%s\n' '[Network]'
+    printf 'Address=%s/24\n' "$gateway"
+    printf '%s\n' 'DHCPServer=yes' 'IPv6AcceptRA=no'
+    printf '%s\n' '[DHCPServer]'
+    printf '%s\n' 'PoolOffset=10' 'PoolSize=90' 'EmitRouter=no' 'EmitDNS=no'
+}} > /run/systemd/network/70-anduinos-wifi-lab.network
+systemctl start systemd-networkd
+networkctl reload
+networkctl reconfigure "$ap_device"
+for _attempt in $(seq 1 30); do
+    if ip -4 -o address show dev "$ap_device" | grep -Fq "inet $gateway/24"; then
+        break
+    fi
+    sleep 1
+done
+ip -4 -o address show dev "$ap_device" | grep -Fq "inet $gateway/24"
 nmcli radio wifi on
 nmcli device set "$client_device" managed yes
 visible=no
