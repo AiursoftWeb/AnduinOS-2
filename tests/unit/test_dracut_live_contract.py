@@ -42,7 +42,11 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertIn("--no-hostonly", script)
         self.assertIn("--no-hostonly-cmdline", script)
         for module in (
-            "drm",
+            "virtio_gpu",
+            "qxl",
+            "bochs",
+            "vmwgfx",
+            "vboxvideo",
             "dmsquash-live",
             "dmsquash-live-autooverlay",
             "overlayfs",
