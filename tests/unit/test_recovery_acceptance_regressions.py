@@ -135,30 +135,30 @@ class AcceptanceRegressionTests(unittest.TestCase):
         nodes.append(second)
         self.assertEqual([first, second], scope["_snapshot_rows"]("baseline"))
 
-    def test_htop_workload_removes_only_the_fixture_package(self):
+    def test_gnome_clocks_workload_removes_only_the_fixture_package(self):
         prepare = runpy.run_path(str(ROOT / "assertions/guest/factory_reset_workload.py"))["prepare"]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             store = root / "store"
-            baseline = store / "deployments/factory/root/usr/bin/htop"
+            baseline = store / "deployments/factory/root/usr/bin/gnome-clocks"
             baseline.parent.mkdir(parents=True)
-            baseline.write_text("fixture htop")
-            current = root / "htop"
-            current.write_text("fixture htop")
+            baseline.write_text("fixture gnome-clocks")
+            current = root / "gnome-clocks"
+            current.write_text("fixture gnome-clocks")
             home = root / "home/tester/workload"
             home.parent.mkdir(parents=True)
 
             def command(*args):
-                if args == ("dpkg", "--remove", "htop"):
+                if args == ("dpkg", "--remove", "gnome-clocks"):
                     current.unlink()
-                    return "Removing htop"
+                    return "Removing gnome-clocks"
                 if args[0] == "dpkg-query":
                     return "install ok installed" if "-f=${Status}" in args else "test-version"
                 return ""
 
             commands = Mock(side_effect=command)
             def guest_path(value):
-                return current if str(value) == "/usr/bin/htop" else Path(value)
+                return current if str(value) == "/usr/bin/gnome-clocks" else Path(value)
 
             with patch.dict(prepare.__globals__, STORE=store, Path=guest_path, run=commands,
                             shutil=SimpleNamespace(which=Mock(return_value=None)),
@@ -167,14 +167,14 @@ class AcceptanceRegressionTests(unittest.TestCase):
                 workload = prepare(home, "factory")
             self.assertFalse(current.exists())
             self.assertEqual("test-version", workload["version"])
-            commands.assert_any_call("dpkg", "--no-act", "--remove", "htop")
-            commands.assert_any_call("dpkg", "--remove", "htop")
+            commands.assert_any_call("dpkg", "--no-act", "--remove", "gnome-clocks")
+            commands.assert_any_call("dpkg", "--remove", "gnome-clocks")
             calls = [call.args for call in commands.call_args_list]
-            self.assertLess(calls.index(("dpkg", "--no-act", "--remove", "htop")),
-                            calls.index(("dpkg", "--remove", "htop")))
+            self.assertLess(calls.index(("dpkg", "--no-act", "--remove", "gnome-clocks")),
+                            calls.index(("dpkg", "--remove", "gnome-clocks")))
             manager_query = ("dpkg-query", "-W", "-f=${Status}", "anduinos-btrfs-snapshots-manager")
             self.assertEqual(2, calls.count(manager_query))
-            self.assertLess(calls.index(manager_query), calls.index(("dpkg", "--remove", "htop")))
+            self.assertLess(calls.index(manager_query), calls.index(("dpkg", "--remove", "gnome-clocks")))
             self.assertEqual(manager_query, calls[-3])
             commands.assert_any_call("apt-get", "check")
             for call in commands.call_args_list:
@@ -186,10 +186,10 @@ class AcceptanceRegressionTests(unittest.TestCase):
             for path, content in workload["files"].items():
                 self.assertEqual(content, Path(path).read_text())
 
-    def test_htop_dependency_conflict_stops_before_mutation(self):
+    def test_gnome_clocks_dependency_conflict_stops_before_mutation(self):
         prepare = runpy.run_path(str(ROOT / "assertions/guest/factory_reset_workload.py"))["prepare"]
         def command(*args):
-            if args == ("dpkg", "--no-act", "--remove", "htop"):
+            if args == ("dpkg", "--no-act", "--remove", "gnome-clocks"):
                 raise subprocess.CalledProcessError(1, args, "dependency conflict")
             return "install ok installed" if "-f=${Status}" in args else "test-version"
         commands = Mock(side_effect=command)
@@ -199,7 +199,7 @@ class AcceptanceRegressionTests(unittest.TestCase):
                 with self.assertRaises(subprocess.CalledProcessError):
                     prepare(home, "factory")
             self.assertFalse(home.exists())
-        self.assertNotIn(("dpkg", "--remove", "htop"),
+        self.assertNotIn(("dpkg", "--remove", "gnome-clocks"),
                          [call.args for call in commands.call_args_list])
 
     def test_recovery_gui_launches_use_the_graphical_user_manager(self):

@@ -1,4 +1,4 @@
-"""Disposable-VM workload: remove htop, then observe real factory recovery."""
+"""Disposable-VM workload: remove GNOME Clocks, then observe factory recovery."""
 
 import argparse
 import hashlib
@@ -29,18 +29,18 @@ def require(condition, message):
 def prepare(home, factory_root):
     baseline = STORE / "deployments" / factory_root / "root"
     query = ("dpkg-query", f"--admindir={baseline}/var/lib/dpkg", "-W")
-    require(run(*query, "-f=${Status}", "htop") == "install ok installed",
-            "Factory baseline must contain installed htop")
-    version = run(*query, "-f=${Version}", "htop")
-    checksum = digest(baseline / "usr/bin/htop")
-    require(run("dpkg-query", "-W", "-f=${Status}", "htop") == "install ok installed",
-            "htop must be installed before each mutation")
-    run("/usr/bin/htop", "--version")
+    require(run(*query, "-f=${Status}", "gnome-clocks") == "install ok installed",
+            "Factory baseline must contain installed gnome-clocks")
+    version = run(*query, "-f=${Version}", "gnome-clocks")
+    checksum = digest(baseline / "usr/bin/gnome-clocks")
+    require(run("dpkg-query", "-W", "-f=${Status}", "gnome-clocks") == "install ok installed",
+            "gnome-clocks must be installed before each mutation")
+    run("/usr/bin/gnome-clocks", "--version")
     require(run("dpkg-query", "-W", "-f=${Status}", "anduinos-btrfs-snapshots-manager")
             == "install ok installed", "Recovery manager must be installed before mutation")
     # Refuse dependency conflicts before mutation. dpkg removes only this
     # package; never let APT remove the recovery stack as a reverse dependant.
-    run("dpkg", "--no-act", "--remove", "htop")
+    run("dpkg", "--no-act", "--remove", "gnome-clocks")
     files = {
         str(home / "documents" / "keep-me.txt"): "Acceptance document: original contents\n",
         str(home / ".config" / "settings.ini"): "[acceptance]\nmodified=true\n",
@@ -52,12 +52,12 @@ def prepare(home, factory_root):
         path.write_text(content, encoding="utf-8")
         for entry in (home, path.parent, path):
             os.chown(entry, owner.st_uid, owner.st_gid)
-    run("dpkg", "--remove", "htop")
-    require(not Path("/usr/bin/htop").exists() and shutil.which("htop") is None,
-            "Removing htop did not make it unavailable")
-    status = subprocess.run(("dpkg-query", "-W", "-f=${Status}", "htop"),
+    run("dpkg", "--remove", "gnome-clocks")
+    require(not Path("/usr/bin/gnome-clocks").exists() and shutil.which("gnome-clocks") is None,
+            "Removing gnome-clocks did not make it unavailable")
+    status = subprocess.run(("dpkg-query", "-W", "-f=${Status}", "gnome-clocks"),
                             text=True, capture_output=True)
-    require(status.stdout.strip() != "install ok installed", "htop is still installed")
+    require(status.stdout.strip() != "install ok installed", "gnome-clocks is still installed")
     require(run("dpkg-query", "-W", "-f=${Status}", "anduinos-btrfs-snapshots-manager")
             == "install ok installed", "Mutation removed the recovery manager")
     require(not run("dpkg", "--audit"), "Package database is damaged before recovery")
@@ -68,13 +68,13 @@ def prepare(home, factory_root):
 
 def verify(workloads, erase_home):
     latest = workloads[-1]
-    require(run("dpkg-query", "-W", "-f=${Status}", "htop") == "install ok installed",
-            "Recovery did not restore the htop package")
-    require(run("dpkg-query", "-W", "-f=${Version}", "htop") == latest["version"],
-            "Restored htop version differs from the factory baseline")
-    require(digest(Path("/usr/bin/htop")) == latest["sha256"],
-            "Restored htop binary differs from the factory baseline")
-    run("/usr/bin/htop", "--version")
+    require(run("dpkg-query", "-W", "-f=${Status}", "gnome-clocks") == "install ok installed",
+            "Recovery did not restore the gnome-clocks package")
+    require(run("dpkg-query", "-W", "-f=${Version}", "gnome-clocks") == latest["version"],
+            "Restored gnome-clocks version differs from the factory baseline")
+    require(digest(Path("/usr/bin/gnome-clocks")) == latest["sha256"],
+            "Restored gnome-clocks binary differs from the factory baseline")
+    run("/usr/bin/gnome-clocks", "--version")
     require(Path("/proc/sys/kernel/random/boot_id").read_text().strip() != latest["boot_id"],
             "Recovery did not boot a new system")
     histories = [json.loads(path.read_text()) for path in (STORE / "rollback-history").glob("*.json")]
@@ -129,7 +129,7 @@ def verify(workloads, erase_home):
                                              "" if folder == "." else folder, "--json"))
                     require(any(entry.get("name") == Path(name).name for entry in entries),
                             "Saved Home files are not browsable through the application API")
-    print("htop=restored-and-runnable")
+    print("gnome-clocks=restored-and-runnable")
     print("home-workload=" + ("rolled-back-history-preserved" if erase_home and preserve_history
                               else "erased-with-history" if erase_home else "content-preserved"))
 

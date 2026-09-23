@@ -36,9 +36,9 @@ External catalog/download failures are reported as failures, not skipped passes.
 GHex uses an isolated local search; Spotify suites retain the Software provider.
 Plymouth is checked before debug injection and retains failed frames; **BLOCKED** prerequisites prevent release.
 
-`factory-reset-repeat` removes htop and creates Home files, then resets the same
+`factory-reset-repeat` removes GNOME Clocks and creates Home files, then resets the same
 disposable VM twice: preserve Home, then roll back Home while retaining browsable snapshot history.
-Both boots must restore baseline htop, package health and desktop login, with QEMU blocking Internet access. Dependency-checked `dpkg` removes only htop; the snapshot manager must remain installed. Package edge cases stay in AnduinOS-Packages.
+Both boots must restore baseline GNOME Clocks, package health and desktop login, with QEMU blocking Internet access. Dependency-checked `dpkg` removes only GNOME Clocks; the snapshot manager must remain installed. Package edge cases stay in AnduinOS-Packages.
 The power-loss overlay adds serial observation and a temporary confirmation mask to its recovery entry. After cutting QEMU at the durable apply checkpoint, it verifies the fallback checkpoint in the next boot's journal and rollback history (the fallback boots without the injected serial argument); a final clean boot must reconcile the transaction. Normal reset/rollback suites use unmodified recovery boots.
 
 `btrfs-home-rollback` uses the Home GUI and an offline reboot: user files return,
