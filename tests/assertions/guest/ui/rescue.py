@@ -41,6 +41,48 @@ def _named_descendant(container, candidate_name: str, candidate_role: str = ""):
     )
 
 
+def _rescue_window_origin(target) -> tuple[float, float]:
+    """Locate a GTK Wayland window via GNOME Shell's screen geometry."""
+
+    frame = target
+    while frame is not None and role(frame) != "frame":
+        frame = _parent(frame)
+    if frame is None:
+        raise UiFailure("Rescue control has no accessible window frame")
+    window = frame.get_extents(Atspi.CoordType.WINDOW)
+    if window.width < 200 or window.height < 100:
+        raise UiFailure("Rescue window returned invalid local dimensions")
+
+    matches = []
+    # GNOME Shell marks a Wayland window's compositor node as not SHOWING
+    # outside Overview even while the GTK window itself is visibly painted.
+    for item in walk(desktop()):
+        if name(item) != "Wayland window" or owning_application(item) != "gnome-shell":
+            continue
+        rectangle = item.get_extents(Atspi.CoordType.SCREEN)
+        width_extra = rectangle.width - window.width
+        height_extra = rectangle.height - window.height
+        # Mutter's accessible window includes its shadow.  The real GTK
+        # window is centered in that rectangle (50 px larger on both axes in
+        # the observed Live session); reject unrelated compositor surfaces.
+        if not (0 <= width_extra <= 100 and 0 <= height_extra <= 100):
+            continue
+        if rectangle.x < 0 or rectangle.y < 0:
+            continue
+        matches.append(
+            (
+                rectangle.x + width_extra / 2,
+                rectangle.y + height_extra / 2,
+            )
+        )
+    if len(matches) != 1:
+        raise UiFailure(
+            f"Expected one matching Wayland window for {name(frame)!r}, "
+            f"found {len(matches)}"
+        )
+    return matches[0]
+
+
 def restore_offline_system(
     system_name: str,
     snapshot_title: str,
@@ -75,6 +117,7 @@ def restore_offline_system(
         installation,
         "rescue-select-installation",
         semantic_target=f"installation:{system_name}",
+        window_origin=_rescue_window_origin(installation),
     )
 
     snapshots = find_candidates(
@@ -87,6 +130,7 @@ def restore_offline_system(
         snapshots,
         "rescue-open-snapshots",
         semantic_target="Manage Btrfs snapshots",
+        window_origin=_rescue_window_origin(snapshots),
     )
 
     snapshot = find_candidates(
@@ -101,6 +145,7 @@ def restore_offline_system(
         restore,
         "rescue-select-snapshot",
         semantic_target=f"Restore snapshot:{snapshot_title}",
+        window_origin=_rescue_window_origin(restore),
     )
 
     confirmation = find_candidates(
@@ -131,6 +176,7 @@ def restore_offline_system(
         submit,
         "rescue-confirm-restore",
         semantic_target="Restore system",
+        window_origin=_rescue_window_origin(submit),
     )
 
     complete = find_candidates(

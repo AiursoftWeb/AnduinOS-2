@@ -1239,14 +1239,26 @@ def request_node_click(
     *,
     button: str = "left",
     semantic_target: str = "",
+    window_origin: tuple[float, float] | None = None,
 ) -> None:
     """Click one exact semantic node, including non-Shell desktop icons."""
 
     try:
-        bounds = target.get_extents(Atspi.CoordType.SCREEN)
+        coordinate_type = (
+            Atspi.CoordType.WINDOW
+            if window_origin is not None
+            else Atspi.CoordType.SCREEN
+        )
+        bounds = target.get_extents(coordinate_type)
     except Exception as error:
         raise UiFailure(f"Could not read semantic node bounds: {error}")
-    values = (bounds.x, bounds.y, bounds.width, bounds.height)
+    offset_x, offset_y = window_origin or (0, 0)
+    values = (
+        bounds.x + offset_x,
+        bounds.y + offset_y,
+        bounds.width,
+        bounds.height,
+    )
     if min(values) < 0 or bounds.width < 2 or bounds.height < 2:
         raise UiFailure(f"Semantic node returned unusable bounds: {values!r}")
     if button not in {"left", "right"}:
@@ -1259,8 +1271,8 @@ def request_node_click(
         accessible_name=name(target),
         role=role(target),
         application=owning_application(target),
-        x_px=round(bounds.x + bounds.width / 2, 3),
-        y_px=round(bounds.y + bounds.height / 2, 3),
+        x_px=round(values[0] + values[2] / 2, 3),
+        y_px=round(values[1] + values[3] / 2, 3),
         button=button,
         bounds=list(values),
     )

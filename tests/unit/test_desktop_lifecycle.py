@@ -2,6 +2,8 @@
 
 from unit.support import *  # noqa: F403
 from business.desktop.lifecycle import _validate_rescue_pointer_trace
+from assertions.guest.ui import rescue as rescue_ui
+from assertions.guest.ui import core as ui_core
 
 
 class DesktopLifecycleOracleTests(FeatureOracleCase):
@@ -135,6 +137,30 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         self.assertNotIn("do_action(", source)
         self.assertIn("if not checked(protect):", source)
         self.assertIn('"System restore complete"', source)
+
+    def test_rescue_pointer_maps_gtk_window_coordinates_to_screen(self):
+        window = SimpleNamespace(x=0, y=0, width=900, height=640)
+        compositor = SimpleNamespace(x=165, y=31, width=950, height=690)
+        row = SimpleNamespace(x=32, y=211, width=836, height=56)
+        frame = SimpleNamespace(get_extents=Mock(return_value=window))
+        shell_window = SimpleNamespace(get_extents=Mock(return_value=compositor))
+        target = SimpleNamespace(get_extents=Mock(return_value=row))
+        with (
+            patch.object(rescue_ui, "role", return_value="frame"),
+            patch.object(rescue_ui, "walk", return_value=(shell_window,)),
+            patch.object(rescue_ui, "desktop"),
+            patch.object(rescue_ui, "name", return_value="Wayland window"),
+            patch.object(rescue_ui, "owning_application", return_value="gnome-shell"),
+            patch.object(ui_core, "event") as record,
+            patch.object(ui_core, "name", return_value="AnduinOS 2.0.3"),
+            patch.object(ui_core, "role", return_value="list item"),
+            patch.object(ui_core, "owning_application", return_value="python3"),
+        ):
+            origin = rescue_ui._rescue_window_origin(frame)
+            ui_core.request_node_click(target, "rescue-select-installation", window_origin=origin)
+        self.assertEqual((190, 56), origin)
+        self.assertEqual(640, record.call_args.kwargs["x_px"])
+        self.assertEqual(295, record.call_args.kwargs["y_px"])
 
     def test_factory_network_isolation_survives_every_qemu_command(self):
         with tempfile.TemporaryDirectory() as directory:
