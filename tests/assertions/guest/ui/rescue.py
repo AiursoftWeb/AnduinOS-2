@@ -48,6 +48,18 @@ def restore_offline_system(
 ) -> None:
     """Restore one exact snapshot using only real pointer requests."""
 
+    # The Live session launches the installer automatically.  Close that
+    # unrelated window before testing pointer coordinates in Rescue Center;
+    # otherwise Mutter can leave the newly launched rescue window behind it,
+    # and GTK reports the hidden row at (0, 0).
+    for item in visible_nodes():
+        if role(item) != "frame" or name(item) != "AnduinOS Installer":
+            continue
+        close = _named_descendant(item, "Close", "button")
+        if not perform_action(close, 0):
+            raise UiFailure("Could not close the Live installer before rescue")
+        break
+
     find_candidates(
         ("Choose an AnduinOS installation",),
         label="Rescue Center installation chooser",
