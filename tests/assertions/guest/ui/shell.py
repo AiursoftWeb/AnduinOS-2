@@ -412,8 +412,20 @@ def exercise_panel_pin_persisted(evidence: Path) -> None:
 def exercise_panel_remove(evidence: Path) -> None:
     dismiss_initial_setup()
     launcher = _wait_taskbar_fixture(True)
-    request_node_click(launcher, "panel-remove-context", button="right")
-    item = _wait_shell_named("taskbar_unpin", True)[0]
+    for attempt in range(2):
+        request_node_click(
+            launcher,
+            "panel-remove-context" if attempt == 0 else "panel-remove-context-retry",
+            button="right",
+        )
+        try:
+            item = _wait_shell_named("taskbar_unpin", True, timeout=10)[0]
+            break
+        except UiFailure:
+            if attempt:
+                raise
+            event("panel-remove-context-retry", reason="menu-not-visible")
+            launcher = _wait_taskbar_fixture(True)
     localized = name(item)
     if localized != "从任务栏中移除":
         raise UiFailure(

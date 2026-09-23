@@ -239,6 +239,51 @@ class QmpClient:
             button=button,
         )
 
+    def scroll_pointer_pixels(
+        self,
+        x_px: float,
+        y_px: float,
+        *,
+        steps: int,
+    ) -> None:
+        """Scroll a visible guest window with the emulated tablet wheel."""
+
+        if isinstance(steps, bool) or not 1 <= steps <= 12:
+            raise ProtocolError("Pointer scroll steps must be within 1..12")
+        width, height = self.framebuffer_size()
+        if not 0.0 <= x_px < width or not 0.0 <= y_px < height:
+            raise ProtocolError(
+                "AT-SPI scroll coordinates are outside the QEMU framebuffer: "
+                f"({x_px}, {y_px}) not within {width}x{height}"
+            )
+        self.move_pointer_absolute(x_px / width, y_px / height)
+        time.sleep(0.25)
+        for _ in range(steps):
+            self.execute(
+                "input-send-event",
+                {
+                    "device": "video0",
+                    "events": [
+                        {
+                            "type": "btn",
+                            "data": {"down": True, "button": "wheel-down"},
+                        }
+                    ],
+                },
+            )
+            self.execute(
+                "input-send-event",
+                {
+                    "device": "video0",
+                    "events": [
+                        {
+                            "type": "btn",
+                            "data": {"down": False, "button": "wheel-down"},
+                        }
+                    ],
+                },
+            )
+
     def validate_pointer_bounds(
         self,
         x_px: float,

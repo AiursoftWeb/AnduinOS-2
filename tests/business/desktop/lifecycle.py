@@ -167,6 +167,7 @@ class LifecycleChecks:
             base.architecture,
             firmware_delay=self.options.firmware_delay_seconds,
             spice_socket=vm.spice_socket,
+            scratch_dir=artifacts,
         )
         vm.serial.timeout = self.options.command_timeout_seconds
         vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
@@ -267,15 +268,8 @@ class LifecycleChecks:
             "2>/dev/null | grep -q '^ii '; "
             "test \"$(findmnt -n -o FSTYPE /)\" = btrfs; "
             "test \"$(findmnt -n -o FSROOT /)\" = /@root; "
-            "store=/.snapshots/anduinos-btrfs-snapshots-manager; "
-            f"test \"$(jq -r .current_head_id \"$store/system-lineage.json\")\" = {shlex.quote(deployment_id)}; "
-            "test ! -e \"$store/offline-transactions/pending.json\"; "
-            "test \"$(jq -r .phase \"$store/offline-transactions/history/\"*.json | "
-            "grep -c '^completed$')\" -ge 1; "
-            "test \"$(jq -r 'select(.kind == \"pre-rollback\" and "
-            ".state == \"ready\") | .id' \"$store/metadata/\"*.json | "
-            "grep -c .)\" -ge 1; "
-            "! btrfs subvolume list / | grep -Eq '@root[.]rescue-center-(old|new)-'; "
+            "sudo -n /usr/local/sbin/anduinos-acceptance-rescue-state "
+            f"{shlex.quote(deployment_id)}; "
             "sudo -n /usr/local/sbin/anduinos-acceptance-package-health; "
             "printf 'root-repaired=yes\\nhome-preserved=yes\\n"
             "offline-transaction=archived\\ngraphical-boot=ready\\n'",
@@ -284,12 +278,49 @@ class LifecycleChecks:
         (artifacts / "rescue-restored-system.txt").write_text(
             restored + "\n", encoding="utf-8"
         )
-        assert vm.qmp is not None and vm.serial is not None
-        _login_gdm(vm, self.username, self.password, timeout=120)
-        if _graphical_user(vm.serial) != self.username:
-            raise TestFailure("The Rescue Center restored an unusable GNOME session")
+        self._login_gdm_over_ssh(vm, key, timeout=120)
         vm.screenshot("rescue-restored-gnome")
-        _power_off(vm)
+        self._ssh(vm, key, "sync")
+        vm.stop()
+
+    def _login_gdm_over_ssh(self, vm: QemuVm, key: Path, *, timeout: float) -> None:
+        """Verify the restored graphical session without a debug serial shell."""
+
+        assert vm.qmp is not None
+        ready = (
+            "set -e; "
+            "uid=$(id -u); runtime=/run/user/$uid; "
+            "test -S \"$runtime/bus\"; "
+            "find \"$runtime\" -maxdepth 1 -type s "
+            "-name 'wayland-[0-9]*' | grep -q .; "
+            f"pgrep -u {shlex.quote(self.username)} -x gnome-shell >/dev/null; "
+            "printf 'graphical-user=ready\\n'"
+        )
+        deadline = time.monotonic() + timeout
+        next_input = 0.0
+        attempts = 0
+        while time.monotonic() < deadline:
+            if "graphical-user=ready" in self._ssh(
+                vm, key, ready, timeout=15, check=False
+            ):
+                return
+            now = time.monotonic()
+            if now >= next_input and attempts < 3:
+                if attempts == 0:
+                    vm.qmp.send_key("ret")
+                    time.sleep(2)
+                else:
+                    vm.qmp.send_key("ctrl-a")
+                    time.sleep(1)
+                vm.qmp.type_text(self.password, interval=0.06)
+                vm.qmp.send_key("ret")
+                attempts += 1
+                next_input = time.monotonic() + 15
+            time.sleep(2)
+        raise TestFailure(
+            "The Rescue Center restored the system, but a GNOME user session "
+            f"did not start after GDM login; attempts={attempts}"
+        )
 
     def _exercise_ordinary_reboot(
         self,
@@ -1269,17 +1300,38 @@ class LifecycleChecks:
             "\"$expected_target\"\n"
             "journalctl -b -u \"$unit\" --no-pager\n"
             "EOF\n"
+            "cat > /usr/local/sbin/anduinos-acceptance-rescue-state <<'EOF'\n"
+            "#!/bin/bash\n"
+            "set -euo pipefail\n"
+            "test \"$#\" -eq 1\n"
+            "expected_target=$1\n"
+            "[[ \"$expected_target\" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-"
+            "[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]\n"
+            "store=/.snapshots/anduinos-btrfs-snapshots-manager\n"
+            "test \"$(jq -r .current_head_id \"$store/history/system-lineage.json\")\" "
+            "= \"$expected_target\"\n"
+            "test ! -e \"$store/offline-transactions/pending.json\"\n"
+            "jq -r .phase \"$store/offline-transactions/history/\"*.json "
+            "| grep -q '^completed$'\n"
+            "jq -r 'select(.kind == \"pre-rollback\" and .state == \"ready\") "
+            "| .id' \"$store/metadata/\"*.json | grep -q .\n"
+            "! btrfs subvolume list / | "
+            "grep -Eq '@root[.]rescue-center-(old|new)-'\n"
+            "printf 'rescue-state=healthy\\n'\n"
+            "EOF\n"
             "chmod 0755 /usr/local/sbin/anduinos-acceptance-reboot "
             "/usr/local/sbin/anduinos-acceptance-poweroff "
             "/usr/local/sbin/anduinos-acceptance-package-health "
             "/usr/local/sbin/anduinos-acceptance-boot-health "
-            "/usr/local/sbin/anduinos-acceptance-rollback-state\n"
+            "/usr/local/sbin/anduinos-acceptance-rollback-state "
+            "/usr/local/sbin/anduinos-acceptance-rescue-state\n"
             f"printf '%s ALL=(root) NOPASSWD: "
             f"/usr/local/sbin/anduinos-acceptance-reboot, "
             f"/usr/local/sbin/anduinos-acceptance-poweroff, "
             f"/usr/local/sbin/anduinos-acceptance-package-health, "
             f"/usr/local/sbin/anduinos-acceptance-boot-health, "
-            f"/usr/local/sbin/anduinos-acceptance-rollback-state\\n' "
+            f"/usr/local/sbin/anduinos-acceptance-rollback-state, "
+            f"/usr/local/sbin/anduinos-acceptance-rescue-state\\n' "
             f"{shlex.quote(self.username)} "
             "> /etc/sudoers.d/anduinos-acceptance-power\n"
             "chmod 0440 /etc/sudoers.d/anduinos-acceptance-power\n"

@@ -168,6 +168,7 @@ from business.install import (
     _login_gdm,
     _is_gnome_extension_entry,
     _parse_qmp_click_request,
+    _parse_qmp_scroll_request,
     _parse_spice_double_click_request,
     _parse_qmp_key_request,
     _parse_qmp_secret_request,

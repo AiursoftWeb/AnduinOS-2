@@ -110,6 +110,38 @@ def _run_with_qmp_key_requests(
         lines = partial.split("\n")
         partial = lines.pop()
         for line in lines:
+            scroll_request = _parse_qmp_scroll_request(line)
+            if scroll_request is not None:
+                identifier, x_px, y_px, steps = scroll_request
+                if identifier in handled:
+                    continue
+                handled.add(identifier)
+                started = time.monotonic_ns()
+                try:
+                    vm.qmp.scroll_pointer_pixels(x_px, y_px, steps=steps)
+                    time.sleep(_GUEST_QMP_CLICK_SETTLE_SECONDS)
+                except BaseException as error:
+                    record_request(
+                        request=identifier,
+                        kind="scroll",
+                        x_px=x_px,
+                        y_px=y_px,
+                        steps=steps,
+                        completed=False,
+                        duration_ms=round((time.monotonic_ns() - started) / 1_000_000, 3),
+                        error=f"{type(error).__name__}: {error}",
+                    )
+                    raise
+                record_request(
+                    request=identifier,
+                    kind="scroll",
+                    x_px=x_px,
+                    y_px=y_px,
+                    steps=steps,
+                    completed=True,
+                    duration_ms=round((time.monotonic_ns() - started) / 1_000_000, 3),
+                )
+                continue
             double_click_request = _parse_spice_double_click_request(line)
             if double_click_request is not None:
                 identifier, x_px, y_px, bounds, double_click_time_ms = (
@@ -382,6 +414,39 @@ def _parse_qmp_click_request(
     if "click_count" in request:
         return None
     return identifier, pixel_x, pixel_y, button
+
+
+def _parse_qmp_scroll_request(
+    line: str,
+) -> tuple[str, float, float, int] | None:
+    """Parse a bounded, guest-requested downward tablet-wheel gesture."""
+
+    start = line.find('{"event": "qmp-scroll"')
+    if start < 0:
+        return None
+    try:
+        request = json.loads(line[start:])
+    except json.JSONDecodeError:
+        return None
+    identifier = request.get("request")
+    x = request.get("x_px")
+    y = request.get("y_px")
+    steps = request.get("steps")
+    if (
+        not isinstance(identifier, str)
+        or not identifier
+        or isinstance(x, bool)
+        or isinstance(y, bool)
+        or not isinstance(x, (int, float))
+        or not isinstance(y, (int, float))
+        or not 0 <= float(x) <= 10000
+        or not 0 <= float(y) <= 10000
+        or isinstance(steps, bool)
+        or not isinstance(steps, int)
+        or not 1 <= steps <= 12
+    ):
+        return None
+    return identifier, float(x), float(y), steps
 
 
 def _parse_qmp_key_request(line: str) -> tuple[str, str] | None:

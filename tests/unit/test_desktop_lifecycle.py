@@ -3,6 +3,7 @@
 from unit.support import *  # noqa: F403
 from business.desktop.lifecycle import _validate_rescue_pointer_trace
 from assertions.guest.ui import rescue as rescue_ui
+from assertions.guest.ui import shell as shell_ui
 from assertions.guest.ui import core as ui_core
 
 
@@ -51,6 +52,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         runner.phase_callback = Mock()
         runner.driver = SimpleNamespace(upload=Mock())
         runner._prepare_power_control = Mock(return_value=Path("/tmp/control-key"))
+        runner._login_gdm_over_ssh = Mock()
         runner._ssh = Mock(return_value="poweroff-requested")
         runner._wait_for_power_transition = Mock()
         restored_commands = []
@@ -84,7 +86,6 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             with (
                 patch("business.desktop.lifecycle._power_off"),
                 patch("business.desktop.lifecycle.boot_iso_with_debug_shell"),
-                patch("business.desktop.lifecycle._login_gdm"),
                 patch("business.desktop.lifecycle._run_with_qmp_key_requests", side_effect=run_ui),
                 patch("business.desktop.lifecycle._retrieve_tree"),
                 patch(
@@ -116,6 +117,28 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         vm.start.assert_any_call(attach_iso=True, phase="rescue-live")
         vm.start.assert_any_call(attach_iso=False, phase="rescue-damaged-boot")
         vm.start.assert_any_call(attach_iso=False, phase="rescue-restored")
+        runner._login_gdm_over_ssh.assert_called_once_with(
+            vm, Path("/tmp/control-key"), timeout=120
+        )
+        self.assertEqual(2, vm.stop.call_count)
+
+    def test_rescue_gdm_login_uses_ssh_after_debug_serial_disappears(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        runner.username = "acceptance"
+        runner.password = "secret"
+        runner._ssh = Mock(
+            side_effect=["", "graphical-user=ready\n"]
+        )
+        qmp = SimpleNamespace(
+            send_key=Mock(),
+            type_text=Mock(),
+        )
+        vm = SimpleNamespace(qmp=qmp, serial=None)
+        with patch("business.desktop.lifecycle.time.sleep"):
+            runner._login_gdm_over_ssh(vm, Path("/tmp/key"), timeout=120)
+        qmp.send_key.assert_any_call("ret")
+        qmp.type_text.assert_called_once_with("secret", interval=0.06)
+        self.assertIn("wayland-[0-9]", runner._ssh.call_args.args[2])
 
     def test_rescue_center_requires_every_real_pointer_action(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -128,6 +151,36 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             }) + "\n", encoding="utf-8")
             with self.assertRaisesRegex(TestFailure, "required real pointer"):
                 _validate_rescue_pointer_trace(trace)
+
+    def test_panel_remove_retries_only_when_real_context_menu_is_absent(self):
+        launcher = object()
+        item = object()
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(shell_ui, "dismiss_initial_setup"),
+                patch.object(
+                    shell_ui, "_wait_taskbar_fixture",
+                    side_effect=[launcher, launcher, None],
+                ),
+                patch.object(shell_ui, "request_node_click") as pointer,
+                patch.object(
+                    shell_ui, "_wait_shell_named",
+                    side_effect=[shell_ui.UiFailure("menu absent"), [item]],
+                ),
+                patch.object(shell_ui, "name", return_value="从任务栏中移除"),
+                patch.object(shell_ui, "dump_accessibility"),
+                patch.object(
+                    shell_ui, "activate_shell_context_action",
+                    return_value="从任务栏中移除",
+                ),
+                patch.object(shell_ui, "event"),
+            ):
+                shell_ui.exercise_panel_remove(Path(directory))
+        self.assertEqual(2, pointer.call_count)
+        self.assertEqual(
+            ["panel-remove-context", "panel-remove-context-retry"],
+            [call.args[1] for call in pointer.call_args_list],
+        )
 
     def test_rescue_center_guest_driver_uses_pointer_and_checks_safety_default(self):
         source = (ROOT / "assertions/guest/ui/rescue.py").read_text(
@@ -161,6 +214,62 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         self.assertEqual((190, 56), origin)
         self.assertEqual(640, record.call_args.kwargs["x_px"])
         self.assertEqual(295, record.call_args.kwargs["y_px"])
+
+    def test_rescue_scrolls_offscreen_snapshot_action_before_click(self):
+        window = SimpleNamespace(x=0, y=0, width=900, height=640)
+        hidden = SimpleNamespace(x=32, y=735, width=836, height=56)
+        visible = SimpleNamespace(x=32, y=535, width=836, height=56)
+        frame = SimpleNamespace(get_extents=Mock(return_value=window))
+        target = SimpleNamespace(
+            get_parent=Mock(return_value=frame),
+            get_extents=Mock(return_value=hidden),
+        )
+        requests = []
+
+        def record(kind, **values):
+            requests.append((kind, values))
+            target.get_extents.return_value = visible
+
+        with (
+            patch.object(rescue_ui, "role", side_effect=lambda item: "frame" if item is frame else "list item"),
+            patch.object(rescue_ui, "name", return_value="Manage Btrfs snapshots"),
+            patch.object(rescue_ui, "_rescue_window_origin", return_value=(190, 56)),
+            patch.object(rescue_ui, "event", side_effect=record),
+        ):
+            rescue_ui._scroll_rescue_target_into_view(target)
+        self.assertEqual("qmp-scroll", requests[0][0])
+        self.assertEqual(640, requests[0][1]["x_px"])
+        self.assertEqual(376, requests[0][1]["y_px"])
+        self.assertEqual(4, requests[0][1]["steps"])
+
+    def test_rescue_modal_confirm_button_maps_from_dialog_to_screen(self):
+        dialog = SimpleNamespace(
+            get_extents=Mock(return_value=SimpleNamespace(width=432, height=262)),
+        )
+        shell_dialog = SimpleNamespace(
+            get_extents=Mock(return_value=SimpleNamespace(
+                x=399, y=221, width=482, height=312,
+            )),
+        )
+        button = SimpleNamespace(
+            get_parent=Mock(return_value=dialog),
+            get_extents=Mock(return_value=SimpleNamespace(
+                x=222, y=194, width=190, height=44,
+            )),
+        )
+        with (
+            patch.object(rescue_ui, "role", side_effect=lambda item: "dialog" if item is dialog else "button"),
+            patch.object(rescue_ui, "walk", return_value=(shell_dialog,)),
+            patch.object(rescue_ui, "desktop"),
+            patch.object(rescue_ui, "name", return_value="Wayland window"),
+            patch.object(rescue_ui, "owning_application", return_value="gnome-shell"),
+            patch.object(ui_core, "event") as record,
+        ):
+            origin = rescue_ui._rescue_window_origin(button)
+            ui_core.request_node_click(button, "rescue-confirm-restore", window_origin=origin)
+        self.assertEqual((424, 246), origin)
+        self.assertEqual(741, record.call_args.kwargs["x_px"])
+        self.assertEqual(462, record.call_args.kwargs["y_px"])
 
     def test_factory_network_isolation_survives_every_qemu_command(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -212,7 +321,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                 history.rmdir()
                 with patch("sys.stdout", new_callable=io.StringIO) as output:
                     verify([workload, workload], True)
-                self.assertIn("htop=restored-and-runnable", output.getvalue())
+                self.assertIn("gnome-clocks=restored-and-runnable", output.getvalue())
 
     def test_new_factory_workload_requires_retained_browsable_history(self):
         module = runpy.run_path(str(ROOT / "assertions/guest/factory_reset_workload.py"))
@@ -600,6 +709,54 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         ):
             self.assertIn(contract, helper)
         self.assertNotIn("snapshots-manager-cli status", helper)
+
+    def test_rescue_state_helper_is_valid_and_privileged(self):
+        commands = []
+
+        def run(command, **_kwargs):
+            commands.append(command)
+            return SimpleNamespace(stdout="")
+
+        runner = object.__new__(FeatureSuiteRunner)
+        runner.username = "test-user"
+        runner.btrfs_rollback_oracle = (
+            ROOT / "assertions/guest/btrfs_rollback_oracle.py"
+        )
+        runner._ssh_eventually = lambda *_args, **_kwargs: "ready"
+        vm = SimpleNamespace(
+            serial=SimpleNamespace(
+                upload=lambda *_args, **_kwargs: None,
+                run=run,
+            )
+        )
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "business.desktop.subprocess.run"
+        ):
+            runner._prepare_power_control(vm, Path(directory), "/run/feature")
+
+        payload = commands[0]
+        marker = (
+            "cat > /usr/local/sbin/anduinos-acceptance-rescue-state "
+            "<<'EOF'\n"
+        )
+        helper = payload.split(marker, 1)[1].split("\nEOF\n", 1)[0] + "\n"
+        syntax = subprocess.run(
+            ("bash", "-n"),
+            input=helper,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stdout)
+        self.assertIn("store=/.snapshots/anduinos-btrfs-snapshots-manager", helper)
+        self.assertIn("$store/history/system-lineage.json", helper)
+        self.assertIn("offline-transactions/pending.json", helper)
+        self.assertIn("pre-rollback", helper)
+        self.assertIn(
+            "/usr/local/sbin/anduinos-acceptance-rescue-state\\n'",
+            payload,
+        )
 
     def test_btrfs_protected_state_oracle_rejects_a_broken_fallback(self):
         target = "11111111-1111-4111-8111-111111111111"

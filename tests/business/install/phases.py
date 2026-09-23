@@ -27,6 +27,7 @@ class InstallationPhases:
                 vm,
                 live_entry,
                 live_region,
+                artifacts,
                 persistent=persistent,
                 phase=("live-persistent-first" if persistent else "live-temporary"),
             )
@@ -76,6 +77,7 @@ class InstallationPhases:
                     vm,
                     live_entry,
                     live_region,
+                    artifacts,
                     persistent=True,
                     phase="live-persistent-second",
                 )
@@ -140,6 +142,7 @@ class InstallationPhases:
         vm: QemuVm,
         regional_entry,
         live_region: LiveRegion,
+        artifacts: Path,
         *,
         persistent: bool,
         phase: str,
@@ -171,6 +174,7 @@ class InstallationPhases:
             kernel_arguments=entry.kernel_arguments,
             extra_kernel_arguments=extra_arguments,
             spice_socket=vm.spice_socket,
+            scratch_dir=artifacts,
         )
         vm.serial.timeout = self.options.command_timeout_seconds
         vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
@@ -614,6 +618,7 @@ fi
         self._boot_live_session(
             vm, self._live_grub_entry(scenario),
             scenario_live_region(self.defaults, scenario),
+            artifacts,
             persistent=False, phase="feature-base-preparation",
         )
         assert vm.serial is not None

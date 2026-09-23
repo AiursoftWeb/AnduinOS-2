@@ -56,6 +56,7 @@ def boot_iso_with_debug_shell(
     kernel_arguments: tuple[str, ...] = (),
     extra_kernel_arguments: tuple[str, ...] = (),
     spice_socket: Path | None = None,
+    scratch_dir: Path | None = None,
 ) -> None:
     """Edit and boot the ISO's real locale menuentry.
 
@@ -81,7 +82,7 @@ def boot_iso_with_debug_shell(
     ) + debug_kernel_arguments(architecture)
     if uses_graphical_grub_synchronization(architecture):
         time.sleep(firmware_delay)
-        editor = _GraphicalGrubMenuEditor(qmp)
+        editor = _GraphicalGrubMenuEditor(qmp, scratch_dir=scratch_dir)
         try:
             editor.wait_for_top_menu(timeout=30)
             editor.cancel_timeout()
@@ -306,9 +307,11 @@ class _ArmGraphicalGrubCommandLine:
 class _GraphicalGrubMenuEditor:
     """Synchronize menu/editor transitions through QEMU screendumps."""
 
-    def __init__(self, qmp: QmpClient):
+    def __init__(self, qmp: QmpClient, *, scratch_dir: Path | None = None):
         self.qmp = qmp
-        self._temporary = tempfile.TemporaryDirectory(prefix="anduinos-grub-menu-")
+        self._temporary = tempfile.TemporaryDirectory(
+            prefix="anduinos-grub-menu-", dir=scratch_dir,
+        )
         self._counter = 0
         self.current_frame: Path | None = None
         self._editor_cursor_y: int | None = None

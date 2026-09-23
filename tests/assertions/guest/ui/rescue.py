@@ -42,10 +42,10 @@ def _named_descendant(container, candidate_name: str, candidate_role: str = ""):
 
 
 def _rescue_window_origin(target) -> tuple[float, float]:
-    """Locate a GTK Wayland window via GNOME Shell's screen geometry."""
+    """Locate a GTK Wayland frame or modal dialog via Shell geometry."""
 
     frame = target
-    while frame is not None and role(frame) != "frame":
+    while frame is not None and role(frame) not in {"frame", "dialog"}:
         frame = _parent(frame)
     if frame is None:
         raise UiFailure("Rescue control has no accessible window frame")
@@ -81,6 +81,47 @@ def _rescue_window_origin(target) -> tuple[float, float]:
             f"found {len(matches)}"
         )
     return matches[0]
+
+
+def _scroll_rescue_target_into_view(target) -> None:
+    """Expose an off-screen row before asking QEMU to click its coordinates."""
+
+    frame = target
+    while frame is not None and role(frame) != "frame":
+        frame = _parent(frame)
+    if frame is None:
+        raise UiFailure("Rescue control has no accessible window frame")
+
+    def inside_window() -> bool:
+        window = frame.get_extents(Atspi.CoordType.WINDOW)
+        bounds = target.get_extents(Atspi.CoordType.WINDOW)
+        return (
+            bounds.width >= 2
+            and bounds.height >= 2
+            and bounds.x >= 0
+            and bounds.y >= 0
+            and bounds.x + bounds.width <= window.width
+            and bounds.y + bounds.height <= window.height
+        )
+
+    for attempt in range(4):
+        if inside_window():
+            return
+        window = frame.get_extents(Atspi.CoordType.WINDOW)
+        origin_x, origin_y = _rescue_window_origin(target)
+        event(
+            "qmp-scroll",
+            request=f"rescue-scroll-snapshots-{attempt}",
+            x_px=round(origin_x + window.width / 2, 3),
+            y_px=round(origin_y + window.height / 2, 3),
+            steps=4,
+        )
+        deadline = time.monotonic() + 4
+        while time.monotonic() < deadline:
+            if inside_window():
+                return
+            time.sleep(0.1)
+    raise UiFailure(f"Rescue control {name(target)!r} remains outside its window")
 
 
 def restore_offline_system(
@@ -126,6 +167,7 @@ def restore_offline_system(
         timeout=180,
         require_enabled=True,
     )
+    _scroll_rescue_target_into_view(snapshots)
     request_node_click(
         snapshots,
         "rescue-open-snapshots",
