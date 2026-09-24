@@ -23,7 +23,7 @@ class DracutLiveContractTests(unittest.TestCase):
     def test_every_live_entry_uses_the_dracut_contract(self) -> None:
         build = (ROOT / "build.sh").read_text()
         common = (
-            "root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS "
+            "root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS "
             "rd.live.squashimg=rootfs.squashfs rd.overlay "
             "rd.anduinos.live=1"
         )
@@ -135,6 +135,9 @@ class DracutLiveContractTests(unittest.TestCase):
             )
         )
         _validate_dracut_live_contract("\n".join(entries))
+        _validate_dracut_live_contract("\n".join(entries), expected_label="anduinos")
+        with self.assertRaisesRegex(ConfigurationError, "ISO volume label"):
+            _validate_dracut_live_contract("\n".join(entries), expected_label="OTHER")
         with self.assertRaises(ConfigurationError):
             _validate_dracut_live_contract("\n".join(entries).replace(
                 "rd.overlay=LABEL=ANDUINOS-PERSIST", "persistent"

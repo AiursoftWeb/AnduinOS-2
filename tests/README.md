@@ -1,6 +1,6 @@
 # ISO acceptance tests
 
-Run the complete release test from the repository root:
+Run the complete release test below; `make test TEST_ARGS="--live-usb-only --no-tui"` selects only the AMD64 Rufus ISO-mode regression (default/custom FAT labels, UEFI, Live login and media integrity; not a release verdict):
 
 ```bash
 make test

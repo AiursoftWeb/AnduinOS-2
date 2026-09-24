@@ -12,6 +12,17 @@ export SCRIPT_DIR
 source "$SCRIPT_DIR/shared.sh"
 source "$SCRIPT_DIR/args.sh"
 
+# Do NOT derive this label from TARGET_NAME. Rufus ISO mode replaces the old
+# volume-label substring across matching boot command lines, not just CDLABEL
+# values. With label "anduinos", FAT label uppercasing also turns
+# rd.anduinos.live=1 into rd.ANDUINOS.live=1. Our case-sensitive Live hooks then
+# skip BOTH media verification and Live-user setup, leaving a GDM login prompt.
+# "ANDUINOS" alone is not sufficient: a custom USB label would also rewrite
+# ANDUINOS-PERSIST. Keep the media label distinct from parameter names and the
+# persistence label; changing the USB label must only change media references.
+# Regression coverage: make test TEST_ARGS="--live-usb-only --no-tui".
+LIVE_MEDIA_LABEL="AOS_LIVE"
+
 # Map Debian arch name to GRUB target name (amd64 -> x86_64, arm64 -> arm64)
 case "$TARGET_ARCH" in
     amd64) GRUB_EFI_TARGET="x86_64-efi" ;;
@@ -223,7 +234,7 @@ function build_iso() {
     TOGO_TEXT="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
     # Our Live checker owns progress/recovery. Upstream rd.live.check hides
     # Plymouth and waits twelve hours on failure; never enable that path here.
-    LIVE_BOOT_ARGS="root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
+    LIVE_BOOT_ARGS="root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
 
     # Build the Try-mode submenu from the independent Live regional policy.
     # The selected region supplies useful locale, timezone and physical-XKB
@@ -291,7 +302,7 @@ submenu "Advanced Options..." {
     }
     menuentry "$TOGO_TEXT" {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz root=live:CDLABEL=$TARGET_NAME rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
+        linux   /LiveOS/vmlinuz root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
         initrd  /LiveOS/initrd
     }
     menuentry "Check installation media for defects (Integrity Check)" {
@@ -403,7 +414,7 @@ EOF
             # this avoids installing a foreign shim package that conflicts
             # with an amd64 build host's own bootloader.
             cat > arm64-grub.cfg <<EOF
-search --no-floppy --label --set=anduinos_iso $TARGET_NAME
+search --no-floppy --label --set=anduinos_iso $LIVE_MEDIA_LABEL
 set prefix=(\$anduinos_iso)/boot/grub
 configfile \$prefix/grub.cfg
 EOF
@@ -461,11 +472,14 @@ EOF
     judge "Create .disk/info"
 
     print_ok "Creating md5sum.txt..."
-    if [ "$TARGET_ARCH" = "amd64" ]; then
-        sudo /bin/bash -c "(find . -type f -print0 | xargs -0 md5sum | grep -v -e 'md5sum.txt' -e 'bios.img' -e 'efiboot.img' > md5sum.txt)"
-    else
-        sudo /bin/bash -c "(find . -type f -print0 | xargs -0 md5sum | grep -v -e 'md5sum.txt' -e 'efiboot.img' > md5sum.txt)"
-    fi
+    # ISO-mode writers legitimately rewrite this config's volume references.
+    # Hashing it here would falsely report corruption after a custom-label
+    # rewrite, even with the namespace collision above fixed. Exclude only this
+    # mutable config, not all .cfg files or any system payload. Kernel, initrd,
+    # SquashFS and package manifest remain checked; whole-ISO/DD checks still
+    # cover this config as well. This exception does not fix mangled boot keys:
+    # media verification cannot run if rd.anduinos.live itself was rewritten.
+    sudo /bin/bash -c 'find . -type f ! -name md5sum.txt ! -name bios.img ! -name efiboot.img ! -path ./isolinux/grub.cfg -print0 | xargs -0 md5sum > md5sum.txt'
     judge "Create md5sum.txt"
 
     print_ok "Creating iso image on $SCRIPT_DIR/$TARGET_NAME.iso (arch: $TARGET_ARCH)..."
@@ -476,7 +490,7 @@ EOF
             -r -J \
             -iso-level 3 \
             -full-iso9660-filenames \
-            -volid "$TARGET_NAME" \
+            -volid "$LIVE_MEDIA_LABEL" \
             -partition_offset 16 \
             -eltorito-boot boot/grub/bios.img \
                 -no-emul-boot \
@@ -504,7 +518,7 @@ EOF
             -r -J \
             -iso-level 3 \
             -full-iso9660-filenames \
-            -volid "$TARGET_NAME" \
+            -volid "$LIVE_MEDIA_LABEL" \
             -partition_offset 16 \
             -e EFI/efiboot.img \
             -no-emul-boot \

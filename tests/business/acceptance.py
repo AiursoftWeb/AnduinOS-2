@@ -55,6 +55,21 @@ def main(argv: list[str] | None = None) -> int:
             uefi_vars_no_secure_boot=args.uefi_vars,
             uefi_vars_secure_boot=args.secure_boot_vars,
         )
+        if architecture is Architecture.AMD64 or args.live_usb_only:
+            from .live_usb import run_live_usb
+
+            usb_artifacts = (
+                args.artifacts.with_name(args.artifacts.name + '-live-usb') if args.artifacts else
+                Path('test-results') / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ') + '-live-usb')
+            )
+            usb_passed = run_live_usb(
+                inspection, usb_artifacts, overrides,
+                timeout=args.boot_timeout or matrix.defaults.boot_timeout_seconds,
+                memory=args.memory or 4096, cpus=args.cpus or 2,
+                delay=args.firmware_delay if args.firmware_delay is not None else 2,
+            )
+            if args.live_usb_only or not usb_passed:
+                return 0 if usb_passed else 1
         _preflight(architecture, selected, overrides, suites)
         persistent_live_bytes = (
             inspection.path.stat().st_size
@@ -251,6 +266,10 @@ def _parser() -> argparse.ArgumentParser:
         choices=tuple(item.value for item in Architecture),
     )
     parser.add_argument("--artifacts", type=Path)
+    parser.add_argument(
+        '--live-usb-only', action='store_true',
+        help='run only the AMD64 Rufus ISO-mode USB boot regression (default and custom FAT labels)',
+    )
     parser.add_argument(
         "--no-tui",
         action="store_true",

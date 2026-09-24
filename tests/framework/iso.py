@@ -157,7 +157,7 @@ def _validate_efi_payload(path: Path, architecture: Architecture) -> None:
             _extract_fat_member(image, "::/EFI/BOOT/grub.cfg", bridge)
             content = bridge.read_text(encoding="utf-8", errors="strict")
             required = (
-                "search --no-floppy --label --set=anduinos_iso anduinos",
+                f"search --no-floppy --label --set=anduinos_iso {volume_label(path)}",
                 "set prefix=($anduinos_iso)/boot/grub",
                 "configfile $prefix/grub.cfg",
             )
@@ -203,11 +203,11 @@ def _read_live_entries(
         destination = Path(directory) / "grub.cfg"
         _extract(path, "/boot/grub/grub.cfg", destination)
         content = destination.read_text(encoding="utf-8", errors="replace")
-    _validate_dracut_live_contract(content)
+    _validate_dracut_live_contract(content, expected_label=volume_label(path))
     return _parse_live_entries(content), _parse_persistent_entry(content)
 
 
-def _validate_dracut_live_contract(content: str) -> None:
+def _validate_dracut_live_contract(content: str, *, expected_label: str | None = None) -> None:
     if any(value in content for value in ("boot=casper", "/casper/")):
         raise ConfigurationError("ISO GRUB still contains the retired Live ABI")
     linux_lines = re.findall(
@@ -225,12 +225,15 @@ def _validate_dracut_live_contract(content: str) -> None:
 
     parsed = [tuple(shlex.split(line)) for line in linux_lines]
     required = {
-        "root=live:CDLABEL=anduinos",
         "rd.live.dir=LiveOS",
         "rd.live.squashimg=rootfs.squashfs",
         "rd.anduinos.live=1",
     }
     for arguments in parsed:
+        if sum(bool(re.fullmatch(r"root=live:CDLABEL=[A-Za-z0-9_-]+", arg)) for arg in arguments) != 1:
+            raise ConfigurationError("A Live entry has no unique media label")
+        if expected_label is not None and f"root=live:CDLABEL={expected_label}" not in arguments:
+            raise ConfigurationError("A Live entry does not reference the ISO volume label")
         if not required <= set(arguments):
             raise ConfigurationError("A Live entry is missing the Dracut root contract")
         if "rd.overlay" not in arguments and not any(
@@ -374,3 +377,15 @@ def _boot_report(path: Path) -> str:
     if result.returncode != 0:
         raise ConfigurationError("Cannot inspect ISO boot records")
     return result.stdout
+
+
+def volume_label(path: Path) -> str:
+    result = subprocess.run(
+        ("xorriso", "-indev", str(path), "-pvd_info"),
+        check=True, text=True, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, timeout=60,
+    )
+    match = re.search(r"^Volume Id\s*:\s*(\S+)\s*$", result.stdout, re.MULTILINE)
+    if match is None or not re.fullmatch(r"[A-Za-z0-9_-]+", match[1]):
+        raise ConfigurationError("ISO has no supported media label")
+    return match[1]

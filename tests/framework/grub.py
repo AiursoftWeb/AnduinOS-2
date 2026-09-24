@@ -116,7 +116,7 @@ def boot_iso_with_debug_shell(
     )
     if not arguments:
         arguments = (
-            "root=live:CDLABEL=anduinos",
+            "root=live:CDLABEL=AOS_LIVE",
             "rd.live.dir=LiveOS",
             "rd.live.squashimg=rootfs.squashfs",
             "rd.overlay",

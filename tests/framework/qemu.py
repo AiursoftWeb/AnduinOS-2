@@ -45,6 +45,7 @@ class QemuConfig:
     file_size_limit_bytes: int | None = None
     backing_disk: Path | None = None
     live_media: Path | None = None
+    live_media_usb: bool = False
     restrict_network: bool = False
 
 
@@ -239,7 +240,8 @@ class QemuVm:
                     ),
                     "-device",
                     (
-                        "scsi-hd,bus=scsi0.0,drive=live-media,"
+                        ("usb-storage,bus=xhci.0,drive=live-media," if cfg.live_media_usb else
+                         "scsi-hd,bus=scsi0.0,drive=live-media,") +
                         "serial=ANDUINOS-TEST-LIVE,bootindex=1"
                     ),
                 ]
