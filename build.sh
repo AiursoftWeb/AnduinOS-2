@@ -325,11 +325,6 @@ submenu "Advanced Options..." --class recovery {
         linux   /LiveOS/vmlinuz root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
         initrd  /LiveOS/initrd
     }
-    menuentry "Check installation media for defects (Integrity Check)" --class help {
-        set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS quiet splash ---
-        initrd  /LiveOS/initrd
-    }
 }
 
 if [ "\$grub_platform" == "efi" ]; then

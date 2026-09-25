@@ -72,7 +72,7 @@ def boot_iso_with_debug_shell(
     top_index, child_index = menu_path
     if not (
         (top_index == 0 and 0 <= child_index < 28)
-        or (top_index == 1 and 0 <= child_index < 3)
+        or (top_index == 1 and 0 <= child_index < 2)
     ):
         raise ProtocolError(f"Unsafe ISO GRUB menu path: {menu_path}")
     suffix = (

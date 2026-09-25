@@ -255,10 +255,12 @@ def _validate_dracut_live_contract(content: str, *, expected_label: str | None =
     initrd_lines = re.findall(
         r"^\s*initrd\s+(\S+)\s*$", content, re.MULTILINE
     )
-    if len(linux_lines) != 31 or len(initrd_lines) != len(linux_lines):
+    if len(linux_lines) != 30 or len(initrd_lines) != len(linux_lines):
         raise ConfigurationError(
-            "ISO GRUB must contain 28 regional and 3 advanced Live entries"
+            "ISO GRUB must contain 28 regional and 2 advanced Live entries"
         )
+    if "Check installation media for defects" in content:
+        raise ConfigurationError("ISO GRUB retains a redundant manual media-check entry")
     if set(initrd_lines) != {"/LiveOS/initrd"}:
         raise ConfigurationError("ISO GRUB references an unexpected Live initrd")
 

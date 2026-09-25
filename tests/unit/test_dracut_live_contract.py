@@ -35,6 +35,7 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertNotIn("rd.anduinos.media-check=", build)
         self.assertEqual(build.count("-partition_offset 16"), 2)
         self.assertIn("implantisomd5 --force", build)
+        self.assertNotIn("Check installation media for defects", build)
         self.assertNotIn("boot=casper", build)
 
     def test_dedicated_live_initrd_recipe_only_builds_the_image(self) -> None:
@@ -130,8 +131,6 @@ class DracutLiveContractTests(unittest.TestCase):
                 f"linux /LiveOS/vmlinuz {common} "
                 "rd.overlay=LABEL=ANDUINOS-PERSIST "
                 "rd.live.overlay.cowfs=ext4\ninitrd /LiveOS/initrd",
-                f"linux /LiveOS/vmlinuz {common} rd.overlay\n"
-                "initrd /LiveOS/initrd",
             )
         )
         _validate_dracut_live_contract("\n".join(entries))
