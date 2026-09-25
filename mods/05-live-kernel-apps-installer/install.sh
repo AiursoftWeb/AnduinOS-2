@@ -45,6 +45,13 @@ apt install -y \
     --install-recommends
 judge "Install anduinos-desktop"
 
+# A standalone, removable theme package. Keep it installed on the target so
+# the installed GRUB uses the same artwork; no desktop meta-package depends on it.
+print_ok "Installing the optional AnduinOS GRUB theme..."
+apt install -y anduinos-hyperfluent-grub-theme \
+    --no-install-recommends
+judge "Install anduinos-hyperfluent-grub-theme"
+
 print_ok "Installing AnduinOS native installer..."
 apt install -y anduinos-installer-beta \
     --no-install-recommends

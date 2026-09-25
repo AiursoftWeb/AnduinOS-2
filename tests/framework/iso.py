@@ -71,6 +71,7 @@ def inspect_iso(path: Path, expected_architecture: Architecture) -> IsoInspectio
         )
     report = _boot_report(resolved)
     _validate_efi_payload(resolved, architecture)
+    _validate_live_theme(resolved)
     live_entries, persistent_entry = _read_live_entries(resolved)
     has_bios = re.search(r"El Torito boot img\s*:\s*\S+\s+BIOS\b", report) is not None
     has_uefi = re.search(r"El Torito boot img\s*:\s*\S+\s+UEFI\b", report) is not None
@@ -204,7 +205,45 @@ def _read_live_entries(
         _extract(path, "/boot/grub/grub.cfg", destination)
         content = destination.read_text(encoding="utf-8", errors="replace")
     _validate_dracut_live_contract(content, expected_label=volume_label(path))
+    required_theme_lines = (
+        "if loadfont unicode ; then",
+        "source /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg",
+    )
+    if any(line not in content for line in required_theme_lines):
+        raise ConfigurationError("ISO GRUB does not load the packaged theme safely")
     return _parse_live_entries(content), _parse_persistent_entry(content)
+
+
+def _validate_live_theme(path: Path) -> None:
+    """The bootloader must read the packaged artwork before SquashFS exists."""
+
+    theme_root = "/boot/grub/themes/anduinos-hyperfluent"
+    with tempfile.TemporaryDirectory(prefix="anduinos-theme-inspect-") as directory:
+        root = Path(directory)
+        manifest = root / "md5sum.txt"
+        _extract(path, "/md5sum.txt", manifest)
+        checksums = manifest.read_text(encoding="utf-8", errors="strict")
+        packages = root / "filesystem.manifest"
+        _extract(path, "/LiveOS/filesystem.manifest", packages)
+        if re.search(r"^anduinos-hyperfluent-grub-theme\s+", packages.read_text(encoding="utf-8"), re.MULTILINE) is None:
+            raise ConfigurationError("Live root does not contain the removable GRUB theme package")
+        for name in ("theme.txt", "background.png", "live-grub.cfg"):
+            source = f"{theme_root}/{name}"
+            destination = root / name
+            _extract(path, source, destination)
+            digest = hashlib.md5(destination.read_bytes()).hexdigest()
+            if f"{digest}  .{source}" not in checksums:
+                raise ConfigurationError(
+                    f"ISO theme asset is absent from the integrity manifest: {source}"
+                )
+        theme = (root / "theme.txt").read_text(encoding="utf-8", errors="strict")
+        live_config = (root / "live-grub.cfg").read_text(
+            encoding="utf-8", errors="strict"
+        )
+        if ".pf2" in theme or ".pf2" in live_config:
+            raise ConfigurationError("ISO theme attempts an external Secure Boot font")
+        if "if insmod gfxmenu" not in live_config or "if insmod png" not in live_config:
+            raise ConfigurationError("ISO theme has no recoverable graphics fallback")
 
 
 def _validate_dracut_live_contract(content: str, *, expected_label: str | None = None) -> None:
@@ -260,7 +299,7 @@ def _validate_dracut_live_contract(content: str, *, expected_label: str | None =
 def _parse_live_entries(content: str) -> tuple[LiveGrubEntry, ...]:
     entries: list[LiveGrubEntry] = []
     pattern = re.compile(
-        r'^\s*menuentry\s+"(?P<name>[^"]+)"\s*\{(?P<body>.*?)^\s*\}',
+        r'^\s*menuentry\s+"(?P<name>[^"]+)"(?:\s+--class\s+[A-Za-z0-9_.-]+)*\s*\{(?P<body>.*?)^\s*\}',
         re.MULTILINE | re.DOTALL,
     )
     for match in pattern.finditer(content):
@@ -306,7 +345,7 @@ def _parse_live_entries(content: str) -> tuple[LiveGrubEntry, ...]:
 def _parse_persistent_entry(content: str) -> PersistentLiveGrubEntry:
     entries: list[PersistentLiveGrubEntry] = []
     pattern = re.compile(
-        r'^\s*menuentry\s+"(?P<name>[^"]+)"\s*\{(?P<body>.*?)^\s*\}',
+        r'^\s*menuentry\s+"(?P<name>[^"]+)"(?:\s+--class\s+[A-Za-z0-9_.-]+)*\s*\{(?P<body>.*?)^\s*\}',
         re.MULTILINE | re.DOTALL,
     )
     for match in pattern.finditer(content):

@@ -211,6 +211,17 @@ function prepare_live_grub_font() {
     judge "Prepare readable Live GRUB font"
 }
 
+function prepare_live_grub_theme() {
+    local source_dir="new_building_os/usr/share/grub/themes/anduinos-hyperfluent"
+    if [ ! -s "$source_dir/theme.txt" ] || [ ! -s "$source_dir/background.png" ] || [ ! -s "$source_dir/live-grub.cfg" ]; then
+        print_error "Installed GRUB theme package is incomplete: $source_dir"
+        exit 1
+    fi
+    mkdir -p image/boot/grub/themes
+    cp -r "$source_dir" image/boot/grub/themes/
+    judge "Copy packaged GRUB theme to Live ISO"
+}
+
 function build_iso() {
     print_ok "Building ISO image..."
 
@@ -262,7 +273,7 @@ function build_iso() {
         _LIVE_REGION_COUNT=$((_LIVE_REGION_COUNT + 1))
 
         _TRY_LOCALE_ENTRIES="$_TRY_LOCALE_ENTRIES
-    menuentry \"$_label\" {
+    menuentry \"$_label\" --class lang {
         set gfxpayload=auto
         linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} rd.anduinos.keyboard=${_kbd} quiet splash ---
         initrd  /LiveOS/initrd
@@ -281,31 +292,40 @@ set gfxmode=1440x900,1280x800,1280x720,1024x768,auto
 insmod all_video
 insmod gfxterm
 insmod font
-if loadfont /boot/grub/fonts/anduinos-unicode-28.pf2 ; then
+set theme_font_ready=0
+if loadfont unicode ; then
+    set theme_font_ready=1
+    terminal_output gfxterm
+elif loadfont /boot/grub/fonts/anduinos-unicode-28.pf2 ; then
+    set theme_font_ready=1
     terminal_output gfxterm
 elif loadfont /isolinux/anduinos-unicode-28.pf2 ; then
+    set theme_font_ready=1
     terminal_output gfxterm
+fi
+if [ -f /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg ]; then
+    source /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg
 fi
 
 set default="0"
 set timeout=10
 
-submenu "$TRY_TEXT" {
+submenu "$TRY_TEXT" --class anduinos {
 $_TRY_LOCALE_ENTRIES
 }
 
-submenu "Advanced Options..." {
-    menuentry "$TRY_TEXT (Safe Graphics)" {
+submenu "Advanced Options..." --class recovery {
+    menuentry "$TRY_TEXT (Safe Graphics)" --class driver {
         set gfxpayload=auto
         linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS nomodeset ---
         initrd  /LiveOS/initrd
     }
-    menuentry "$TOGO_TEXT" {
+    menuentry "$TOGO_TEXT" --class anduinos {
         set gfxpayload=auto
         linux   /LiveOS/vmlinuz root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
         initrd  /LiveOS/initrd
     }
-    menuentry "Check installation media for defects (Integrity Check)" {
+    menuentry "Check installation media for defects (Integrity Check)" --class help {
         set gfxpayload=auto
         linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS quiet splash ---
         initrd  /LiveOS/initrd
@@ -313,10 +333,10 @@ submenu "Advanced Options..." {
 }
 
 if [ "\$grub_platform" == "efi" ]; then
-    menuentry "Boot from next volume" {
+    menuentry "Boot from next volume" --class find.efi {
         exit 1
     }
-    menuentry "UEFI Firmware Settings" {
+    menuentry "UEFI Firmware Settings" --class efi {
         fwsetup
     }
 fi
@@ -455,8 +475,8 @@ EOF
         grub-mkstandalone \
             --format=i386-pc \
             --output=isolinux/core.img \
-            --install-modules="linux16 linux normal iso9660 biosdisk memdisk search tar ls font gfxterm all_video" \
-            --modules="linux16 linux normal iso9660 biosdisk search font gfxterm all_video" \
+            --install-modules="linux16 linux normal iso9660 biosdisk memdisk search tar ls font gfxterm gfxmenu png all_video" \
+            --modules="linux16 linux normal iso9660 biosdisk search font gfxterm gfxmenu png all_video" \
             --locales="" \
             --fonts="" \
             "boot/grub/grub.cfg=isolinux/grub.cfg"
@@ -572,5 +592,6 @@ run_chroot
 umount_folders
 prepare_iso_directory
 prepare_live_grub_font
+prepare_live_grub_theme
 build_iso
 echo "$0 - Build completed."

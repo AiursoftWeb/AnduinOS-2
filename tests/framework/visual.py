@@ -28,15 +28,35 @@ class GrubEditorLayout:
     top: int
     bottom: int
     visible_command_lines: int
+    left: int = 0
+    right: int = 0
 
 
 def grub_frame_difference(first: Path, second: Path) -> int:
     """Count changed foreground pixels while ignoring color-only firmware noise."""
 
-    before_width, before_height, before = _read_ppm_grayscale(first)
-    after_width, after_height, after = _read_ppm_grayscale(second)
+    before_width, before_height, before_rgb = _read_ppm_rgb(first)
+    after_width, after_height, after_rgb = _read_ppm_rgb(second)
     if (before_width, before_height) != (after_width, after_height):
         return before_width * before_height
+    if _is_hyperfluent_frame(before_width, before_height, before_rgb):
+        # The themed selection bar is gray on dark blue: its movement may not
+        # cross the stock menu's foreground threshold of 96. Include both the
+        # menu and centered editor, but omit the independently ticking footer.
+        left, right = before_width * 6 // 100, before_width * 76 // 100
+        top, bottom = before_height * 24 // 100, before_height * 77 // 100
+        changed = 0
+        for y in range(top, bottom):
+            for x in range(left, right):
+                offset = (y * before_width + x) * 3
+                if max(
+                    abs(before_rgb[offset + channel] - after_rgb[offset + channel])
+                    for channel in range(3)
+                ) >= 18:
+                    changed += 1
+        return changed
+    before = before_rgb[0::3]
+    after = after_rgb[0::3]
     first_mask = bytes(value >= 96 for value in before)
     second_mask = bytes(value >= 96 for value in after)
     return sum(left != right for left, right in zip(first_mask, second_mask, strict=True))
@@ -45,9 +65,12 @@ def grub_frame_difference(first: Path, second: Path) -> int:
 def grub_menu_layout(frame: Path) -> GrubMenuLayout | None:
     """Return semantic menu geometry; editor and firmware frames return None."""
 
-    width, height, grayscale = _read_ppm_grayscale(frame)
+    width, height, rgb = _read_ppm_rgb(frame)
     if width < 320 or height < 200:
         return None
+    if _is_hyperfluent_frame(width, height, rgb):
+        return _hyperfluent_menu_layout(width, height, rgb)
+    grayscale = rgb[0::3]
     if sum(value <= 48 for value in grayscale) < width * height * 3 // 4:
         return None
     wide_rows: list[int] = []
@@ -94,7 +117,10 @@ def grub_menu_layout(frame: Path) -> GrubMenuLayout | None:
 def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
     """Return a semantic editor layout; blank, menu, and boot frames fail."""
 
-    width, height, grayscale = _read_ppm_grayscale(frame)
+    width, height, rgb = _read_ppm_rgb(frame)
+    if _is_hyperfluent_frame(width, height, rgb):
+        return _hyperfluent_editor_layout(width, height, rgb)
+    grayscale = rgb[0::3]
     wide_rows = [
         y
         for y in range(height * 7 // 8)
@@ -136,23 +162,28 @@ def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
         top=top,
         bottom=bottom,
         visible_command_lines=len(command_bands),
+        left=width // 40,
+        right=width - width // 40,
     )
 
 
 def grub_editor_left_cursor_y(frame: Path) -> int | None:
-    """Locate stock GRUB's small underline cursor in the left command column."""
+    """Locate GRUB's underline cursor beside the active editor's left edge."""
 
     layout = grub_editor_layout(frame)
     if layout is None:
         return None
     width, _height, grayscale = _read_ppm_grayscale(frame)
+    themed = layout.left > width // 8
+    scan_left = layout.left if themed else 0
+    scan_right = min(width, scan_left + width // 16)
     minimum_width = max(6, width // 240)
     maximum_width = max(24, width // 40)
     candidates: list[tuple[int, int, int]] = []
     for y in range(layout.top + 4, layout.bottom - 4):
         row = grayscale[y * width : (y + 1) * width]
         start: int | None = None
-        for x in range(width // 16):
+        for x in range(scan_left, scan_right):
             painted = row[x] >= 96
             if painted and start is None:
                 start = x
@@ -163,7 +194,7 @@ def grub_editor_left_cursor_y(frame: Path) -> int | None:
                 start = None
     groups: dict[tuple[int, int], list[int]] = {}
     for left, right, y in candidates:
-        if left <= width // 35:
+        if left <= (layout.left + width // 35 if themed else width // 35):
             groups.setdefault((left, right), []).append(y)
     candidates: list[tuple[int, int, int]] = []
     for (left, right), rows in groups.items():
@@ -195,7 +226,112 @@ def _integer_bands(values: list[int], *, maximum_gap: int) -> list[tuple[int, in
     return [(band[0], band[-1]) for band in bands]
 
 
+def _is_hyperfluent_frame(width: int, height: int, rgb: bytes) -> bool:
+    """Identify the packaged blue artwork, not a generic dark firmware page."""
+
+    if width < 640 or height < 400:
+        return False
+    for x_percent, y_percent in ((85, 50), (75, 55), (82, 65)):
+        offset = ((height * y_percent // 100) * width + width * x_percent // 100) * 3
+        red, green, blue = rgb[offset : offset + 3]
+        if blue >= 95 and blue >= red + 65 and blue >= green + 35:
+            return True
+    return False
+
+
+def _hyperfluent_menu_layout(width: int, height: int, rgb: bytes) -> GrubMenuLayout | None:
+    """Recognize visible rows and the selection bar in HyperFluent's viewport."""
+
+    top, bottom = height * 40 // 100, height * 77 // 100
+    left, right = width * 11 // 100, width * 44 // 100
+    text_rows: list[int] = []
+    for y in range(top, bottom):
+        bright = 0
+        for x in range(left, right):
+            offset = (y * width + x) * 3
+            if min(rgb[offset : offset + 3]) >= 145:
+                bright += 1
+        if bright >= max(5, width // 240):
+            text_rows.append(y)
+    entries = [
+        band for band in _integer_bands(text_rows, maximum_gap=2)
+        if 6 <= band[1] - band[0] + 1 <= 30
+    ]
+    if not 2 <= len(entries) <= 7:
+        return None
+
+    selection_rows: list[int] = []
+    sample_x = width * 44 // 100
+    for y in range(top, bottom):
+        offset = (y * width + sample_x) * 3
+        red, green, blue = rgb[offset : offset + 3]
+        if 38 <= red <= 110 and 45 <= green <= 130 and 55 <= blue <= 150:
+            selection_rows.append(y)
+    selections = [
+        band for band in _integer_bands(selection_rows, maximum_gap=1)
+        if 18 <= band[1] - band[0] + 1 <= 65
+    ]
+    if len(selections) != 1:
+        return None
+    highlight_center = sum(selections[0]) // 2
+    if not any(abs(highlight_center - sum(band) // 2) <= 25 for band in entries):
+        return None
+    return GrubMenuLayout(
+        top=height * 39 // 100,
+        bottom=height * 81 // 100,
+        highlight_center=highlight_center,
+        visible_unselected_entries=len(entries) - 1,
+    )
+
+
+def _hyperfluent_editor_layout(width: int, height: int, rgb: bytes) -> GrubEditorLayout | None:
+    """Recognize GRUB's centered editor overlay on top of the theme."""
+
+    border_rows: list[tuple[int, int, int]] = []
+    for y in range(height // 4, height * 3 // 4):
+        pixels: list[int] = []
+        for x in range(width // 4, width * 3 // 4):
+            offset = (y * width + x) * 3
+            red, green, blue = rgb[offset : offset + 3]
+            if min(red, green, blue) >= 145 and max(red, green, blue) - min(red, green, blue) <= 20:
+                pixels.append(x)
+        if len(pixels) >= width * 2 // 5:
+            border_rows.append((y, pixels[0], pixels[-1]))
+    border_bands = _integer_bands([row[0] for row in border_rows], maximum_gap=0)
+    if len(border_bands) != 2:
+        return None
+    top, bottom = border_bands[0][0], border_bands[1][1]
+    left = min(row[1] for row in border_rows)
+    right = max(row[2] for row in border_rows)
+    if bottom - top < height // 5:
+        return None
+    active_rows: list[int] = []
+    for y in range(top + 4, bottom - 4):
+        bright = 0
+        for x in range(left + 4, right - 4):
+            offset = (y * width + x) * 3
+            if min(rgb[offset : offset + 3]) >= 96:
+                bright += 1
+        if bright >= max(3, width // 1000):
+            active_rows.append(y)
+    command_bands = _integer_bands(active_rows, maximum_gap=2)
+    if not 3 <= len(command_bands) <= 12:
+        return None
+    return GrubEditorLayout(
+        top=top,
+        bottom=bottom,
+        visible_command_lines=len(command_bands),
+        left=left,
+        right=right,
+    )
+
+
 def _read_ppm_grayscale(path: Path) -> tuple[int, int, bytes]:
+    width, height, rgb = _read_ppm_rgb(path)
+    return width, height, rgb[0::3]
+
+
+def _read_ppm_rgb(path: Path) -> tuple[int, int, bytes]:
     """Read QEMU's P6 screendump without invoking an image-codec extension."""
 
     try:
@@ -246,7 +382,7 @@ def _read_ppm_grayscale(path: Path) -> tuple[int, int, bytes]:
         raise TestFailure(
             f"Incomplete PPM screendump {path.name}: {len(rgb)}/{expected} RGB bytes"
         )
-    return width, height, rgb[0::3]
+    return width, height, rgb
 
 
 def assert_font_fixture(screenshot: Path, report: Path) -> None:

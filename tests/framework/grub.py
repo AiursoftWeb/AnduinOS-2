@@ -94,7 +94,7 @@ def boot_iso_with_debug_shell(
                 editor.enter_advanced_submenu()
             for _ in range(child_index):
                 editor.move_selection_down(
-                    minimum_visible_unselected_entries=(8 if top_index == 0 else 0)
+                    minimum_visible_unselected_entries=(4 if top_index == 0 else 0)
                 )
             editor.open_editor()
             # Each ISO locale entry has setparams, a blank row, gfxpayload,
@@ -360,15 +360,14 @@ class _GraphicalGrubMenuEditor:
         if self.current_frame is None:
             raise ProtocolError("Graphical GRUB menu was not synchronized")
         self.qmp.send_key("ret")
-        # shim's signed GRUB path can spend more than ten seconds loading the
-        # 5 MiB AnduinOS Unicode font and painting the 28-entry locale menu.
-        # This remains a semantic wait: only the complete, multi-entry submenu
-        # releases the next input, regardless of how quickly it is rendered.
+        # The theme deliberately shows only five of the 28 scrollable locale
+        # entries at once. Stock GRUB shows many more. Four unselected visible
+        # rows distinguish either submenu from the three-entry top menu.
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             frame = self.capture()
             layout = grub_menu_layout(frame)
-            if layout is not None and layout.visible_unselected_entries >= 8:
+            if layout is not None and layout.visible_unselected_entries >= 4:
                 self.current_frame = frame
                 return
             time.sleep(0.1)
