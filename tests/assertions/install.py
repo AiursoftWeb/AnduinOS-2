@@ -679,6 +679,10 @@ if printf '%s\n' "$mount_targets" | grep -Eq '^/target($|/)|^/run/anduinos-targe
     exit 1
 fi
 grub-script-check /boot/grub/grub.cfg
+dpkg-query -W -f='${{db:Status-Abbrev}}' anduinos-hyperfluent-grub-theme | grep -q '^ii '
+test -s /usr/share/grub/themes/anduinos-hyperfluent/theme.txt
+test -s /etc/default/grub.d/30-anduinos-hyperfluent.cfg
+grep -Fq 'anduinos-hyperfluent/theme.txt' /boot/grub/grub.cfg
 ! grub-editenv /boot/grub/grubenv list | grep -q '^menu_show_once='
 ! grub-editenv /boot/grub/grubenv list | grep -q '^recordfail='
 for package in {packages}; do

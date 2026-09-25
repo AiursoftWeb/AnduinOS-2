@@ -25,6 +25,7 @@ class HyperfluentVisualTests(unittest.TestCase):
             for name in (
                 "top", "submenu", "submenu-scrolled", "editor", "editor-down",
                 "top-1024", "submenu-1024", "bios-16",
+                "arm-uefi-top", "arm-uefi-submenu",
             ):
                 destination = Path(temporary) / f"{name}.ppm"
                 with Image.open(FRAMES / f"{name}.png") as image:
@@ -50,6 +51,8 @@ class HyperfluentVisualTests(unittest.TestCase):
             self.assertEqual(2, grub_menu_layout(frames["top-1024"]).visible_unselected_entries)
             self.assertEqual(4, grub_menu_layout(frames["submenu-1024"]).visible_unselected_entries)
             self.assertEqual(2, grub_menu_layout(frames["bios-16"]).visible_unselected_entries)
+            self.assertEqual(2, grub_menu_layout(frames["arm-uefi-top"]).visible_unselected_entries)
+            self.assertEqual(4, grub_menu_layout(frames["arm-uefi-submenu"]).visible_unselected_entries)
 
     def test_theme_does_not_change_live_kernel_contract(self) -> None:
         content = "\n".join(
