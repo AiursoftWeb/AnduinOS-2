@@ -288,7 +288,10 @@ function build_iso() {
 
 search --set=root --file /$TARGET_NAME
 
-set gfxmode=1440x900,1280x800,1280x720,1024x768,auto
+# Prefer 16:9 for the theme's artwork, but retain 16:10 and 4:3 modes for
+# firmware without a usable 16:9 GOP/VBE mode. The theme crops proportionally
+# from the right when a narrower aspect ratio is selected.
+set gfxmode=1920x1080,1600x900,1280x720,1440x900,1280x800,1024x768,auto
 insmod all_video
 insmod gfxterm
 insmod font

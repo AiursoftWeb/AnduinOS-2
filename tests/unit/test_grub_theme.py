@@ -107,6 +107,13 @@ menuentry "AnduinOS To Go" --class anduinos {
         self.assertIn("if regexp '^cd[0-9]+$' \"\\$root\"; then", build)
         self.assertIn("This boot medium is not supported. Powering off in 15 seconds.", build)
 
+    def test_live_grub_prefers_16_by_9_without_dropping_16_by_10(self) -> None:
+        build = (ROOT / "build.sh").read_text(encoding="utf-8")
+        self.assertIn(
+            "set gfxmode=1920x1080,1600x900,1280x720,1440x900,1280x800,1024x768,auto",
+            build,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
