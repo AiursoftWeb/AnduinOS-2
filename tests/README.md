@@ -6,10 +6,10 @@ Run the complete release test below; `make test TEST_ARGS="--live-usb-only --no-
 make test
 ```
 
-The command verifies the framework, then boots the newest ISO in `dist/` and runs
-every installation and desktop suite. Exit zero requires every declared check to pass.
-Failures, interruptions, missing prerequisites, unavailable services and unexecuted
-checks all prevent release approval.
+After the unit tests, the dashboard shows cases, suites and checks from startup.
+The ISO media case runs three suites once per ISO; installation cases follow.
+Every assertion is a third-level check, including USB, install and desktop.
+The final summary uses the same tree; failed or unexecuted checks block release.
 
 Pass `ISO=/path/to/image.iso` and `ARCH=amd64|arm64` only when the newest image
 cannot be selected automatically. `TEST_ARGS=--no-tui` switches to persistent

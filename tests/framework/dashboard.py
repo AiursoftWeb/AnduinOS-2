@@ -26,7 +26,7 @@ class CheckView:
 class SuiteView:
     identifier: str
     state: str = "pending"
-    phase: str = "Waiting for installation base"
+    phase: str = "Waiting to start"
     started_at: float | None = None
     seconds: float | None = None
     error: str = ""
@@ -41,7 +41,6 @@ class CaseView:
     started_at: float | None = None
     seconds: float | None = None
     error: str = ""
-    checks: dict[str, CheckView] | None = None
     suites: dict[str, SuiteView] | None = None
 
 
@@ -63,28 +62,32 @@ class AcceptanceDashboard:
         iso: Path,
         architecture: str,
         artifacts: Path,
-        checks: Mapping[str, tuple[str, ...]] | None = None,
         suites: Mapping[str, Mapping[str, tuple[str, ...]]] | None = None,
         stream: TextIO = sys.stdout,
         live: bool | None = None,
         refresh_seconds: float = 1.0,
     ):
-        declared_checks = checks or {}
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("Acceptance case identifiers must be unique")
         declared_suites = suites or {}
-        unknown = set(declared_checks) - set(identifiers)
-        unknown.update(set(declared_suites) - set(identifiers))
+        unknown = set(declared_suites) - set(identifiers)
         if unknown:
             raise ValueError(
                 "Checks were declared for unknown case(s): "
                 + ", ".join(sorted(unknown))
             )
+        missing = set(identifiers) - set(declared_suites)
+        if missing:
+            raise ValueError("Cases have no declared suites: " + ", ".join(sorted(missing)))
+        for case_id, suite_map in declared_suites.items():
+            if not suite_map:
+                raise ValueError(f"{case_id}: at least one suite is required")
+            for suite_id, check_ids in suite_map.items():
+                if not check_ids or len(check_ids) != len(set(check_ids)):
+                    raise ValueError(f"{case_id}/{suite_id}: checks must be nonempty and unique")
         self.cases = {
             item: CaseView(
                 item,
-                checks={
-                    check: CheckView(check)
-                    for check in declared_checks.get(item, ())
-                },
                 suites={
                     suite: SuiteView(
                         suite,
@@ -148,10 +151,6 @@ class AcceptanceDashboard:
             case.phase = "Starting disposable virtual machine"
             case.started_at = time.monotonic()
             self._changed(case)
-            if not self.live:
-                for check in (case.checks or {}).values():
-                    self._write_plain_check(case, check)
-                self._flush_output()
 
     def begin_suite(self, identifier: str, suite_identifier: str) -> None:
         with self._lock:
@@ -160,7 +159,7 @@ class AcceptanceDashboard:
             self._active_identifier = identifier
             self._active_suite = suite_identifier
             suite.state = "running"
-            suite.phase = "Creating disposable overlay"
+            suite.phase = "Starting suite"
             suite.started_at = time.monotonic()
             self._changed_suite(case, suite)
             if not self.live:
@@ -202,7 +201,7 @@ class AcceptanceDashboard:
                 check = (suite.checks or {})[check_identifier]
             except KeyError as error:
                 raise ValueError(
-                    f"{suite_identifier}: undeclared feature check "
+                    f"{suite_identifier}: undeclared check "
                     f"{check_identifier!r}"
                 ) from error
             now = time.monotonic()
@@ -230,6 +229,8 @@ class AcceptanceDashboard:
         with self._lock:
             case = self.cases[identifier]
             suite = self._suite(case, suite_identifier)
+            if self._active_identifier == identifier:
+                self._active_suite = suite_identifier
             suite.state = status
             suite.seconds = seconds
             suite.error = error
@@ -247,40 +248,6 @@ class AcceptanceDashboard:
                     )
                     check.detail = error or "Suite stopped during this check"
             self._changed_suite(case, suite)
-
-    def check(
-        self,
-        identifier: str,
-        check_identifier: str,
-        state: str,
-        detail: str = "",
-    ) -> None:
-        """Record one real assertion boundary within an installation case."""
-
-        if state not in self._STYLE:
-            raise ValueError(f"Unknown check state: {state}")
-        with self._lock:
-            case = self.cases[identifier]
-            checks = case.checks or {}
-            try:
-                check = checks[check_identifier]
-            except KeyError as error:
-                raise ValueError(
-                    f"{identifier}: undeclared check event {check_identifier!r}"
-                ) from error
-            now = time.monotonic()
-            if state == "running" and check.started_at is None:
-                check.started_at = now
-            if state in {"passed", "failed"}:
-                if check.started_at is None:
-                    check.started_at = now
-                check.seconds = now - check.started_at
-            check.state = state
-            if detail:
-                check.detail = detail
-            elif state == "passed":
-                check.detail = "All assertions passed"
-            self._changed_check(case, check)
 
     def phase(self, identifier: str, message: str) -> None:
         with self._lock:
@@ -306,42 +273,25 @@ class AcceptanceDashboard:
             case.seconds = seconds
             case.error = error
             case.phase = "All assertions passed" if status == "passed" else error
-            for check in (case.checks or {}).values():
-                if check.state == "running":
-                    check.state = "failed"
-                    check.seconds = max(
-                        0.0,
-                        time.monotonic() - (check.started_at or time.monotonic()),
-                    )
-                    check.detail = error or "Scenario stopped during this check"
             self._changed(case)
 
-    def check_results(self, identifier: str) -> list[dict[str, object]]:
-        """Return the same child verdicts shown by the dashboard."""
-
-        with self._lock:
-            return [
-                {
-                    "id": check.identifier,
-                    "status": check.state,
-                    "seconds": check.seconds,
-                    "detail": check.detail,
-                }
-                for check in (self.cases[identifier].checks or {}).values()
-            ]
-
     def case_result(self, identifier: str) -> dict[str, object]:
-        """Return the installation verdict, independent of assigned suites."""
+        """Return the aggregate case verdict and its declared suites."""
 
         with self._lock:
             case = self.cases[identifier]
+            from .dashboard_render import case_state
+
+            status = case_state(case)
+            child_error = next((suite.error for suite in (case.suites or {}).values()
+                                if suite.state in {"failed", "blocked"} and suite.error), "")
             return {
                 "id": case.identifier,
-                "status": case.state,
+                "status": status,
                 "seconds": case.seconds,
-                "detail": case.phase,
-                "error": case.error,
-                "checks": self.check_results(identifier),
+                "detail": case.error or child_error or case.phase,
+                "error": case.error or child_error,
+                "suites": self.suite_results(identifier),
             }
 
     def suite_results(self, identifier: str) -> list[dict[str, object]]:
@@ -352,6 +302,7 @@ class AcceptanceDashboard:
                     "status": suite.state,
                     "seconds": suite.seconds,
                     "detail": suite.phase,
+                    "error": suite.error,
                     "checks": [
                         {
                             "id": check.identifier,
@@ -376,16 +327,18 @@ class AcceptanceDashboard:
                 self._render_locked()
                 self._write_output("\x1b[?25h\n")
             else:
-                passed = sum(item.state == "passed" for item in self.cases.values())
-                failed = sum(item.state == "failed" for item in self.cases.values())
-                pending = sum(item.state == "pending" for item in self.cases.values())
+                from .dashboard_render import case_state
+
+                passed = sum(case_state(item) == "passed" for item in self.cases.values())
+                failed = sum(case_state(item) == "failed" for item in self.cases.values())
+                pending = sum(case_state(item) == "pending" for item in self.cases.values())
                 suites = tuple(
                     suite
                     for case in self.cases.values()
                     for suite in (case.suites or {}).values()
                 )
                 self._write_output(
-                    f"\nInstallation scenarios: {passed}/{len(self.cases)} passed, "
+                    f"\nAcceptance cases: {passed}/{len(self.cases)} passed, "
                     f"{failed} failed, {pending} not started\n"
                 )
                 if suites:
@@ -394,8 +347,18 @@ class AcceptanceDashboard:
                     suites_pending = sum(item.state == "pending" for item in suites)
                     suites_blocked = sum(item.state == "blocked" for item in suites)
                     self._write_output(
-                        f"Feature suites: {suites_passed}/{len(suites)} passed, "
+                        f"Suites: {suites_passed}/{len(suites)} passed, "
                         f"{suites_failed} failed, {suites_blocked} blocked, {suites_pending} not started\n"
+                    )
+                checks = tuple(check for suite in suites
+                               for check in (suite.checks or {}).values())
+                if checks:
+                    checks_passed = sum(check.state == "passed" for check in checks)
+                    checks_failed = sum(check.state == "failed" for check in checks)
+                    checks_blocked = sum(check.state == "blocked" for check in checks)
+                    self._write_output(
+                        f"Checks: {checks_passed}/{len(checks)} passed, "
+                        f"{checks_failed} failed, {checks_blocked} blocked\n"
                     )
                 self._write_output(f"Artifacts: {self.artifacts}\n")
             self._flush_output()
@@ -406,13 +369,6 @@ class AcceptanceDashboard:
             self._render_locked()
         else:
             self._write_plain(case)
-        self._flush_output()
-
-    def _changed_check(self, case: CaseView, check: CheckView) -> None:
-        if self.live:
-            self._render_locked()
-        else:
-            self._write_plain_check(case, check)
         self._flush_output()
 
     def _changed_suite(self, case: CaseView, suite: SuiteView) -> None:
@@ -440,7 +396,7 @@ class AcceptanceDashboard:
             return (case.suites or {})[identifier]
         except KeyError as error:
             raise ValueError(
-                f"{case.identifier}: undeclared feature suite {identifier!r}"
+                f"{case.identifier}: undeclared suite {identifier!r}"
             ) from error
 
     def _refresh_loop(self) -> None:
@@ -465,13 +421,15 @@ class AcceptanceDashboard:
 
     def _write_plain_header(self) -> None:
         suites = sum(len(case.suites or {}) for case in self.cases.values())
+        checks = sum(len(suite.checks or {}) for case in self.cases.values()
+                     for suite in (case.suites or {}).values())
         self._write_output(
             "AnduinOS ISO Acceptance\n"
             f"ISO: {self.iso}\n"
             f"Architecture: {self.architecture}\n"
-            f"Installation scenarios: {len(self.cases)}\n"
-            f"Desktop suites: {suites}\n"
-            f"Total workflows: {len(self.cases) + suites}\n"
+            f"Acceptance cases: {len(self.cases)}\n"
+            f"Suites: {suites}\n"
+            f"Checks: {checks}\n"
         )
 
     def _write_plain(self, case: CaseView) -> None:
@@ -482,16 +440,6 @@ class AcceptanceDashboard:
         self._write_output(
             f"[{elapsed}] {icon} {label:<11} {case.identifier} "
             f"({duration}) — {phase}\n"
-        )
-
-    def _write_plain_check(self, case: CaseView, check: CheckView) -> None:
-        icon, label, _color = self._STYLE[check.state]
-        elapsed = _duration(time.monotonic() - self.started_at)
-        duration = self._check_duration(check)
-        detail = check.detail.replace("\n", " | ")
-        self._write_output(
-            f"[{elapsed}]   {icon} {label:<11} {case.identifier} / "
-            f"{check.identifier} ({duration}) — {detail}\n"
         )
 
     def _write_plain_suite(self, case: CaseView, suite: SuiteView) -> None:

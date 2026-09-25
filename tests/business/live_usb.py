@@ -20,7 +20,42 @@ from framework.reporting import write_junit_report
 from framework.usb_iso import prepare_iso_usb
 
 
-def run_live_usb(inspection, artifacts: Path, overrides, *, timeout=600, memory=4096, cpus=2, delay=2) -> bool:
+USB_CASE_ID = 'iso-media'
+
+
+def _labels(inspection) -> tuple[str, str]:
+    default = volume_label(inspection.path).upper()[:11]
+    return default, 'CUSTOM_USB' if default != 'CUSTOM_USB' else 'ALT_USB'
+
+
+def live_usb_suite_checks(inspection) -> dict[str, tuple[str, ...]]:
+    return {
+        **{f'live-usb-iso-mode-{label}': ('uefi-boot', 'live-desktop-and-integrity')
+           for label in _labels(inspection)},
+        'live-usb-to-go-optical-rejected': ('warning-visible', 'power-off'),
+    }
+
+
+def _write_summary(inspection, artifacts: Path, records: list[dict], started: float,
+                   dashboard) -> None:
+    case = dashboard.case_result(USB_CASE_ID)
+    suites = case['suites']
+    actual = {item['id']: item for item in records}
+    for suite in suites:
+        fallback = ('TO_GO_OPTICAL_REJECTED' if suite['id'] == 'live-usb-to-go-optical-rejected'
+                    else suite['id'].removeprefix('live-usb-iso-mode-'))
+        suite['artifacts'] = actual.get(suite['id'], {}).get('artifacts', str(artifacts / fallback))
+    summary = dict(schema_version=2, iso=str(inspection.path), iso_sha256=inspection.sha256,
+                   scope='live-usb-iso-mode', results=[{
+                       **case, 'seconds': case['seconds'] or time.monotonic()-started,
+                       'artifacts': str(artifacts), 'suites': suites,
+                   }])
+    (artifacts/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+    write_junit_report(summary, artifacts/'junit.xml')
+
+
+def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=600,
+                 memory=4096, cpus=2, delay=2) -> bool:
     """AMD64 USB regressions and rejection of To Go on optical media."""
     if inspection.architecture is not Architecture.AMD64:
         raise ConfigurationError('Rufus ISO-mode boot regression currently requires AMD64')
@@ -29,15 +64,18 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, timeout=600, memory=
     records = []
     firmware = resolve_firmware(Architecture.AMD64, Firmware.UEFI_NO_SECURE_BOOT, overrides)
     binary, accel = resolve_qemu(Architecture.AMD64)
+    dashboard.begin(USB_CASE_ID)
+    dashboard.phase(USB_CASE_ID, 'Testing ISO media boot paths')
     # Default FAT label and a user-selected label must both preserve the ABI.
-    labels = (volume_label(inspection.path).upper()[:11], 'CUSTOM_USB')
-    for label in labels:
+    for label in _labels(inspection):
         case = artifacts / label
         case.mkdir()
         record = dict(id=f'live-usb-iso-mode-{label}', status='failed', seconds=0, error='')
         begin = time.monotonic()
         vm = None
-        print(f'[ISO USB] Testing FAT label {label}', flush=True)
+        dashboard.begin_suite(USB_CASE_ID, record['id'])
+        dashboard.suite_phase(USB_CASE_ID, record['id'], f'Booting FAT label {label}')
+        dashboard.suite_check(USB_CASE_ID, record['id'], 'uefi-boot', 'running')
         try:
             with tempfile.TemporaryDirectory(prefix='.usb-work-', dir=case) as directory:
                 work = Path(directory)
@@ -57,6 +95,9 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, timeout=600, memory=
                     boot_iso_with_debug_shell(vm.qmp, vm.serial, Architecture.AMD64,
                                               firmware_delay=delay, scratch_dir=case)
                     vm.serial.wait_for_shell(timeout)
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'uefi-boot', 'passed')
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'live-desktop-and-integrity', 'running')
+                    dashboard.suite_phase(USB_CASE_ID, record['id'], 'Checking Live desktop and media integrity')
                     result = vm.serial.run(r'''
 set -eu
 for attempt in $(seq 1 120); do
@@ -87,6 +128,7 @@ echo ISO_USB_DESKTOP_PASSED
                     vm.screenshot('desktop' if result.returncode == 0 else 'failure')
                     if result.returncode or 'ISO_USB_DESKTOP_PASSED' not in result.stdout:
                         raise TestFailure('ISO-mode Live login/integrity assertions failed; see guest-evidence.txt')
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'live-desktop-and-integrity', 'passed')
                     record['status'] = 'passed'
                 except BaseException:
                     with contextlib.suppress(Exception):
@@ -98,18 +140,18 @@ echo ISO_USB_DESKTOP_PASSED
             record['error'] = str(error)
         finally:
             record['seconds'] = time.monotonic()-begin
+            record['artifacts'] = str(case)
             records.append(record)
-            summary = dict(schema_version=1, iso=str(inspection.path), iso_sha256=inspection.sha256,
-                           scope='live-usb-iso-mode', results=records, feature_suites=[])
-            (artifacts/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
-            write_junit_report(summary, artifacts/'junit.xml')
-        print(f"[ISO USB] {label}: {record['status']} {record['error']}", flush=True)
+            dashboard.complete_suite(USB_CASE_ID, record['id'], record['status'], record['seconds'], record['error'])
+            _write_summary(inspection, artifacts, records, started, dashboard)
     case = artifacts / 'TO_GO_OPTICAL_REJECTED'
     case.mkdir()
     record = dict(id='live-usb-to-go-optical-rejected', status='failed', seconds=0, error='')
     begin = time.monotonic()
     vm = None
-    print('[ISO USB] Testing To Go rejection on optical ISO', flush=True)
+    dashboard.begin_suite(USB_CASE_ID, record['id'])
+    dashboard.suite_phase(USB_CASE_ID, record['id'], 'Checking To Go rejection on optical ISO')
+    dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'running')
     try:
         with tempfile.TemporaryDirectory(prefix='.optical-work-', dir=case) as directory:
             work = Path(directory)
@@ -132,6 +174,8 @@ echo ISO_USB_DESKTOP_PASSED
                 # serial console would invalidate this user-visible check.
                 display_deadline = time.monotonic() + min(timeout, 180)
                 while True:
+                    if vm.process is not None and vm.process.poll() is not None:
+                        raise TestFailure('QEMU stopped before the To Go rejection was recognized on the display')
                     warning_frame = vm.screenshot('unsupported-media')
                     with Image.open(warning_frame) as image:
                         screen = image.convert('RGB')
@@ -141,12 +185,19 @@ echo ISO_USB_DESKTOP_PASSED
                         # A real text-VT warning starts in this upper band.
                         text_area = screen.crop((width * 12 // 100, 0,
                                                  width * 90 // 100, height * 30 // 100))
-                        if sum(min(pixel) >= 200 for pixel in text_area.get_flattened_data()) >= 100:
+                        # The GRUB console renders this warning in gray (RGB
+                        # 160 on the release ISO), not bright white.
+                        if sum(min(pixel) >= 150 for pixel in text_area.get_flattened_data()) >= 100:
                             break
                     if time.monotonic() >= display_deadline:
                         raise TestFailure('To Go rejection is not visible on the display')
                     time.sleep(0.4)
-                vm.wait(timeout=45)
+                dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'passed')
+                dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'running')
+                dashboard.suite_phase(USB_CASE_ID, record['id'], 'Waiting for expected power-off')
+                if vm.wait(timeout=45) != 0:
+                    raise TestFailure('To Go rejection did not power off QEMU cleanly')
+                dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'passed')
                 record['status'] = 'passed'
             finally:
                 vm.stop()
@@ -154,11 +205,13 @@ echo ISO_USB_DESKTOP_PASSED
         record['error'] = str(error)
     finally:
         record['seconds'] = time.monotonic()-begin
+        record['artifacts'] = str(case)
         records.append(record)
-        summary = dict(schema_version=1, iso=str(inspection.path), iso_sha256=inspection.sha256,
-                       scope='live-usb-iso-mode', results=records, feature_suites=[])
-        (artifacts/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
-        write_junit_report(summary, artifacts/'junit.xml')
-    print(f"[ISO USB] To Go optical: {record['status']} {record['error']}", flush=True)
-    print(f'[ISO USB] Evidence: {artifacts} ({time.monotonic()-started:.0f}s)', flush=True)
-    return len(records) == 3 and all(r['status'] == 'passed' for r in records)
+        dashboard.complete_suite(USB_CASE_ID, record['id'], record['status'], record['seconds'], record['error'])
+        _write_summary(inspection, artifacts, records, started, dashboard)
+    passed = len(records) == 3 and all(r['status'] == 'passed' for r in records)
+    error = '; '.join(r['error'] or r['id'] for r in records if r['status'] != 'passed')
+    dashboard.complete(USB_CASE_ID, 'passed' if passed else 'failed',
+                       time.monotonic()-started, error)
+    _write_summary(inspection, artifacts, records, started, dashboard)
+    return passed

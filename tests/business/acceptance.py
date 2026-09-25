@@ -8,6 +8,7 @@ import json
 import signal
 import shutil
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -36,6 +37,7 @@ from framework.storage import (
 def main(argv: list[str] | None = None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
+    dashboard = None
     try:
         root = Path(__file__).parents[1]
         matrix = TestMatrix.load(root / "cases/install.json")
@@ -55,19 +57,52 @@ def main(argv: list[str] | None = None) -> int:
             uefi_vars_no_secure_boot=args.uefi_vars,
             uefi_vars_secure_boot=args.secure_boot_vars,
         )
+        artifacts_root = (
+            args.artifacts.expanduser().resolve() if args.artifacts else
+            (Path.cwd() / 'test-results' /
+             datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')).resolve()
+        )
+        usb_suites = {}
         if architecture is Architecture.AMD64 or args.live_usb_only:
-            from .live_usb import run_live_usb
+            from .live_usb import USB_CASE_ID, live_usb_suite_checks, run_live_usb
+
+            usb_suites = live_usb_suite_checks(inspection)
+        if any(suite.id == 'installation' for suite in suites):
+            raise ConfigurationError("Desktop suite ID 'installation' is reserved")
+        installation_cases = () if args.live_usb_only else selected
+        installation_suites = {
+            scenario.id: {
+                'installation': scenario_check_ids(scenario),
+                **{suite.id: suite.checks for suite in suites
+                   if suite.source_for(architecture) == scenario.id},
+            }
+            for scenario in installation_cases
+        }
+        dashboard = AcceptanceDashboard(
+            ((USB_CASE_ID,) if usb_suites else ())
+            + tuple(item.id for item in installation_cases),
+            iso=inspection.path,
+            architecture=architecture.value,
+            artifacts=artifacts_root,
+            suites={**({USB_CASE_ID: usb_suites} if usb_suites else {}),
+                    **installation_suites},
+            live=False if args.no_tui else None,
+        )
+        dashboard.start()
+        usb_records = []
+        if usb_suites:
 
             usb_artifacts = (
-                args.artifacts.with_name(args.artifacts.name + '-live-usb') if args.artifacts else
-                Path('test-results') / (datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%fZ') + '-live-usb')
+                artifacts_root.with_name(artifacts_root.name + '-live-usb')
             )
             usb_passed = run_live_usb(
                 inspection, usb_artifacts, overrides,
                 timeout=args.boot_timeout or matrix.defaults.boot_timeout_seconds,
                 memory=args.memory or 4096, cpus=args.cpus or 2,
                 delay=args.firmware_delay if args.firmware_delay is not None else 2,
+                dashboard=dashboard,
             )
+            usb_records = json.loads((usb_artifacts / 'summary.json').read_text())['results']
             if args.live_usb_only or not usb_passed:
                 return 0 if usb_passed else 1
         _preflight(architecture, selected, overrides, suites)
@@ -84,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
             args,
             matrix,
             additional_disk_bytes=persistent_live_bytes,
+            artifacts_root=artifacts_root,
         )
         assert_disk_storage_ready(
             options.disk_storage,
@@ -99,32 +135,18 @@ def main(argv: list[str] | None = None) -> int:
                 f"Target disks: {options.disk_storage.backend} at "
                 f"{options.disk_storage.root} ({options.disk_storage.reason})"
             )
-            dashboard = AcceptanceDashboard(
-                tuple(item.id for item in selected),
-                iso=inspection.path,
-                architecture=architecture.value,
-                artifacts=options.artifacts_root,
-                checks={
-                    item.id: scenario_check_ids(item)
-                    for item in selected
-                },
-                suites={
-                    scenario.id: {
-                        suite.id: suite.checks
-                        for suite in suites
-                        if suite.source_for(architecture) == scenario.id
-                    }
-                    for scenario in selected
-                },
-                live=False if args.no_tui else None,
-            )
+            def install_phase(case_id: str, message: str) -> None:
+                dashboard.phase(case_id, message)
+                dashboard.suite_phase(case_id, 'installation', message)
+
             runner = ScenarioRunner(
                 inspection,
                 architecture,
                 matrix.defaults,
                 options,
-                status_callback=dashboard.phase,
-                check_callback=dashboard.check,
+                status_callback=install_phase,
+                check_callback=lambda case_id, check_id, state, detail: dashboard.suite_check(
+                    case_id, 'installation', check_id, state, detail),
             )
             results = []
             suite_results = []
@@ -144,19 +166,17 @@ def main(argv: list[str] | None = None) -> int:
                 phase_callback=dashboard.suite_phase,
                 check_callback=dashboard.suite_check,
             )
-            dashboard.start()
             try:
                 with _termination_as_interrupt():
                     for scenario in selected:
+                        case_started = time.monotonic()
                         dashboard.begin(scenario.id)
+                        dashboard.begin_suite(scenario.id, 'installation')
                         source_suites = suites_by_source[scenario.id]
                         result = runner.run(scenario, promote=bool(source_suites))
                         results.append(result)
-                        dashboard.complete(
-                            result.id,
-                            result.status,
-                            result.seconds,
-                            result.error,
+                        dashboard.complete_suite(
+                            result.id, 'installation', result.status, result.seconds, result.error,
                         )
                         base = result.promoted_base
                         try:
@@ -203,10 +223,35 @@ def main(argv: list[str] | None = None) -> int:
                                     "after every dependent overlay stopped.\n",
                                     encoding="utf-8",
                                 )
+                        suite_views = dashboard.suite_results(result.id)
+                        problem = next((item for item in suite_views
+                                        if item['status'] == 'failed'), None)
+                        if problem is None:
+                            problem = next((item for item in suite_views
+                                            if item['status'] == 'blocked'), None)
+                        dashboard.complete(
+                            result.id, problem['status'] if problem else result.status,
+                            time.monotonic() - case_started,
+                            (problem or {}).get('error') or result.error,
+                        )
             finally:
                 dashboard.close()
+            case_records = _materialize_case_results(
+                selected, results, dashboard, options.artifacts_root,
+            )
+            feature_records = _materialize_suite_results(
+                suites, suite_results, dashboard, architecture, options.artifacts_root,
+            )
+            feature_by_source = {(item['source_case'], item['id']): item
+                                 for item in feature_records}
+            for record in case_records:
+                for suite in record['suites']:
+                    if suite['id'] == 'installation':
+                        suite['artifacts'] = record['artifacts']
+                    else:
+                        suite['artifacts'] = feature_by_source[(record['id'], suite['id'])]['artifacts']
             summary = {
-                "schema_version": 1,
+                "schema_version": 2,
                 "iso": str(inspection.path),
                 "iso_sha256": inspection.sha256,
                 "architecture": architecture.value,
@@ -215,19 +260,7 @@ def main(argv: list[str] | None = None) -> int:
                     "root": str(options.disk_storage.root),
                     "reason": options.disk_storage.reason,
                 },
-                "results": _materialize_case_results(
-                    selected,
-                    results,
-                    dashboard,
-                    options.artifacts_root,
-                ),
-                "feature_suites": _materialize_suite_results(
-                    suites,
-                    suite_results,
-                    dashboard,
-                    architecture,
-                    options.artifacts_root,
-                ),
+                "results": usb_records + case_records,
             }
             (options.artifacts_root / "summary.json").write_text(
                 json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
@@ -253,6 +286,9 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 130
+    finally:
+        if dashboard is not None:
+            dashboard.close()
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -317,10 +353,11 @@ def _options(
     matrix: TestMatrix,
     *,
     additional_disk_bytes: int = 0,
+    artifacts_root: Path | None = None,
 ) -> RunnerOptions:
     defaults = matrix.defaults
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    artifacts = (
+    artifacts = artifacts_root or (
         args.artifacts.expanduser().resolve()
         if args.artifacts
         else (Path.cwd() / "test-results" / timestamp).resolve()
@@ -394,9 +431,9 @@ def _materialize_case_results(
                     if result is not None
                     else artifacts_root / scenario.id
                 ),
-                "error": result.error if result is not None else view["error"],
+                "error": view["error"] or (result.error if result is not None else ""),
                 "detail": view["detail"],
-                "checks": view["checks"],
+                "suites": view["suites"],
             }
         )
     return records

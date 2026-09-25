@@ -378,17 +378,18 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
-                checks={"case": ("live-boot",)},
+                suites={"case": {"installation": ("live-boot",)}},
                 stream=ClosedOutput(),
                 live=False,
             )
             dashboard.start()
             dashboard.begin("case")
-            dashboard.check("case", "live-boot", "failed", "original failure")
+            dashboard.begin_suite("case", "installation")
+            dashboard.suite_check("case", "installation", "live-boot", "failed", "original failure")
             dashboard.complete("case", "failed", 1.0, "original failure")
             dashboard.close()
         self.assertEqual(
-            "failed", dashboard.check_results("case")[0]["status"]
+            "failed", dashboard.suite_results("case")[0]["checks"][0]["status"]
         )
 
     def test_unexpected_output_error_still_fails_closed(self):
@@ -405,6 +406,7 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test.iso",
                 architecture="amd64",
                 artifacts=Path(directory),
+                suites={"case": {"installation": ("check",)}},
                 stream=BrokenDiskOutput(),
                 live=False,
             )
@@ -419,25 +421,30 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
-                checks={"first-case": ("live-boot", "journal.boot-and-idle")},
+                suites={"first-case": {"installation":
+                        ("live-boot", "journal.boot-and-idle")},
+                        "second-case": {"installation": ("live-boot",)}},
                 stream=stream,
                 live=False,
             )
             dashboard.start()
             dashboard.begin("first-case")
-            dashboard.check(
-                "first-case", "live-boot", "running", "Booting original ISO"
+            dashboard.begin_suite("first-case", "installation")
+            dashboard.suite_check(
+                "first-case", "installation", "live-boot", "running", "Booting original ISO"
             )
-            dashboard.check(
-                "first-case", "live-boot", "passed", "Live GNOME is ready"
+            dashboard.suite_check(
+                "first-case", "installation", "live-boot", "passed", "Live GNOME is ready"
             )
-            dashboard.check(
+            dashboard.suite_check(
                 "first-case",
+                "installation",
                 "journal.boot-and-idle",
                 "passed",
                 "0 blockers; 3 known diagnostics",
             )
             dashboard.phase("first-case", "Booting original ISO")
+            dashboard.complete_suite("first-case", "installation", "passed", 65.0)
             dashboard.complete("first-case", "passed", 65.0)
             dashboard.close()
         output = stream.getvalue()
@@ -446,10 +453,10 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("PASSED", output)
         self.assertIn("first-case", output)
         self.assertIn("second-case", output)
-        self.assertIn("first-case / live-boot", output)
-        self.assertIn("first-case / journal.boot-and-idle", output)
+        self.assertIn("first-case / installation / live-boot", output)
+        self.assertIn("first-case / installation / journal.boot-and-idle", output)
         self.assertIn("3 known diagnostics", output)
-        self.assertIn("Installation scenarios: 1/2 passed", output)
+        self.assertIn("Acceptance cases: 1/2 passed", output)
 
     def test_plain_dashboard_summary_cannot_hide_a_failed_feature_suite(self):
         stream = io.StringIO()
@@ -459,8 +466,8 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory),
-                checks={"base": ("live-boot",)},
-                suites={"base": {"desktop-theme": ("appearance.theme-qt",)}},
+                suites={"base": {"installation": ("live-boot",),
+                                  "desktop-theme": ("appearance.theme-qt",)}},
                 live=False,
                 stream=stream,
             )
@@ -473,8 +480,8 @@ class DashboardTests(unittest.TestCase):
             )
             dashboard.close()
         output = stream.getvalue()
-        self.assertIn("Installation scenarios: 1/1 passed, 0 failed", output)
-        self.assertIn("Feature suites: 0/1 passed, 1 failed", output)
+        self.assertIn("Acceptance cases: 0/1 passed, 1 failed", output)
+        self.assertIn("Suites: 0/2 passed, 1 failed", output)
 
     def test_live_dashboard_renders_a_fixed_status_table(self):
         stream = io.StringIO()
@@ -484,20 +491,24 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
-                checks={"one": ("live-boot", "files.exe-open-fixture")},
+                suites={"one": {"installation":
+                        ("live-boot", "files.exe-open-fixture")}},
                 stream=stream,
                 live=True,
                 refresh_seconds=60,
             )
             dashboard.start()
             dashboard.begin("one")
-            dashboard.check("one", "live-boot", "passed", "Live GNOME is ready")
-            dashboard.check(
+            dashboard.begin_suite("one", "installation")
+            dashboard.suite_check("one", "installation", "live-boot", "passed", "Live GNOME is ready")
+            dashboard.suite_check(
                 "one",
+                "installation",
                 "files.exe-open-fixture",
                 "failed",
                 "CPU-Z handler missing",
             )
+            dashboard.complete_suite("one", "installation", "failed", 2.0, "example failure")
             dashboard.complete("one", "failed", 2.0, "example failure")
             dashboard.close()
         output = stream.getvalue()
@@ -506,7 +517,7 @@ class DashboardTests(unittest.TestCase):
         self.assertIn("INSTALLING", output)
         self.assertIn("FAILED", output)
         self.assertIn("example failure", output)
-        self.assertIn("Checks — one", output)
+        self.assertIn("Checks — installation", output)
         self.assertIn("files.exe-open-fixture", output)
         self.assertIn("CPU-Z handler missing", output)
 
@@ -517,12 +528,22 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
-                checks={"one": ("live-boot",)},
+                suites={"one": {"installation": ("live-boot",)}},
                 stream=io.StringIO(),
                 live=False,
             )
             with self.assertRaisesRegex(ValueError, "undeclared check"):
-                dashboard.check("one", "invented-check", "running")
+                dashboard.suite_check("one", "installation", "invented-check", "running")
+
+    def test_every_case_declares_nonempty_suites_and_checks(self):
+        options = dict(iso=Path('image.iso'), architecture='amd64',
+                       artifacts=Path('test-results'), stream=io.StringIO(), live=False)
+        for suites, error in (({}, 'no declared suites'),
+                              ({'one': {}}, 'at least one suite'),
+                              ({'one': {'installation': ()}}, 'checks must be nonempty'),
+                              ({'one': {'installation': ('boot', 'boot')}}, 'checks must be nonempty')):
+            with self.subTest(suites=suites), self.assertRaisesRegex(ValueError, error):
+                AcceptanceDashboard(('one',), suites=suites, **options)
 
     def test_dashboard_renders_install_suite_check_hierarchy(self):
         stream = io.StringIO()
@@ -532,9 +553,9 @@ class DashboardTests(unittest.TestCase):
                 iso=Path(directory) / "test-amd64.iso",
                 architecture="amd64",
                 artifacts=Path(directory) / "artifacts",
-                checks={"bios-online-btrfs": ("installed-boot",)},
                 suites={
                     "bios-online-btrfs": {
+                        "installation": ("installed-boot",),
                         "input-and-appearance": ("input.super-space-rime",),
                     }
                 },
@@ -570,7 +591,7 @@ class DashboardTests(unittest.TestCase):
         )
         self.assertEqual(
             "passed",
-            dashboard.suite_results("bios-online-btrfs")[0]["checks"][0]["status"],
+            dashboard.suite_results("bios-online-btrfs")[1]["checks"][0]["status"],
         )
 
     def test_interrupted_reporting_keeps_pending_cases_and_suites(self):
@@ -581,18 +602,20 @@ class DashboardTests(unittest.TestCase):
                 iso=Path("image.iso"),
                 architecture="amd64",
                 artifacts=root,
-                checks={"first": ("first.check",), "second": ("second.check",)},
                 suites={
                     "first": {
+                        "installation": ("first.check",),
                         "failed-suite": ("failed.check",),
                         "pending-suite": ("pending.check",),
-                    }
+                    },
+                    "second": {"installation": ("second.check",)},
                 },
                 stream=io.StringIO(),
                 live=False,
             )
             dashboard.begin("first")
-            dashboard.check("first", "first.check", "failed", "injected defect")
+            dashboard.begin_suite("first", "installation")
+            dashboard.suite_check("first", "installation", "first.check", "failed", "injected defect")
             dashboard.complete("first", "failed", 1.25, "injected defect")
             dashboard.begin_suite("first", "failed-suite")
             dashboard.suite_check(
@@ -639,7 +662,7 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(
             ["failed", "pending"], [item["status"] for item in suite_records]
         )
-        self.assertEqual("pending", case_records[1]["checks"][0]["status"])
+        self.assertEqual("pending", case_records[1]["suites"][0]["checks"][0]["status"])
         self.assertEqual("pending", suite_records[1]["checks"][0]["status"])
 
     def test_junit_marks_failed_and_not_started_work_as_non_passing(self):
@@ -706,6 +729,31 @@ class DashboardTests(unittest.TestCase):
         self.assertIsNotNone(pending)
         assert pending is not None
         self.assertEqual("IncompleteAcceptanceCheck", pending.get("type"))
+
+    def test_nested_report_fails_parent_when_a_desktop_suite_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            dashboard = AcceptanceDashboard(
+                ('case',), iso=Path('image.iso'), architecture='amd64',
+                artifacts=Path(directory),
+                suites={'case': {'installation': ('boot',), 'desktop': ('login',)}},
+                stream=io.StringIO(), live=False)
+            dashboard.begin('case')
+            dashboard.begin_suite('case', 'installation')
+            dashboard.suite_check('case', 'installation', 'boot', 'passed')
+            dashboard.complete_suite('case', 'installation', 'passed', 1)
+            dashboard.complete('case', 'passed', 1)
+            dashboard.begin_suite('case', 'desktop')
+            dashboard.suite_check('case', 'desktop', 'login', 'failed', 'login missing')
+            dashboard.complete_suite('case', 'desktop', 'failed', 2, 'login missing')
+            record = dashboard.case_result('case')
+            destination = Path(directory) / 'junit.xml'
+            write_junit_report({'results': [record]}, destination)
+            report = ET.parse(destination).getroot()
+        self.assertEqual('failed', record['status'])
+        self.assertEqual('passed', record['suites'][0]['status'])
+        self.assertEqual('login missing', record['error'])
+        self.assertEqual('5', report.get('tests'))
+        self.assertEqual('3', report.get('failures'))
 
 
 class ScenarioCheckPlanTests(unittest.TestCase):

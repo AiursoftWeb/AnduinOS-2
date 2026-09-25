@@ -123,7 +123,7 @@ buildtorrent:
 
 test:
 	@python3 tests/run.py clean-disks --root test-results
-	@PYTHONPATH=tests python3 -m unittest discover -s tests/unit -p 'test_*.py'
+	@PYTHONPATH=tests python3 -m unittest discover -s tests/unit -p 'test_*.py' -q
 	@iso='$(ISO)'; arch='$(ARCH)'; \
 	if [ -z "$$iso" ]; then \
 		iso=$$(find dist -maxdepth 1 -type f -name '*.iso' -printf '%T@ %p\n' 2>/dev/null | sort -nr | sed -n '1s/^[^ ]* //p'); \

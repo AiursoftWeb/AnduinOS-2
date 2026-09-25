@@ -1,4 +1,4 @@
-"""Read-only responsive presentation of installation and feature verdicts."""
+"""Read-only responsive presentation of case, suite and check verdicts."""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ _WIDE_COLUMNS = 120
 
 
 def case_state(case: CaseView) -> str:
-    """Aggregate for display only; never overwrite the installation verdict."""
+    """Aggregate child suite verdicts for the parent case."""
     suites = tuple((case.suites or {}).values())
     if case.state == "failed" or any(suite.state == "failed" for suite in suites):
         return "failed"
@@ -91,9 +91,9 @@ def _case_panel(dashboard, width: int, height: int) -> list[str]:
                   if case.identifier == dashboard._active_identifier), 0)
     compact = height < 4
     visible, first, last = _window(cases, height - 1 if compact else (height - 2) // 2, focus)
-    rows = [_cell(" Installation cases · overall status", width)]
+    rows = [_cell(" Acceptance cases · overall status", width)]
     if not compact:
-        rows.append(_cell(f" Showing {first}-{last}/{len(cases)} · install + assigned suites", width))
+        rows.append(_cell(f" Showing {first}-{last}/{len(cases)} · cases + assigned suites", width))
     for case in visible:
         state = case_state(case)
         selected = case.identifier == dashboard._active_identifier
@@ -102,27 +102,33 @@ def _case_panel(dashboard, width: int, height: int) -> list[str]:
         suites = tuple((case.suites or {}).values())
         passed = sum(suite.state == "passed" for suite in suites)
         progress = f"{passed}/{len(suites)}" if suites else "—"
-        install = {"pending": "WAIT", "running": "RUN", "passed": "OK", "failed": "FAIL"}[case.state]
+        is_usb = case.identifier == "iso-media"
+        kind = "USB" if is_usb else "Install"
+        installation = (case.suites or {}).get("installation")
+        verdict_state = installation.state if installation is not None else case.state
+        verdict = {"pending": "WAIT", "running": "RUN", "passed": "OK",
+                   "failed": "FAIL", "blocked": "BLOCK"}[verdict_state]
         stage = {"pending": "NOT STARTED", "failed": "FAILED", "passed": "ALL PASSED", "blocked": "BLOCKED"}.get(state)
         if stage is None:
-            stage = "INSTALLING" if case.state != "passed" else "TESTING"
+            stage = ("CHECKING USB" if is_usb else "TESTING" if verdict_state == "passed"
+                     else "INSTALLING")
         prefix = f"{'▶' if selected else ' '} {icon} "
         if compact:
             rows.append(_cell(f"{prefix}{stage} · {case.identifier}", width, color, selected))
         else:
             rows.append(_cell(f"{prefix}{case.identifier}", width, color, selected))
-            rows.append(_cell(f"    {stage} · Install {install} · Suites {progress}", width, color, selected))
+            rows.append(_cell(f"    {stage} · {kind} {verdict} · Suites {progress}", width, color, selected))
     return _pad(rows, width, height)
 
 
 def _suite_panel(dashboard, active, width: int, height: int) -> list[str]:
     name = active.identifier if active is not None else "waiting"
-    rows = [_cell(f" Feature suites — {name}", width)]
+    rows = [_cell(f" Suites — {name}", width)]
     suites = tuple((active.suites or {}).values()) if active is not None else ()
     if not suites:
-        message = " No feature suites assigned" if active else " Waiting for an installation case"
+        message = " No suites assigned" if active else " Waiting for a case"
         if active is not None and active.error:
-            message = " Installation failed: " + active.error
+            message = " Case failed: " + active.error
         rows.append(_cell(message, width, _color(dashboard, active.state) if active else ""))
         if active is not None:
             rows.append(_cell(" " + active.phase, width, _color(dashboard, active.state)))
@@ -137,7 +143,7 @@ def _suite_panel(dashboard, active, width: int, height: int) -> list[str]:
     for suite in visible:
         icon, label, _ = dashboard._STYLE[suite.state]
         if suite.state == "pending":
-            label = "QUEUED" if active.state == "passed" else "WAIT BASE"
+            label = "QUEUED"
         checks = tuple((suite.checks or {}).values())
         done = sum(check.state in {"passed", "failed"} for check in checks)
         suffix = f"{label} {done}/{len(checks)}"
@@ -149,7 +155,7 @@ def _suite_panel(dashboard, active, width: int, height: int) -> list[str]:
 
 
 def _check_panel(dashboard, active, suite, width: int, height: int) -> list[str]:
-    owner = suite if suite is not None else active
+    owner = suite
     checks = tuple((owner.checks or {}).values()) if owner is not None else ()
     name = owner.identifier if owner is not None else "waiting"
     rows = [_cell(f" Checks — {name}", width)]
@@ -182,31 +188,35 @@ def render_dashboard(dashboard: AcceptanceDashboard, terminal) -> str:
              if active is not None else None)
     all_suites = tuple(suite for case in dashboard.cases.values()
                        for suite in (case.suites or {}).values())
-    work = (*dashboard.cases.values(), *all_suites)
-    passed = sum(item.state == "passed" for item in work)
-    failed = sum(item.state == "failed" for item in work)
-    blocked = sum(item.state == "blocked" for item in work)
+    all_checks = tuple(check for suite in all_suites
+                       for check in (suite.checks or {}).values())
+    complete = sum(check.state in {"passed", "failed", "blocked"} for check in all_checks)
+    failed = sum(check.state == "failed" for check in all_checks)
+    blocked = sum(check.state == "blocked" for check in all_checks)
+    suites_done = sum(suite.state in {"passed", "failed", "blocked"} for suite in all_suites)
+    cases_done = sum(case_state(case) in {"passed", "failed", "blocked"}
+                     for case in dashboard.cases.values())
     elapsed = max(0, int(time.monotonic() - dashboard.started_at))
     minutes, seconds = divmod(elapsed, 60)
     clock = f"{minutes}:{seconds:02d}"
     if width < 40 or terminal.lines < 18:
         # There is not room for three bordered panels. Keep a safe, useful
         # summary until the terminal is enlarged instead of scrolling it.
-        focus = suite if suite is not None else active
+        focus = suite
         checks = tuple((focus.checks or {}).values()) if focus is not None else ()
         visible, _, _ = _window(checks, 1)
         summary = ["AnduinOS ISO Acceptance", "Enlarge terminal for three panels",
                    f"Case: {active.identifier if active else 'waiting'}",
                    f"Suite: {suite.identifier if suite else 'none'}",
                    f"Check: {visible[0].identifier if visible else 'waiting'}",
-                   f"Progress {passed + failed + blocked}/{len(work)} · ✓ {passed} · ✗ {failed} · ⊘ {blocked} · {clock}",
+                   f"Checks {complete}/{len(all_checks)} · ✗ {failed} · ⊘ {blocked} · {clock}",
                    f"Artifacts: {dashboard.artifacts}"]
         return "\n".join(_fit(line, width) for line in summary[:max(1, terminal.lines - 1)])
     body_height = terminal.lines - 10
     lines = ["┌" + "─" * inner + "┐",
              "│" + _cell(" AnduinOS ISO Acceptance", inner) + "│",
              "│" + _cell(f" ISO: {dashboard.iso.name}", inner) + "│",
-             "│" + _cell(f" Arch: {dashboard.architecture} · Cases: {len(dashboard.cases)} · Suites: {len(all_suites)}", inner) + "│"]
+             "│" + _cell(f" Arch: {dashboard.architecture} · Cases: {len(dashboard.cases)} · Suites: {len(all_suites)} · Checks: {len(all_checks)}", inner) + "│"]
     if width >= _WIDE_COLUMNS:
         left = max(46, min(64, inner * 2 // 5))
         right = inner - left - 1
@@ -236,12 +246,11 @@ def render_dashboard(dashboard: AcceptanceDashboard, terminal) -> str:
             lines.append("├" + "─" * inner + "┤")
             lines.extend("│" + row + "│" for row in rows)
         lines.append("├" + "─" * inner + "┤")
-    complete = passed + failed + blocked
     bar_width = max(0, min(24, inner - 65))
-    filled = round(bar_width * complete / max(1, len(work)))
+    filled = round(bar_width * complete / max(1, len(all_checks)))
     bar = "[" + "█" * filled + "░" * (bar_width - filled) + "] " if bar_width else ""
     lines.extend([
-        "│" + _cell(f" Progress {bar}{complete}/{len(work)} · ✓ {passed} · ✗ {failed} · ⊘ {blocked} · Elapsed {clock}", inner) + "│",
+        "│" + _cell(f" Progress {bar}{complete}/{len(all_checks)} checks · {suites_done}/{len(all_suites)} suites · {cases_done}/{len(dashboard.cases)} cases · ✗ {failed} · ⊘ {blocked} · Elapsed {clock}", inner) + "│",
         "│" + _cell(f" Artifacts: {dashboard.artifacts}", inner) + "│",
         "└" + "─" * inner + "┘",
     ])

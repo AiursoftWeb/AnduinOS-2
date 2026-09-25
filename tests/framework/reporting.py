@@ -11,7 +11,12 @@ def write_junit_report(summary: dict[str, object], destination: Path) -> None:
 
     suites: list[ET.Element] = []
     for record in summary.get("results", []):
-        suites.append(_suite_element("installation", record))
+        if isinstance(record, dict) and "suites" in record:
+            suites.append(_hierarchical_suite_element(record))
+            continue
+        kind = ("usb" if isinstance(record, dict)
+                and str(record.get("id", "")).startswith("live-usb-") else "installation")
+        suites.append(_suite_element(kind, record))
     for record in summary.get("feature_suites", []):
         suites.append(_suite_element("feature", record))
 
@@ -33,6 +38,47 @@ def write_junit_report(summary: dict[str, object], destination: Path) -> None:
     temporary = destination.with_name(f".{destination.name}.tmp")
     tree.write(temporary, encoding="utf-8", xml_declaration=True)
     temporary.replace(destination)
+
+
+def _hierarchical_suite_element(record: dict[str, object]) -> ET.Element:
+    identifier = str(record.get("id", "unknown"))
+    children = record["suites"]
+    if not isinstance(children, list):
+        raise TypeError(f"{identifier}: suites must be a list")
+    cases = [_testcase(classname=f"acceptance.{identifier}", name="case-result",
+                       status=str(record.get("status", "pending")),
+                       seconds=record.get("seconds"),
+                       detail=str(record.get("error") or record.get("detail") or ""))]
+    for suite in children:
+        if not isinstance(suite, dict):
+            raise TypeError(f"{identifier}: suite records must be objects")
+        suite_id = str(suite.get("id", "unknown-suite"))
+        classname = f"acceptance.{identifier}.{suite_id}"
+        cases.append(_testcase(classname=classname, name="suite-result",
+                               status=str(suite.get("status", "pending")),
+                               seconds=suite.get("seconds"),
+                               detail=str(suite.get("error") or suite.get("detail") or "")))
+        checks = suite.get("checks", [])
+        if not isinstance(checks, list):
+            raise TypeError(f"{identifier}/{suite_id}: checks must be a list")
+        for check in checks:
+            if not isinstance(check, dict):
+                raise TypeError(f"{identifier}/{suite_id}: check records must be objects")
+            cases.append(_testcase(classname=classname,
+                                   name=str(check.get("id", "unknown-check")),
+                                   status=str(check.get("status", "pending")),
+                                   seconds=check.get("seconds"),
+                                   detail=str(check.get("detail") or "")))
+    testsuite = ET.Element("testsuite", {
+        "name": identifier,
+        "tests": str(len(cases)),
+        "failures": str(sum(item.find("failure") is not None for item in cases)),
+        "errors": str(sum(item.find("error") is not None for item in cases)),
+        "time": _seconds(record.get("seconds")),
+    })
+    for case in cases:
+        testsuite.append(case)
+    return testsuite
 
 
 def _suite_element(kind: str, record: object) -> ET.Element:

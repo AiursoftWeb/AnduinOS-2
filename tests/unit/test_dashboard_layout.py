@@ -26,12 +26,17 @@ def sample_dashboard():
     dashboard = AcceptanceDashboard(
         ids, iso=Path("AnduinOS-2.0.3-2609190323-amd64.iso"), architecture="amd64",
         artifacts=Path("/home/anduin/Source/Repos/Aiursoft/bash-app/AnduinOS-2/test-results/example"),
-        checks={name: ("live-boot", "installed-boot") for name in ids},
-        suites={ids[1]: suites, ids[4]: {f"recovery-{i}": (f"reset-{i}",) for i in range(6)}},
+        suites={name: {"installation": ("live-boot", "installed-boot"),
+                       **(suites if name == ids[1] else
+                          {f"recovery-{i}": (f"reset-{i}",) for i in range(6)}
+                          if name == ids[4] else {})}
+                for name in ids},
         stream=io.StringIO(), live=False,
     )
     dashboard.color = False
+    dashboard.complete_suite(ids[0], "installation", "passed", 242)
     dashboard.complete(ids[0], "passed", 242)
+    dashboard.complete_suite(ids[1], "installation", "passed", 303)
     dashboard.complete(ids[1], "passed", 303)
     for suite in suite_names[:3]:
         dashboard.suite_check(ids[1], suite, suite + ".check", "passed")
@@ -45,24 +50,45 @@ def sample_dashboard():
 
 
 class DashboardLayoutTests(unittest.TestCase):
+    def test_usb_case_uses_the_same_three_panel_layout(self):
+        dashboard = AcceptanceDashboard(
+            ('iso-media', 'bios-online-btrfs'),
+            iso=Path('image.iso'), architecture='amd64', artifacts=Path('test-results'),
+            suites={'iso-media': {'live-usb-iso-mode-AOS_LIVE':
+                                 ('uefi-boot', 'live-desktop-and-integrity')},
+                    'bios-online-btrfs': {'installation': ('live-boot',)}},
+            stream=io.StringIO(), live=False,
+        )
+        dashboard.color = False
+        dashboard.begin('iso-media')
+        dashboard.begin_suite('iso-media', 'live-usb-iso-mode-AOS_LIVE')
+        dashboard.suite_check('iso-media', 'live-usb-iso-mode-AOS_LIVE',
+                              'uefi-boot', 'running')
+        frame = render_dashboard(dashboard, os.terminal_size((150, 40)))
+        self.assertIn('Acceptance cases', frame)
+        self.assertIn('CHECKING USB · USB RUN', frame)
+        self.assertIn('Checks — live-usb-iso-mode-AOS_LIVE', frame)
+        self.assertIn('uefi-boot', frame)
+        self.assertIn('bios-online-btrfs', frame)
+
     def test_wide_layout_has_cases_left_suites_and_checks_right(self):
         dashboard = sample_dashboard()
         frame = render_dashboard(dashboard, os.terminal_size((150, 40)))
         lines = frame.splitlines()
-        heading = next(line for line in lines if "Installation cases" in line)
-        self.assertIn("Feature suites — bios-online-btrfs", heading)
+        heading = next(line for line in lines if "Acceptance cases" in line)
+        self.assertIn("Suites — bios-online-btrfs", heading)
         divider = heading.index("│", 1)
         check_heading = next(line for line in lines if "Checks — desktop-theme" in line)
         self.assertGreater(check_heading.index("Checks —"), divider)
         self.assertIn("▶ ● bios-online-btrfs", frame)
-        self.assertIn("TESTING · Install OK · Suites 3/11", frame)
+        self.assertIn("TESTING · Install OK · Suites 4/12", frame)
         self.assertIn("✓ bios-offline-btrfs", frame)
-        self.assertIn("ALL PASSED · Install OK · Suites —", frame)
+        self.assertIn("ALL PASSED · Install OK · Suites 1/1", frame)
         self.assertIn("QUEUED", frame)
         self.assertNotIn("Waiting for installation base", frame)
         self.assertIn("RUNNING 3/4", frame)
         self.assertIn("appearance.theme-firefox", frame)
-        self.assertIn("5/30 · ✓ 5 · ✗ 0", frame)
+        self.assertIn("6/46 checks · 5/30 suites · 1/13 cases", frame)
         self.assertIn("Elapsed", lines[-3])
         self.assertIn("Artifacts:", lines[-2])
 
@@ -80,9 +106,20 @@ class DashboardLayoutTests(unittest.TestCase):
             self.assertEqual("running", case_state(case))
         dashboard.complete_suite(case.identifier, suites[-1], "failed", 1, "recovery failed")
         self.assertEqual("failed", case_state(case))
-        # Reporting APIs keep the independent installation and suite verdicts.
-        self.assertEqual("passed", dashboard.case_result(case.identifier)["status"])
+        # The parent aggregates its suites; the installation suite keeps its own verdict.
+        self.assertEqual("failed", dashboard.case_result(case.identifier)["status"])
+        self.assertEqual("passed", dashboard.suite_results(case.identifier)[0]["status"])
         self.assertEqual("failed", dashboard.suite_results(case.identifier)[-1]["status"])
+
+    def test_parent_stays_running_until_desktop_suites_finish(self):
+        dashboard = sample_dashboard()
+        case_id = 'bios-online-btrfs'
+        dashboard.begin(case_id)
+        dashboard.begin_suite(case_id, 'installation')
+        dashboard.complete_suite(case_id, 'installation', 'passed', 1)
+        self.assertEqual('running', dashboard.case_result(case_id)['status'])
+        frame = render_dashboard(dashboard, os.terminal_size((150, 40)))
+        self.assertIn('TESTING · Install OK', frame)
 
     def test_case_turns_green_only_after_all_assigned_suites_pass(self):
         dashboard = sample_dashboard()
@@ -94,7 +131,7 @@ class DashboardLayoutTests(unittest.TestCase):
         frame = render_dashboard(dashboard, os.terminal_size((150, 40)))
         row = next(line for line in frame.splitlines() if "▶ ✓ bios-online-btrfs" in line)
         self.assertIn("\x1b[1;32m", row)
-        self.assertIn("ALL PASSED · Install OK · Suites 11/11", frame)
+        self.assertIn("ALL PASSED · Install OK · Suites 12/12", frame)
 
     def test_running_case_is_highlighted_cyan_and_failed_suite_makes_it_red(self):
         dashboard = sample_dashboard()
@@ -106,16 +143,18 @@ class DashboardLayoutTests(unittest.TestCase):
         frame = render_dashboard(dashboard, os.terminal_size((150, 40)))
         row = next(line for line in frame.splitlines() if "▶ ✗ bios-online-btrfs" in line)
         self.assertIn("\x1b[1;31m\x1b[7m", row)
-        self.assertIn("FAILED · Install OK · Suites 3/11", frame)
+        self.assertIn("FAILED · Install OK · Suites 4/12", frame)
 
     def test_installing_case_shows_installation_checks(self):
         dashboard = sample_dashboard()
         dashboard.begin("bios-online-ext4")
-        dashboard.check("bios-online-ext4", "installed-boot", "running", "Booting installed system")
+        dashboard.begin_suite("bios-online-ext4", "installation")
+        dashboard.suite_check("bios-online-ext4", "installation", "installed-boot",
+                              "running", "Booting installed system")
         frame = render_dashboard(dashboard, os.terminal_size((150, 40)))
-        self.assertIn("Checks — bios-online-ext4", frame)
+        self.assertIn("Checks — installation", frame)
         self.assertIn("installed-boot", frame)
-        self.assertIn("No feature suites assigned", frame)
+        self.assertIn("Suites — bios-online-ext4", frame)
         self.assertIn("INSTALLING", frame)
         self.assertNotIn("appearance.theme-firefox", frame)
 
@@ -128,8 +167,8 @@ class DashboardLayoutTests(unittest.TestCase):
                 self.assertIn("appearance.theme-firefox", frame)
                 self.assertIn("▶ ● bios-online-btrfs", frame)
                 if columns < 120:
-                    self.assertLess(frame.index("Installation cases"), frame.index("Feature suites"))
-                    self.assertLess(frame.index("Feature suites"), frame.index("Checks —"))
+                    self.assertLess(frame.index("Acceptance cases"), frame.index("Suites —"))
+                    self.assertLess(frame.index("Suites —"), frame.index("Checks —"))
 
     def test_frames_fit_terminal_including_colors_and_unicode(self):
         dashboard = sample_dashboard()
@@ -161,7 +200,9 @@ class DashboardLayoutTests(unittest.TestCase):
         dashboard = sample_dashboard()
         last = tuple(dashboard.cases)[-1]
         dashboard.begin(last)
-        dashboard.check(last, "installed-boot", "running", "Checking the last installation")
+        dashboard.begin_suite(last, "installation")
+        dashboard.suite_check(last, "installation", "installed-boot", "running",
+                              "Checking the last installation")
         frame = render_dashboard(dashboard, os.terminal_size((80, 24)))
         self.assertIn("▶ ● " + last, frame)
         self.assertIn("Showing 13-13/13", frame)
@@ -169,7 +210,7 @@ class DashboardLayoutTests(unittest.TestCase):
         dashboard.begin_suite("bios-online-btrfs", "public-ghex")
         dashboard.suite_check("bios-online-btrfs", "public-ghex", "public-ghex.check", "running")
         frame = render_dashboard(dashboard, os.terminal_size((80, 24)))
-        self.assertIn("showing 10-11", frame)
+        self.assertIn("showing 11-12", frame)
         self.assertIn("Checks — public-ghex", frame)
         self.assertIn("public-ghex.check", frame)
 
@@ -197,5 +238,5 @@ class DashboardLayoutTests(unittest.TestCase):
         dashboard = AcceptanceDashboard((), iso=Path("test.iso"), architecture="amd64",
                                         artifacts=Path("test-results"), stream=io.StringIO(), live=False)
         frame = render_dashboard(dashboard, os.terminal_size((150, 30)))
-        self.assertIn("Waiting for an installation case", frame)
+        self.assertIn("Waiting for a case", frame)
         self.assertIn("0/0", frame)

@@ -307,7 +307,7 @@ class AcceptanceRegressionTests(unittest.TestCase):
             dashboard.color = False
             frame = render_dashboard(dashboard, os.terminal_size((160, 32)))
             self.assertIn("BLOCKED", frame)
-            self.assertIn("✗ 1 · ⊘ 1", frame)
+            self.assertIn("✗ 0 · ⊘ 1", frame)
             self.assertTrue((blocked.artifacts / "blocked.txt").is_file())
             output = root / "junit.xml"
             write_junit_report({"feature_suites": [record]}, output)
