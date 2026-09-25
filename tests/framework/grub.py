@@ -55,6 +55,7 @@ def boot_iso_with_debug_shell(
     menu_path: tuple[int, int] | None = None,
     kernel_arguments: tuple[str, ...] = (),
     extra_kernel_arguments: tuple[str, ...] = (),
+    serial_debug: bool = True,
     spice_socket: Path | None = None,
     scratch_dir: Path | None = None,
 ) -> None:
@@ -79,7 +80,7 @@ def boot_iso_with_debug_shell(
         (" " + " ".join(extra_kernel_arguments))
         if extra_kernel_arguments
         else ""
-    ) + debug_kernel_arguments(architecture)
+    ) + (debug_kernel_arguments(architecture) if serial_debug else "")
     if uses_graphical_grub_synchronization(architecture):
         time.sleep(firmware_delay)
         editor = _GraphicalGrubMenuEditor(qmp, scratch_dir=scratch_dir)
@@ -96,6 +97,12 @@ def boot_iso_with_debug_shell(
                 editor.move_selection_down(
                     minimum_visible_unselected_entries=(4 if top_index == 0 else 0)
                 )
+            if not serial_debug and not suffix:
+                # Preserve the entry exactly as a user boots it. In
+                # particular, adding console=ttyS0 hides early tty0 warnings
+                # from the graphical display under test.
+                qmp.send_key("ret", hold_ms=150)
+                return
             editor.open_editor()
             # Each ISO locale entry has setparams, a blank row, gfxpayload,
             # linux and initrd. Three Down presses place the cursor on linux;
@@ -381,7 +388,9 @@ class _GraphicalGrubMenuEditor:
         while time.monotonic() < deadline:
             frame = self.capture()
             layout = grub_menu_layout(frame)
-            if layout is not None and layout.visible_unselected_entries == 2:
+            # The dedicated media-check entry was removed; Advanced now has
+            # two entries total, one of which is selected.
+            if layout is not None and layout.visible_unselected_entries == 1:
                 self.current_frame = frame
                 return
             time.sleep(0.1)

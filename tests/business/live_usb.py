@@ -8,6 +8,8 @@ import tempfile
 import time
 from pathlib import Path
 
+from PIL import Image
+
 from framework.errors import ConfigurationError, TestFailure
 from framework.firmware import resolve_firmware
 from framework.grub import boot_iso_with_debug_shell
@@ -124,15 +126,26 @@ echo ISO_USB_DESKTOP_PASSED
                 vm.create_disk()
                 vm.start(attach_iso=True)
                 boot_iso_with_debug_shell(vm.qmp, vm.serial, Architecture.AMD64,
-                                          firmware_delay=delay, menu_path=(1, 1), scratch_dir=case)
-                vm.serial.wait_for_text(
-                    'AnduinOS To Go requires a USB drive written in DD mode with '
-                    'unallocated space after the image. This boot medium is not supported.',
-                    timeout=min(timeout, 180),
-                )
-                # The serial warning precedes Plymouth's graphical message.
-                time.sleep(1)
-                vm.screenshot('unsupported-media')
+                                          firmware_delay=delay, menu_path=(1, 1),
+                                          serial_debug=False, scratch_dir=case)
+                # Boot unmodified, with the real screen console. A forced
+                # serial console would invalidate this user-visible check.
+                display_deadline = time.monotonic() + min(timeout, 180)
+                while True:
+                    warning_frame = vm.screenshot('unsupported-media')
+                    with Image.open(warning_frame) as image:
+                        screen = image.convert('RGB')
+                        width, height = screen.size
+                        # Exclude both the EFI/AnduinOS splash logos in the
+                        # middle and the tiny HyperFluent icon at top left.
+                        # A real text-VT warning starts in this upper band.
+                        text_area = screen.crop((width * 12 // 100, 0,
+                                                 width * 90 // 100, height * 30 // 100))
+                        if sum(min(pixel) >= 200 for pixel in text_area.get_flattened_data()) >= 100:
+                            break
+                    if time.monotonic() >= display_deadline:
+                        raise TestFailure('To Go rejection is not visible on the display')
+                    time.sleep(0.4)
                 vm.wait(timeout=45)
                 record['status'] = 'passed'
             finally:

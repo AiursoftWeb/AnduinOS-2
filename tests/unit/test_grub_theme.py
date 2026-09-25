@@ -4,10 +4,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from framework.iso import _parse_live_entries, _parse_persistent_entry
 from framework.visual import (
+    grub_editor_left_cursor_y,
     grub_editor_layout,
     grub_frame_difference,
     grub_menu_layout,
@@ -19,6 +20,21 @@ FRAMES = ROOT / "tests/fixtures/hyperfluent"
 
 
 class HyperfluentVisualTests(unittest.TestCase):
+    def test_left_editor_lower_border_below_three_quarters_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            frame = Path(temporary) / "left-editor.ppm"
+            image = Image.new("RGB", (1440, 900), (18, 26, 42))
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((1100, 400, 1320, 660), fill=(18, 52, 170))
+            draw.rectangle((97, 298, 1018, 683), outline=(180, 180, 180), width=2)
+            for index, command in enumerate(("setparams", "set gfxpayload", "linux", "initrd")):
+                draw.text((110, 320 + index * 23), command, fill=(230, 230, 230))
+            image.save(frame, format="PPM")
+            layout = grub_editor_layout(frame)
+            self.assertIsNotNone(layout)
+            self.assertEqual((97, 1018, 298, 683),
+                             (layout.left, layout.right, layout.top, layout.bottom))
+
     def test_signed_grub_menu_scroll_and_editor_are_distinct(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             frames = {}
@@ -50,6 +66,9 @@ class HyperfluentVisualTests(unittest.TestCase):
             with Image.open(FRAMES / "editor.png") as image:
                 self.assertLess(editor.left, image.width // 8)
             self.assertGreater(grub_frame_difference(frames["editor"], frames["editor-down"]), 8)
+            self.assertIsNotNone(grub_editor_left_cursor_y(frames["editor"]))
+            self.assertGreater(grub_editor_left_cursor_y(frames["editor-down"]),
+                               grub_editor_left_cursor_y(frames["editor"]))
             self.assertEqual(2, grub_menu_layout(frames["top-1024"]).visible_unselected_entries)
             self.assertEqual(4, grub_menu_layout(frames["submenu-1024"]).visible_unselected_entries)
             self.assertEqual(2, grub_menu_layout(frames["arm-uefi-top"]).visible_unselected_entries)
@@ -85,6 +104,8 @@ menuentry "AnduinOS To Go" --class anduinos {
         self.assertIn('--size="16"', build)
         self.assertIn("/boot/grub/fonts/anduinos-unicode-16.pf2", build)
         self.assertIn("LIVE_MEDIA_LABEL=\"AOS_LIVE\"", build)
+        self.assertIn("if regexp '^cd[0-9]+$' \"\\$root\"; then", build)
+        self.assertIn("This boot medium is not supported. Powering off in 15 seconds.", build)
 
 
 if __name__ == "__main__":

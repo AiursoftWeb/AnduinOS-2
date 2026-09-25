@@ -321,6 +321,18 @@ submenu "Advanced Options..." --class recovery {
         initrd  /LiveOS/initrd
     }
     menuentry "$TOGO_TEXT" --class anduinos {
+        # Optical media have no writable space for a persistent partition.
+        # Report this before Linux takes over the framebuffer: an initrd
+        # warning can otherwise be hidden behind the firmware splash.
+        insmod regexp
+        if regexp '^cd[0-9]+$' "\$root"; then
+            clear
+            echo 'AnduinOS To Go requires a USB drive written in DD mode with unallocated space after the image.'
+            echo 'This boot medium is not supported. Powering off in 15 seconds.'
+            sleep 15
+            insmod halt
+            halt
+        fi
         set gfxpayload=auto
         linux   /LiveOS/vmlinuz root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
         initrd  /LiveOS/initrd

@@ -174,7 +174,10 @@ def grub_editor_left_cursor_y(frame: Path) -> int | None:
     if layout is None:
         return None
     width, _height, grayscale = _read_ppm_grayscale(frame)
-    themed = layout.left > width // 8
+    # The left-anchored theme starts near 7% of the screen; stock GRUB's
+    # synthetic inset is only 2.5%. The old centered-theme threshold missed
+    # the real cursor after moving the editor beside the menu.
+    themed = layout.left >= width // 20
     scan_left = layout.left if themed else 0
     scan_right = min(width, scan_left + width // 16)
     minimum_width = max(6, width // 240)
@@ -288,7 +291,9 @@ def _hyperfluent_editor_layout(width: int, height: int, rgb: bytes) -> GrubEdito
     """Recognize GRUB's editor overlay, whether centered or left-anchored."""
 
     border_rows: list[tuple[int, int, int]] = []
-    for y in range(height // 4, height * 3 // 4):
+    # At 1440x900 the left-anchored editor's lower border is near 76% of the
+    # screen. The previous 75% cutoff saw only the upper border.
+    for y in range(height // 4, height * 83 // 100):
         pixels: list[int] = []
         for x in range(width // 40, width - width // 40):
             offset = (y * width + x) * 3
