@@ -285,12 +285,12 @@ def _hyperfluent_menu_layout(width: int, height: int, rgb: bytes) -> GrubMenuLay
 
 
 def _hyperfluent_editor_layout(width: int, height: int, rgb: bytes) -> GrubEditorLayout | None:
-    """Recognize GRUB's centered editor overlay on top of the theme."""
+    """Recognize GRUB's editor overlay, whether centered or left-anchored."""
 
     border_rows: list[tuple[int, int, int]] = []
     for y in range(height // 4, height * 3 // 4):
         pixels: list[int] = []
-        for x in range(width // 4, width * 3 // 4):
+        for x in range(width // 40, width - width // 40):
             offset = (y * width + x) * 3
             red, green, blue = rgb[offset : offset + 3]
             if min(red, green, blue) >= 145 and max(red, green, blue) - min(red, green, blue) <= 20:

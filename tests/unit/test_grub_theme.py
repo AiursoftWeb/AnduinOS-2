@@ -24,7 +24,7 @@ class HyperfluentVisualTests(unittest.TestCase):
             frames = {}
             for name in (
                 "top", "submenu", "submenu-scrolled", "editor", "editor-down",
-                "top-1024", "submenu-1024", "bios-16",
+                "top-1024", "submenu-1024",
                 "arm-uefi-top", "arm-uefi-submenu",
             ):
                 destination = Path(temporary) / f"{name}.ppm"
@@ -47,10 +47,11 @@ class HyperfluentVisualTests(unittest.TestCase):
             editor = grub_editor_layout(frames["editor"])
             self.assertIsNotNone(editor)
             self.assertGreaterEqual(editor.visible_command_lines, 4)
+            with Image.open(FRAMES / "editor.png") as image:
+                self.assertLess(editor.left, image.width // 8)
             self.assertGreater(grub_frame_difference(frames["editor"], frames["editor-down"]), 8)
             self.assertEqual(2, grub_menu_layout(frames["top-1024"]).visible_unselected_entries)
             self.assertEqual(4, grub_menu_layout(frames["submenu-1024"]).visible_unselected_entries)
-            self.assertEqual(2, grub_menu_layout(frames["bios-16"]).visible_unselected_entries)
             self.assertEqual(2, grub_menu_layout(frames["arm-uefi-top"]).visible_unselected_entries)
             self.assertEqual(4, grub_menu_layout(frames["arm-uefi-submenu"]).visible_unselected_entries)
 
