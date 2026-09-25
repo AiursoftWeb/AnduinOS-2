@@ -198,16 +198,16 @@ function prepare_iso_directory() {
 }
 
 function prepare_live_grub_font() {
-    print_ok "Generating 28px Unicode font for the Live ISO..."
+    print_ok "Generating BIOS Unicode font for the Live ISO..."
     mkdir -p \
         image/isolinux \
         image/boot/grub/fonts
     grub-mkfont \
-        --size="28" \
-        --output="image/isolinux/anduinos-unicode-28.pf2" \
+        --size="16" \
+        --output="image/isolinux/anduinos-unicode-16.pf2" \
         "/usr/share/fonts/opentype/unifont/unifont.otf"
-    cp "image/isolinux/anduinos-unicode-28.pf2" \
-        "image/boot/grub/fonts/anduinos-unicode-28.pf2"
+    cp "image/isolinux/anduinos-unicode-16.pf2" \
+        "image/boot/grub/fonts/anduinos-unicode-16.pf2"
     judge "Prepare readable Live GRUB font"
 }
 
@@ -296,10 +296,10 @@ set theme_font_ready=0
 if loadfont unicode ; then
     set theme_font_ready=1
     terminal_output gfxterm
-elif loadfont /boot/grub/fonts/anduinos-unicode-28.pf2 ; then
+elif loadfont /boot/grub/fonts/anduinos-unicode-16.pf2 ; then
     set theme_font_ready=1
     terminal_output gfxterm
-elif loadfont /isolinux/anduinos-unicode-28.pf2 ; then
+elif loadfont /isolinux/anduinos-unicode-16.pf2 ; then
     set theme_font_ready=1
     terminal_output gfxterm
 fi

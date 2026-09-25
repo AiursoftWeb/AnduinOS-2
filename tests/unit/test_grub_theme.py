@@ -24,7 +24,7 @@ class HyperfluentVisualTests(unittest.TestCase):
             frames = {}
             for name in (
                 "top", "submenu", "submenu-scrolled", "editor", "editor-down",
-                "top-1024", "submenu-1024",
+                "top-1024", "submenu-1024", "bios-16",
             ):
                 destination = Path(temporary) / f"{name}.ppm"
                 with Image.open(FRAMES / f"{name}.png") as image:
@@ -49,6 +49,7 @@ class HyperfluentVisualTests(unittest.TestCase):
             self.assertGreater(grub_frame_difference(frames["editor"], frames["editor-down"]), 8)
             self.assertEqual(2, grub_menu_layout(frames["top-1024"]).visible_unselected_entries)
             self.assertEqual(4, grub_menu_layout(frames["submenu-1024"]).visible_unselected_entries)
+            self.assertEqual(2, grub_menu_layout(frames["bios-16"]).visible_unselected_entries)
 
     def test_theme_does_not_change_live_kernel_contract(self) -> None:
         content = "\n".join(
@@ -77,6 +78,8 @@ menuentry "AnduinOS To Go" --class anduinos {
         self.assertIn("source /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg", build)
         self.assertIn('gfxterm gfxmenu png all_video', build)
         self.assertIn("if loadfont unicode", build)
+        self.assertIn('--size="16"', build)
+        self.assertIn("/boot/grub/fonts/anduinos-unicode-16.pf2", build)
         self.assertIn("LIVE_MEDIA_LABEL=\"AOS_LIVE\"", build)
 
 
