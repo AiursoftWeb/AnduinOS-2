@@ -83,6 +83,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gdm-autologin-keyring-locked",
                 "gnome50-keyboard-null-variant",
                 "gnome50-gdm-media-keys-null-table",
+                "gnome50-autologin-media-keys-proxy-race",
                 "gnome50-sharing-closed-dbus",
                 "gnome50-transient-stack-position",
                 "ding-gtk422-transient-a11y-toplevel",
@@ -299,6 +300,39 @@ class JournalClassificationTests(unittest.TestCase):
         )
         self.assertFalse(automatic.passed)
         self.assertFalse(installed_user.passed)
+
+    def test_autologin_media_keys_proxy_diagnostic_is_exact_and_budgeted(self):
+        message = (
+            "g_dbus_proxy_call_internal: assertion "
+            "'G_IS_DBUS_PROXY (proxy)' failed"
+        )
+        component = (
+            "gsd-media-keys|user@1000.service|"
+            "org.gnome.SettingsDaemon.MediaKeys.service|"
+            "/usr/libexec/gsd-media-keys"
+        )
+        item = entry(message, component)
+        accepted = self.policy.classify((item,), scenario(), VERSIONS)
+        self.assertTrue(accepted.passed)
+        self.assertEqual(
+            "gnome50-autologin-media-keys-proxy-race",
+            accepted.known_diagnostics[0].rule_id,
+        )
+        for changed_item, changed_scenario, versions in (
+            (item, scenario(automatic_login=False), VERSIONS),
+            (item, scenario(desktop_contracts=False), VERSIONS),
+            (entry(message, component.replace("user@1000", "user@60578")), scenario(), VERSIONS),
+            (entry(message.replace("proxy", "connection"), component), scenario(), VERSIONS),
+            (item, scenario(), dict(VERSIONS, **{"gnome-settings-daemon": "51.0-1"})),
+        ):
+            self.assertFalse(
+                self.policy.classify((changed_item,), changed_scenario, versions).passed
+            )
+        excessive = self.policy.classify(
+            (item, entry(message, component, cursor="second")), scenario(), VERSIONS
+        )
+        self.assertFalse(excessive.passed)
+        self.assertEqual("diagnostic-budget-exceeded", excessive.blockers[0].kind)
 
     def test_sharing_diagnostic_is_exact_automatic_desktop_pair(self):
         message = (
@@ -638,6 +672,12 @@ class JournalGateIntegrationTests(unittest.TestCase):
             self.assertTrue(
                 (artifacts / "installed-journal-functional-health.txt").is_file()
             )
+            self.assertIn(
+                "gsd-media-keys-service=active",
+                (artifacts / "installed-journal-functional-health.txt").read_text(
+                    encoding="utf-8"
+                ),
+            )
             self.assertEqual(
                 json.loads(POLICY_PATH.read_text(encoding="utf-8")),
                 json.loads(
@@ -702,9 +742,12 @@ class _JournalConsole:
                 0,
             )
         if "gnome-shell-pid=" in script:
+            assert "systemctl --user is-active org.gnome.SettingsDaemon.MediaKeys.service" in script
             return CommandResult(
                 "gnome-shell-pid=100\n"
                 "gsd-keyboard-pid=101\n"
+                "gsd-media-keys-pid=103\n"
+                "gsd-media-keys-service=active\n"
                 "gnome-keyring-pid=102\n"
                 "input-sources=[('xkb', 'us'), ('ibus', 'rime')]",
                 0,

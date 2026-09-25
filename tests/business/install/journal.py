@@ -193,15 +193,20 @@ class JournalChecks:
 set -euo pipefail
 shell_pid=$(pgrep -n -x gnome-shell)
 keyboard_pid=$(pgrep -n -x gsd-keyboard)
+media_keys_pid=$(pgrep -n -x gsd-media-keys)
 keyring_pid=$(pgrep -n -x gnome-keyring-d)
 ding_pid=$(pgrep -n -f '^gjs .*/ding@rastersoft\.com/app/ding\.js( |$)')
 test -n "$shell_pid"
 test -n "$keyboard_pid"
+test -n "$media_keys_pid"
 test -n "$keyring_pid"
 test -n "$ding_pid"
+test "$(systemctl --user is-active org.gnome.SettingsDaemon.MediaKeys.service)" = active
 sources=$(gsettings get org.gnome.desktop.input-sources sources)
 printf 'gnome-shell-pid=%s\n' "$shell_pid"
 printf 'gsd-keyboard-pid=%s\n' "$keyboard_pid"
+printf 'gsd-media-keys-pid=%s\n' "$media_keys_pid"
+printf 'gsd-media-keys-service=active\n'
 printf 'gnome-keyring-pid=%s\n' "$keyring_pid"
 printf 'ding-pid=%s\n' "$ding_pid"
 printf 'input-sources=%s\n' "$sources"
@@ -263,7 +268,7 @@ printf 'input-sources=%s\n' "$sources"
         failures = []
         if functional.returncode != 0:
             failures.append(
-                "GNOME Shell, keyboard, keyring, or input-source functional "
+                "GNOME Shell, keyboard, media keys, keyring, or input-source functional "
                 "health check failed"
             )
         if not verdict.passed:

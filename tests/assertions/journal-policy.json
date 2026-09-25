@@ -53,6 +53,20 @@
       "reason": "GNOME 50 can emit this assertion while the transient GDM greeter user's media-keys service exits after a manual desktop login. The rule excludes the installed user's UID, while the same action must still prove the real user session and GNOME Shell remain healthy."
     },
     {
+      "id": "gnome50-autologin-media-keys-proxy-race",
+      "component_regex": "^gsd-media-keys\\|user@1000\\.service\\|org\\.gnome\\.SettingsDaemon\\.MediaKeys\\.service\\|/usr/libexec/gsd-media-keys$",
+      "message_regex": "^g_dbus_proxy_call_internal: assertion 'G_IS_DBUS_PROXY \\(proxy\\)' failed$",
+      "conditions": {
+        "automatic_login": true,
+        "desktop_contracts": true
+      },
+      "max_occurrences": 1,
+      "package": "gnome-settings-daemon",
+      "version_glob": "50.*",
+      "owner": "GNOME Settings Daemon",
+      "reason": "One GNOME 50 startup assertion was observed during automatic login; the same ISO and case passed on rerun. The gate separately requires the installed user's media-keys service and process to remain active, so a broken service still fails."
+    },
+    {
       "id": "gnome50-sharing-closed-dbus",
       "component_regex": "^gsd-sharing\\|user@1000\\.service\\|org\\.gnome\\.SettingsDaemon\\.Sharing\\.service\\|/usr/libexec/gsd-sharing$",
       "message_regex": "^g_dbus_connection_call_internal: assertion 'G_IS_DBUS_CONNECTION \\(connection\\)' failed$",
