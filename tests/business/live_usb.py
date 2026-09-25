@@ -19,7 +19,7 @@ from framework.usb_iso import prepare_iso_usb
 
 
 def run_live_usb(inspection, artifacts: Path, overrides, *, timeout=600, memory=4096, cpus=2, delay=2) -> bool:
-    """AMD64 Rufus regression. Dedicated reports remain visible in full runs."""
+    """AMD64 USB regressions and rejection of To Go on optical media."""
     if inspection.architecture is not Architecture.AMD64:
         raise ConfigurationError('Rufus ISO-mode boot regression currently requires AMD64')
     artifacts.mkdir(parents=True, exist_ok=False)
@@ -102,5 +102,50 @@ echo ISO_USB_DESKTOP_PASSED
             (artifacts/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
             write_junit_report(summary, artifacts/'junit.xml')
         print(f"[ISO USB] {label}: {record['status']} {record['error']}", flush=True)
+    case = artifacts / 'TO_GO_OPTICAL_REJECTED'
+    case.mkdir()
+    record = dict(id='live-usb-to-go-optical-rejected', status='failed', seconds=0, error='')
+    begin = time.monotonic()
+    vm = None
+    print('[ISO USB] Testing To Go rejection on optical ISO', flush=True)
+    try:
+        with tempfile.TemporaryDirectory(prefix='.optical-work-', dir=case) as directory:
+            work = Path(directory)
+            variables = work / 'vars.fd'
+            shutil.copyfile(firmware.variables_template, variables)
+            vm = QemuVm(QemuConfig(
+                architecture=Architecture.AMD64, firmware=Firmware.UEFI_NO_SECURE_BOOT,
+                network=Network.OFFLINE, memory_mib=memory, cpus=cpus, disk_gib=1,
+                ssh_forward_port=0, iso=inspection.path, disk=work/'target.qcow2',
+                variables=variables, firmware_selection=firmware, artifacts=case,
+                qemu_binary=binary, acceleration=accel,
+            ))
+            try:
+                vm.create_disk()
+                vm.start(attach_iso=True)
+                boot_iso_with_debug_shell(vm.qmp, vm.serial, Architecture.AMD64,
+                                          firmware_delay=delay, menu_path=(1, 1), scratch_dir=case)
+                vm.serial.wait_for_text(
+                    'AnduinOS To Go requires a USB drive written in DD mode with '
+                    'unallocated space after the image. This boot medium is not supported.',
+                    timeout=min(timeout, 180),
+                )
+                # The serial warning precedes Plymouth's graphical message.
+                time.sleep(1)
+                vm.screenshot('unsupported-media')
+                vm.wait(timeout=45)
+                record['status'] = 'passed'
+            finally:
+                vm.stop()
+    except Exception as error:
+        record['error'] = str(error)
+    finally:
+        record['seconds'] = time.monotonic()-begin
+        records.append(record)
+        summary = dict(schema_version=1, iso=str(inspection.path), iso_sha256=inspection.sha256,
+                       scope='live-usb-iso-mode', results=records, feature_suites=[])
+        (artifacts/'summary.json').write_text(json.dumps(summary, indent=2)+'\n')
+        write_junit_report(summary, artifacts/'junit.xml')
+    print(f"[ISO USB] To Go optical: {record['status']} {record['error']}", flush=True)
     print(f'[ISO USB] Evidence: {artifacts} ({time.monotonic()-started:.0f}s)', flush=True)
-    return len(records) == 2 and all(r['status'] == 'passed' for r in records)
+    return len(records) == 3 and all(r['status'] == 'passed' for r in records)
