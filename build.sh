@@ -222,76 +222,52 @@ function prepare_live_grub_theme() {
     judge "Copy packaged GRUB theme to Live ISO"
 }
 
-function build_iso() {
-    print_ok "Building ISO image..."
+function generate_live_grub_config() {
+    local try_text="Try or Install $TARGET_BUSINESS_NAME"
+    local togo_text="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
+    # Our Live checker owns media verification; do not enable rd.live.check.
+    local live_boot_args="root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
+    local regional_entries=""
+    local region_count=0
+    local code label timezone keyboard extra
 
-    # Copy the kernel and the separately-built non-host-only Live initrd.
-    print_ok "Copying the Dracut Live boot artifacts to /LiveOS..."
-    # Resolve the distro-maintained symlinks — they always point to the
-    # current kernel, so we never pick a stale one left behind by apt.
-    REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz 2>/dev/null)
-    [ -f "$REAL_VMLINUZ" ] || REAL_VMLINUZ=$(readlink -f new_building_os/boot/vmlinuz 2>/dev/null)
-    REAL_INITRD="new_building_os/boot/anduinos-live-initrd.img"
-    sudo cp "$REAL_VMLINUZ" image/LiveOS/vmlinuz
-    sudo cp "$REAL_INITRD" image/LiveOS/initrd
-    judge "Copy kernel files"
-
-    print_ok "Generating grub.cfg..."
-    touch "image/$TARGET_NAME"
-    cp "$SCRIPT_DIR/args.sh" "image/$TARGET_NAME"
-    judge "Copy build args to disk"
-
-    TRY_TEXT="Try or Install $TARGET_BUSINESS_NAME"
-    TOGO_TEXT="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
-    # Our Live checker owns progress/recovery. Upstream rd.live.check hides
-    # Plymouth and waits twelve hours on failure; never enable that path here.
-    LIVE_BOOT_ARGS="root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
-
-    # Build the Try-mode submenu from the independent Live regional policy.
-    # The selected region supplies useful locale, timezone and physical-XKB
-    # guesses; none of these constrain the system chosen in the installer.
-    _TRY_LOCALE_ENTRIES=""
-    _LIVE_REGION_COUNT=0
-    while IFS="|" read -r _code _label _tz _kbd _extra; do
-        [ -z "$_code" ] && continue
-        if [ -z "$_label" ] || [ -z "$_tz" ] || [ -z "$_kbd" ] || [ -n "$_extra" ]; then
-            print_error "Invalid Live regional policy entry: $_code"
-            exit 1
+    # The Live region is only a boot-time default; it does not constrain the installer.
+    while IFS='|' read -r code label timezone keyboard extra; do
+        [[ -n $code ]] || continue
+        if [[ -z $label || -z $timezone || -z $keyboard || -n $extra ]]; then
+            printf 'Invalid Live regional policy entry: %s\n' "$code" >&2
+            return 1
         fi
-        case "$_code:$_tz:$_kbd" in
+        case "$code:$timezone:$keyboard" in
             *[!A-Za-z0-9_+./:@-]*)
-                print_error "Unsafe Live regional policy entry: $_code"
-                exit 1
+                printf 'Unsafe Live regional policy entry: %s\n' "$code" >&2
+                return 1
                 ;;
         esac
-        case "$_label" in
+        case "$label" in
             *\"*|*\\*|*\$*)
-                print_error "Unsafe Live GRUB label: $_label"
-                exit 1
+                printf 'Unsafe Live GRUB label: %s\n' "$label" >&2
+                return 1
                 ;;
         esac
-        _LIVE_REGION_COUNT=$((_LIVE_REGION_COUNT + 1))
-
-        _TRY_LOCALE_ENTRIES="$_TRY_LOCALE_ENTRIES
-    menuentry \"$_label\" --class lang {
+        region_count=$((region_count + 1))
+        regional_entries="$regional_entries
+    menuentry \"$label\" --class lang {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS locale=${_code}.UTF-8 timezone=${_tz} systemd.timezone=${_tz} rd.anduinos.keyboard=${_kbd} quiet splash ---
+        linux   /LiveOS/vmlinuz $live_boot_args locale=$code.UTF-8 timezone=$timezone systemd.timezone=$timezone rd.anduinos.keyboard=$keyboard quiet splash ---
         initrd  /LiveOS/initrd
     }"
     done <<< "$SUPPORTED_LIVE_REGIONS"
-    if [ "$_LIVE_REGION_COUNT" -ne 28 ]; then
-        print_error "Live regional policy must contain exactly 28 entries"
-        exit 1
+    if ((region_count != 28)); then
+        printf 'Live regional policy must contain exactly 28 entries\n' >&2
+        return 1
     fi
 
-    cat << EOF > image/isolinux/grub.cfg
-
+    cat <<EOF
 search --set=root --file /$TARGET_NAME
 
-# Prefer 16:9 for the theme's artwork, but retain 16:10 and 4:3 modes for
-# firmware without a usable 16:9 GOP/VBE mode. The theme crops proportionally
-# from the right when a narrower aspect ratio is selected.
-set gfxmode=1920x1080,1600x900,1280x720,1440x900,1280x800,1024x768,auto
+# Match the installed system: let GRUB and the firmware choose the display mode.
+set gfxmode=auto
 insmod all_video
 insmod gfxterm
 insmod font
@@ -313,20 +289,18 @@ fi
 set default="0"
 set timeout=10
 
-submenu "$TRY_TEXT" --class anduinos {
-$_TRY_LOCALE_ENTRIES
+submenu "$try_text" --class anduinos {
+$regional_entries
 }
 
 submenu "Advanced Options..." --class recovery {
-    menuentry "$TRY_TEXT (Safe Graphics)" --class driver {
+    menuentry "$try_text (Safe Graphics)" --class driver {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $LIVE_BOOT_ARGS nomodeset ---
+        linux   /LiveOS/vmlinuz $live_boot_args nomodeset ---
         initrd  /LiveOS/initrd
     }
-    menuentry "$TOGO_TEXT" --class anduinos {
-        # Optical media have no writable space for a persistent partition.
-        # Report this before Linux takes over the framebuffer: an initrd
-        # warning can otherwise be hidden behind the firmware splash.
+    menuentry "$togo_text" --class anduinos {
+        # Optical media cannot hold a writable persistence partition.
         insmod regexp
         if regexp '^cd[0-9]+$' "\$root"; then
             clear
@@ -351,6 +325,28 @@ if [ "\$grub_platform" == "efi" ]; then
     }
 fi
 EOF
+}
+
+function build_iso() {
+    print_ok "Building ISO image..."
+
+    # Copy the kernel and the separately-built non-host-only Live initrd.
+    print_ok "Copying the Dracut Live boot artifacts to /LiveOS..."
+    # Resolve the distro-maintained symlinks — they always point to the
+    # current kernel, so we never pick a stale one left behind by apt.
+    REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz 2>/dev/null)
+    [ -f "$REAL_VMLINUZ" ] || REAL_VMLINUZ=$(readlink -f new_building_os/boot/vmlinuz 2>/dev/null)
+    REAL_INITRD="new_building_os/boot/anduinos-live-initrd.img"
+    sudo cp "$REAL_VMLINUZ" image/LiveOS/vmlinuz
+    sudo cp "$REAL_INITRD" image/LiveOS/initrd
+    judge "Copy kernel files"
+
+    print_ok "Generating grub.cfg..."
+    touch "image/$TARGET_NAME"
+    cp "$SCRIPT_DIR/args.sh" "image/$TARGET_NAME"
+    judge "Copy build args to disk"
+
+    generate_live_grub_config > image/isolinux/grub.cfg
     judge "Generate grub.cfg"
 
 
@@ -592,16 +588,18 @@ function umount_on_exit() {
 }
 
 # =============   main  ================
-cd "$SCRIPT_DIR"
-bind_signal
-clean
-download_base_system
-mount_folders
-setup_apt
-run_chroot
-umount_folders
-prepare_iso_directory
-prepare_live_grub_font
-prepare_live_grub_theme
-build_iso
-echo "$0 - Build completed."
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    cd "$SCRIPT_DIR"
+    bind_signal
+    clean
+    download_base_system
+    mount_folders
+    setup_apt
+    run_chroot
+    umount_folders
+    prepare_iso_directory
+    prepare_live_grub_font
+    prepare_live_grub_theme
+    build_iso
+    echo "$0 - Build completed."
+fi

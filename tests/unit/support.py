@@ -229,6 +229,26 @@ from framework.wifi import (
 ROOT = Path(__file__).parents[1]
 
 
+def render_live_grub(regions: str | None = None) -> subprocess.CompletedProcess[str]:
+    """Render the Live menu using the function in the actual ISO build script."""
+
+    # args.sh derives SCRIPT_DIR from $0; point bash -c's $0 at this repo.
+    return subprocess.run(
+        (
+            "bash",
+            "-c",
+            'source "$1"; if [[ "$2" == override ]]; then SUPPORTED_LIVE_REGIONS=$(cat); fi; generate_live_grub_config',
+            str(ROOT.parent / "args.sh"),
+            str(ROOT.parent / "build.sh"),
+            "override" if regions is not None else "default",
+        ),
+        input=regions + "\n" if regions is not None else None,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
 def _source_tree(path: Path) -> str:
     """Read one module or a package as one searchable implementation view."""
 

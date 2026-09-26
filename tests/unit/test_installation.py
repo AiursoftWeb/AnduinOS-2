@@ -1449,15 +1449,18 @@ class BootContractTests(unittest.TestCase):
             by_locale["zh_CN"],
         )
 
-        build = (ROOT.parent / "build.sh").read_text(encoding="utf-8")
-        self.assertIn('done <<< "$SUPPORTED_LIVE_REGIONS"', build)
         locale_mod = (
             ROOT.parent / "mods/82-locales-config/install.sh"
         ).read_text(encoding="utf-8")
         self.assertIn('done <<< "$SUPPORTED_LIVE_REGIONS"', locale_mod)
         self.assertNotIn("SUPPORTED_LOCALES", locale_mod)
-        self.assertIn("rd.anduinos.keyboard=${_kbd}", build)
-        self.assertNotIn('case "${_code}"', build)
+        generated = render_live_grub()
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        entries = _parse_live_entries(generated.stdout)
+        self.assertEqual(set(by_locale), {entry.locale.removesuffix(".UTF-8") for entry in entries})
+        for entry in entries:
+            with self.subTest(locale=entry.locale):
+                self.assertEqual(entry.keyboard, by_locale[entry.locale.removesuffix(".UTF-8")][2])
 
     def test_iso_rejects_a_partial_regional_menu(self):
         with self.assertRaises(ConfigurationError):

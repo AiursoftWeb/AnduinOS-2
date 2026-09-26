@@ -5,6 +5,7 @@ import unittest
 
 from framework.errors import ConfigurationError
 from framework.iso import _pe_machine, _validate_dracut_live_contract
+from unit.support import render_live_grub
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -22,21 +23,18 @@ class DracutLiveContractTests(unittest.TestCase):
 
     def test_every_live_entry_uses_the_dracut_contract(self) -> None:
         build = (ROOT / "build.sh").read_text()
-        common = (
-            "root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS "
-            "rd.live.squashimg=rootfs.squashfs rd.overlay "
-            "rd.anduinos.live=1"
-        )
-        self.assertIn(f'LIVE_BOOT_ARGS="{common}"', build)
-        self.assertIn("rd.overlay=LABEL=ANDUINOS-PERSIST", build)
-        self.assertNotIn("ANDUINOS-PERSISTENCE", build)
-        self.assertIn("rd.live.overlay.cowfs=ext4", build)
-        self.assertNotIn("rd.live.check=1", build)
-        self.assertNotIn("rd.anduinos.media-check=", build)
+        generated = render_live_grub()
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        _validate_dracut_live_contract(generated.stdout, expected_label="AOS_LIVE")
+        self.assertIn("rd.overlay=LABEL=ANDUINOS-PERSIST", generated.stdout)
+        self.assertNotIn("ANDUINOS-PERSISTENCE", generated.stdout)
+        self.assertIn("rd.live.overlay.cowfs=ext4", generated.stdout)
+        self.assertNotIn("rd.live.check=1", generated.stdout)
+        self.assertNotIn("rd.anduinos.media-check=", generated.stdout)
         self.assertEqual(build.count("-partition_offset 16"), 2)
         self.assertIn("implantisomd5 --force", build)
-        self.assertNotIn("Check installation media for defects", build)
-        self.assertNotIn("boot=casper", build)
+        self.assertNotIn("Check installation media for defects", generated.stdout)
+        self.assertNotIn("boot=casper", generated.stdout)
 
     def test_dedicated_live_initrd_recipe_only_builds_the_image(self) -> None:
         script = (ROOT / "mods/80-dracut-live-image/install.sh").read_text()

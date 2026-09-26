@@ -679,6 +679,7 @@ if printf '%s\n' "$mount_targets" | grep -Eq '^/target($|/)|^/run/anduinos-targe
     exit 1
 fi
 grub-script-check /boot/grub/grub.cfg
+grep -Eq '^[[:space:]]*set gfxmode=auto$' /boot/grub/grub.cfg
 dpkg-query -W -f='${{db:Status-Abbrev}}' anduinos-hyperfluent-grub-theme | grep -q '^ii '
 test -s /usr/share/grub/themes/anduinos-hyperfluent/theme.txt
 test -s /etc/default/grub.d/30-anduinos-hyperfluent.cfg

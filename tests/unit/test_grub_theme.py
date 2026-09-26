@@ -1,5 +1,6 @@
 """HyperFluent menu semantics captured from signed GRUB, plus ISO contracts."""
 
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,7 @@ from framework.visual import (
     grub_frame_difference,
     grub_menu_layout,
 )
+from unit.support import render_live_grub
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -91,22 +93,23 @@ class HyperfluentVisualTests(unittest.TestCase):
             self.assertEqual(2, grub_menu_layout(frames["arm-uefi-top"]).visible_unselected_entries)
             self.assertEqual(4, grub_menu_layout(frames["arm-uefi-submenu"]).visible_unselected_entries)
 
-    def test_theme_does_not_change_live_kernel_contract(self) -> None:
-        content = "\n".join(
-            f'''menuentry "Language {index}" --class lang {{
-    linux /LiveOS/vmlinuz root=live:CDLABEL=AOS_LIVE rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=en_US.UTF-8 timezone=UTC systemd.timezone=UTC rd.anduinos.keyboard=us
-    initrd /LiveOS/initrd
-}}'''
-            for index in range(28)
-        )
-        content += '''
-menuentry "AnduinOS To Go" --class anduinos {
-    linux /LiveOS/vmlinuz root=live:CDLABEL=AOS_LIVE rd.overlay=LABEL=ANDUINOS-PERSIST
-    initrd /LiveOS/initrd
-}
-'''
+    def test_generated_theme_menu_retains_live_kernel_contract(self) -> None:
+        generated = render_live_grub()
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        content = generated.stdout
         self.assertEqual(28, len(_parse_live_entries(content)))
-        self.assertEqual("AnduinOS To Go", _parse_persistent_entry(content).name)
+        self.assertEqual(
+            "AnduinOS To Go (Persistent on USB)",
+            _parse_persistent_entry(content).name,
+        )
+        syntax = subprocess.run(
+            ("grub-script-check",),
+            input=content,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(0, syntax.returncode, syntax.stderr)
 
     def test_build_copies_packaged_theme_before_manifest(self) -> None:
         build = (ROOT / "build.sh").read_text(encoding="utf-8")
@@ -114,22 +117,29 @@ menuentry "AnduinOS To Go" --class anduinos {
             encoding="utf-8"
         )
         self.assertIn("apt install -y anduinos-hyperfluent-grub-theme", install)
-        self.assertLess(build.index("prepare_live_grub_theme\nbuild_iso"), build.index('echo "$0 - Build completed."'))
-        self.assertIn("source /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg", build)
+        self.assertIn("generate_live_grub_config > image/isolinux/grub.cfg", build)
         self.assertIn('gfxterm gfxmenu png all_video', build)
-        self.assertIn("if loadfont unicode", build)
         self.assertIn('--size="16"', build)
         self.assertIn("/boot/grub/fonts/anduinos-unicode-16.pf2", build)
         self.assertIn("LIVE_MEDIA_LABEL=\"AOS_LIVE\"", build)
-        self.assertIn("if regexp '^cd[0-9]+$' \"\\$root\"; then", build)
-        self.assertIn("This boot medium is not supported. Powering off in 15 seconds.", build)
+        generated = render_live_grub()
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        self.assertIn("source /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg", generated.stdout)
+        self.assertIn("if loadfont unicode", generated.stdout)
+        self.assertIn("if regexp '^cd[0-9]+$' \"$root\"; then", generated.stdout)
+        self.assertIn("This boot medium is not supported. Powering off in 15 seconds.", generated.stdout)
 
-    def test_live_grub_prefers_16_by_9_without_dropping_16_by_10(self) -> None:
-        build = (ROOT / "build.sh").read_text(encoding="utf-8")
-        self.assertIn(
-            "set gfxmode=1920x1080,1600x900,1280x720,1440x900,1280x800,1024x768,auto",
-            build,
-        )
+    def test_live_grub_uses_automatic_display_mode(self) -> None:
+        generated = render_live_grub()
+        self.assertEqual(0, generated.returncode, generated.stderr)
+        self.assertIn("\nset gfxmode=auto\n", generated.stdout)
+        self.assertNotIn("set gfxmode=1920x1080", generated.stdout)
+
+    def test_live_grub_rejects_incomplete_regional_policy_before_output(self) -> None:
+        generated = render_live_grub("en_US|English|UTC|us")
+        self.assertNotEqual(0, generated.returncode)
+        self.assertEqual("", generated.stdout)
+        self.assertIn("exactly 28 entries", generated.stderr)
 
 
 if __name__ == "__main__":
