@@ -74,13 +74,10 @@ def grub_menu_layout(frame: Path) -> GrubMenuLayout | None:
     if sum(value <= 48 for value in grayscale) < width * height * 3 // 4:
         return None
     wide_rows: list[int] = []
-    # The signed amd64 GRUB path uses the stock text layout, whose lower menu
-    # border is painted at roughly 84% of the framebuffer.  Scanning only the
-    # first four fifths silently discarded that border and made a real Secure
-    # Boot menu indistinguishable from an editor/firmware frame.  Leave the
-    # bottom eighth for GRUB's help text while including both supported menu
-    # layouts.
-    for y in range(height * 7 // 8):
+    # Stock GRUB places the lower border according to its active video mode.
+    # The release ISO can put it below 87.5% at 1920x1080; the help text is
+    # not a full-width band, so scan the entire frame for real borders.
+    for y in range(height):
         row = grayscale[y * width : (y + 1) * width]
         if sum(96 <= value <= 240 for value in row) >= width * 7 // 10:
             wide_rows.append(y)
@@ -123,7 +120,7 @@ def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
     grayscale = rgb[0::3]
     wide_rows = [
         y
-        for y in range(height * 7 // 8)
+        for y in range(height)
         if sum(
             96 <= value <= 240
             for value in grayscale[y * width : (y + 1) * width]
@@ -149,14 +146,11 @@ def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
             active_rows.append(y)
     command_bands = _integer_bands(active_rows, maximum_gap=2)
     # Supported locale entries contain setparams, gfxpayload, linux and initrd.
-    # A partially repainted 28-entry locale menu can temporarily lose its wide
-    # highlight band; rejecting crowded content prevents that transient menu
-    # from masquerading as the editor after the `e` key.
-    # While a long linux line is wrapping, the first few glyphs on its new
-    # visual row can form several disconnected horizontal bands. The Live
-    # keyboard argument made one real trace briefly reach nine bands while
-    # typing k=s; the 28-entry locale menu remains far above this bound.
-    if not 3 <= len(command_bands) <= 12:
+    # Entry contents are not limited to four commands: a real To Go entry
+    # includes an optical-media guard before linux/initrd. The two editor
+    # borders distinguish it from a painted menu; do not reject a valid
+    # editor just because product logic added lines to the entry.
+    if len(command_bands) < 3:
         return None
     return GrubEditorLayout(
         top=top,
@@ -320,7 +314,7 @@ def _hyperfluent_editor_layout(width: int, height: int, rgb: bytes) -> GrubEdito
         if bright >= max(3, width // 1000):
             active_rows.append(y)
     command_bands = _integer_bands(active_rows, maximum_gap=2)
-    if not 3 <= len(command_bands) <= 12:
+    if len(command_bands) < 3:
         return None
     return GrubEditorLayout(
         top=top,

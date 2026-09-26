@@ -59,13 +59,12 @@ def boot_iso_with_debug_shell(
     spice_socket: Path | None = None,
     scratch_dir: Path | None = None,
 ) -> None:
-    """Edit and boot the ISO's real locale menuentry.
+    """Boot the ISO with a serial test channel when requested.
 
-    AMD64 follows the same menuentry a user boots and appends only the serial
-    test channel in GRUB's editor. ARM64 uses an agent-independent SPICE
-    keyboard and requires a stable graphical command-line repaint after every
-    command. Linux then proves the complete sequence on the native PL011 while
-    the GPU stays present for GNOME.
+    AMD64 regional entries are exercised through the real menu and editor.
+    The longer To Go entry and ARM64 use the inspected ISO kernel arguments
+    through GRUB's command prompt, avoiding source-line-position assumptions.
+    Linux then proves the resulting command line in the guest.
     """
 
     if menu_path is None:
@@ -82,11 +81,30 @@ def boot_iso_with_debug_shell(
         else ""
     ) + (debug_kernel_arguments(architecture) if serial_debug else "")
     if uses_graphical_grub_synchronization(architecture):
-        time.sleep(firmware_delay)
+        # The VM is released only after QMP is connected. Observe the menu as
+        # soon as it appears; a fixed firmware sleep can miss its countdown.
         editor = _GraphicalGrubMenuEditor(qmp, scratch_dir=scratch_dir)
         try:
             editor.wait_for_top_menu(timeout=30)
-            editor.cancel_timeout()
+            if menu_path == (1, 1) and serial_debug:
+                # The To Go entry contains an optical-media guard before its
+                # linux command. Its source lines and visual wrapping are not
+                # a stable way to locate that command in GRUB's editor. Use
+                # the kernel arguments inspected from this exact ISO instead;
+                # the separate optical-media test exercises the real guard.
+                if spice_socket is None or not kernel_arguments:
+                    raise ProtocolError(
+                        "Persistent Live boot needs its inspected kernel arguments "
+                        "and private SPICE input"
+                    )
+                _boot_iso_from_grub_prompt(
+                    qmp, spice_socket, architecture,
+                    kernel_arguments=kernel_arguments,
+                    extra_kernel_arguments=extra_kernel_arguments,
+                    serial_debug=serial_debug,
+                    menu_is_ready=True,
+                )
+                return
             if top_index == 0:
                 editor.enter_language_submenu()
             else:
@@ -118,9 +136,39 @@ def boot_iso_with_debug_shell(
 
     if spice_socket is None:
         raise ProtocolError("ARM GRUB requires its private SPICE input channel")
-    arguments = tuple(
-        item for item in kernel_arguments if item not in {"quiet", "splash", "---"}
+    started = time.monotonic()
+    console.wait_for_text("BdsDxe: starting Boot", timeout=120)
+    remaining_delay = firmware_delay - (time.monotonic() - started)
+    if remaining_delay > 0:
+        time.sleep(remaining_delay)
+    _boot_iso_from_grub_prompt(
+        qmp, spice_socket, architecture,
+        kernel_arguments=kernel_arguments,
+        extra_kernel_arguments=extra_kernel_arguments,
+        serial_debug=serial_debug,
+        menu_is_ready=False,
     )
+    console.wait_for_kernel_console(timeout=120)
+
+
+def _boot_iso_from_grub_prompt(
+    qmp: QmpClient,
+    spice_socket: Path,
+    architecture: Architecture,
+    *,
+    kernel_arguments: tuple[str, ...],
+    extra_kernel_arguments: tuple[str, ...],
+    serial_debug: bool,
+    menu_is_ready: bool,
+) -> None:
+    """Boot the inspected ISO kernel without depending on editor line counts."""
+
+    # Keep the tested amd64 entry's real boot behavior. ARM's long-standing
+    # serial bootstrap deliberately omits splash until its console is ready.
+    excluded = {"---"} if architecture is Architecture.AMD64 else {
+        "quiet", "splash", "---"
+    }
+    arguments = tuple(item for item in kernel_arguments if item not in excluded)
     if not arguments:
         arguments = (
             "root=live:CDLABEL=AOS_LIVE",
@@ -133,26 +181,20 @@ def boot_iso_with_debug_shell(
     commands = (
         "linux /LiveOS/vmlinuz "
         + " ".join(arguments)
-        + debug_kernel_arguments(architecture),
+        + (debug_kernel_arguments(architecture) if serial_debug else ""),
         "initrd /LiveOS/initrd",
     )
-    started = time.monotonic()
-    console.wait_for_text("BdsDxe: starting Boot", timeout=120)
-    remaining_delay = firmware_delay - (time.monotonic() - started)
-    if remaining_delay > 0:
-        time.sleep(remaining_delay)
     keyboard = SpiceInputClient(spice_socket, timeout=30)
     keyboard.connect(require_agent=False)
-    command_line = _ArmGraphicalGrubCommandLine(qmp, keyboard)
+    command_line = _GraphicalGrubCommandLine(qmp, keyboard)
     try:
-        command_line.open(timeout=120)
+        command_line.open(timeout=120, menu_is_ready=menu_is_ready)
         for command in commands:
             command_line.submit(command, timeout=120)
         command_line.boot()
     finally:
         command_line.close()
         keyboard.close()
-    console.wait_for_kernel_console(timeout=120)
 
 
 def render_installed_grub_instrumentation(
@@ -229,13 +271,13 @@ sync
 """
 
 
-class _ArmGraphicalGrubCommandLine:
+class _GraphicalGrubCommandLine:
     """Gate blind SPICE key delivery with semantic framebuffer repainting."""
 
     def __init__(self, qmp: QmpClient, keyboard: SpiceInputClient):
         self.qmp = qmp
         self.keyboard = keyboard
-        self._temporary = tempfile.TemporaryDirectory(prefix="anduinos-arm-grub-")
+        self._temporary = tempfile.TemporaryDirectory(prefix="anduinos-grub-prompt-")
         self._counter = 0
         self.current_frame: Path | None = None
 
@@ -248,25 +290,30 @@ class _ArmGraphicalGrubCommandLine:
         self.qmp.screendump(destination)
         return destination
 
-    def open(self, *, timeout: float) -> None:
-        # Escape cancels the countdown and normalizes a nested menu. The next
-        # key opens the graphical command line; no guest agent is involved.
-        self.keyboard.send_boot_key("esc")
+    def open(self, *, timeout: float, menu_is_ready: bool = False) -> None:
+        # ARM may still be in a nested menu, so Escape normalizes it first.
+        # AMD64 has already observed and cancelled the top-level countdown.
+        if not menu_is_ready:
+            self.keyboard.send_boot_key("esc")
         self.keyboard.send_boot_key("c")
         self._wait_for_stable_prompt(timeout=timeout, changed_from=None)
 
     def submit(self, command: str, *, timeout: float) -> None:
         if self.current_frame is None:
-            raise ProtocolError("ARM GRUB command line was not synchronized")
+            raise ProtocolError("GRUB command line was not synchronized")
         before = self.current_frame
-        self.keyboard.type_boot_text(command)
+        # Long GRUB lines contain shifted characters (for example CDLABEL
+        # and underscores).  SPICE's asynchronous key events can overtake a
+        # shift release and corrupt subsequent characters.  QMP waits for
+        # each emulated key release before sending the next one.
+        self.qmp.type_text(command)
         self.keyboard.send_boot_key("ret")
         self._wait_for_stable_prompt(timeout=timeout, changed_from=before)
 
     def boot(self) -> None:
         if self.current_frame is None:
-            raise ProtocolError("ARM GRUB command line was not synchronized")
-        self.keyboard.type_boot_text("boot")
+            raise ProtocolError("GRUB command line was not synchronized")
+        self.qmp.type_text("boot")
         self.keyboard.send_boot_key("ret")
 
     def _wait_for_stable_prompt(
@@ -308,7 +355,7 @@ class _ArmGraphicalGrubCommandLine:
                 self.current_frame = frame
                 return
             time.sleep(0.1)
-        raise ProtocolError("Timed out waiting for a stable ARM GRUB command prompt")
+        raise ProtocolError("Timed out waiting for a stable GRUB command prompt")
 
 
 class _GraphicalGrubMenuEditor:
@@ -333,35 +380,22 @@ class _GraphicalGrubMenuEditor:
         return destination
 
     def wait_for_top_menu(self, timeout: float) -> None:
+        """Observe the real menu and hold it before its countdown expires."""
+
         deadline = time.monotonic() + timeout
-        stable_frames = 0
-        previous_menu: Path | None = None
-        previous_layout: GrubMenuLayout | None = None
         while time.monotonic() < deadline:
             frame = self.capture()
             layout = grub_menu_layout(frame)
             if layout is not None and layout.visible_unselected_entries <= 6:
-                if (
-                    previous_menu is not None
-                    and previous_layout is not None
-                    and layout.highlight_center == previous_layout.highlight_center
-                    and grub_frame_difference(previous_menu, frame) <= 20
-                ):
-                    stable_frames += 1
-                else:
-                    stable_frames = 1
-                previous_menu = frame
-                previous_layout = layout
-                if stable_frames >= 3:
-                    self.current_frame = frame
-                    self._editor_cursor_y = None
-                    return
-            else:
-                stable_frames = 0
-                previous_menu = None
-                previous_layout = None
+                self.current_frame = frame
+                self._editor_cursor_y = None
+                # The menu's ten-second countdown is the only race here.
+                # Cancel it immediately, then prove both key transitions
+                # through the visible selection before navigating further.
+                self.cancel_timeout()
+                return
             time.sleep(0.1)
-        raise ProtocolError("Timed out waiting for a stable top-level GRUB menu")
+        raise ProtocolError("Top-level GRUB menu was not observed before boot")
 
     def enter_language_submenu(self) -> None:
         if self.current_frame is None:

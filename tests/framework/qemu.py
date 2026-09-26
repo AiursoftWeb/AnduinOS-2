@@ -139,6 +139,9 @@ class QemuVm:
             f"AnduinOS acceptance: {cfg.artifacts.name}",
             "-nodefaults",
             "-no-reboot",
+            # Do not let firmware consume the short GRUB menu timeout while
+            # the harness is still connecting its QMP and serial channels.
+            "-S",
             "-m",
             str(cfg.memory_mib),
             "-smp",
@@ -282,6 +285,7 @@ class QemuVm:
         transcript = self.config.artifacts / f"serial-{stem}.log"
         self.serial = SerialConsole(serial_path, transcript, timeout=30)
         self.serial.connect()
+        self.qmp.execute("cont")
 
     def screenshot(self, name: str) -> Path:
         if self.qmp is None:

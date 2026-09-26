@@ -251,6 +251,116 @@ class FactoryRecoveryContractTests(unittest.TestCase):
 
 
 class BootContractTests(unittest.TestCase):
+    def test_vm_starts_only_after_control_channels_are_ready(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = QemuConfig(
+                architecture=Architecture.AMD64,
+                firmware=Firmware.BIOS,
+                network=Network.ONLINE,
+                memory_mib=1024,
+                cpus=1,
+                disk_gib=1,
+                ssh_forward_port=2222,
+                iso=root / "image.iso",
+                disk=root / "target.qcow2",
+                variables=None,
+                firmware_selection=None,
+                artifacts=root / "artifacts",
+                qemu_binary="qemu-system-x86_64",
+                acceleration="kvm",
+            )
+            vm = QemuVm(config)
+            events = []
+            with (
+                patch("framework.qemu.subprocess.Popen") as process,
+                patch("framework.qemu.QmpClient") as qmp,
+                patch("framework.qemu.SerialConsole") as serial,
+            ):
+                process.return_value.poll.return_value = 0
+                qmp.return_value.connect.side_effect = lambda: events.append("qmp")
+                serial.return_value.connect.side_effect = lambda: events.append("serial")
+                qmp.return_value.execute.side_effect = (
+                    lambda command: events.append(command)
+                )
+                try:
+                    vm.start(attach_iso=True)
+                    self.assertIn("-S", process.call_args.args[0])
+                    self.assertEqual(["qmp", "serial", "cont"], events)
+                finally:
+                    vm.stop()
+
+    def test_persistent_live_boot_uses_inspected_arguments_not_editor_rows(self):
+        qmp = Mock()
+        console = Mock()
+        arguments = (
+            "root=live:CDLABEL=AOS_LIVE",
+            "rd.live.dir=LiveOS",
+            "rd.overlay=LABEL=ANDUINOS-PERSIST",
+            "rd.live.overlay.cowfs=ext4",
+            "quiet",
+            "splash",
+            "---",
+        )
+        with (
+            patch("framework.grub._GraphicalGrubMenuEditor") as menu,
+            patch("framework.grub.SpiceInputClient") as input_client,
+            patch("framework.grub._GraphicalGrubCommandLine") as prompt,
+        ):
+            boot_iso_with_debug_shell(
+                qmp, console, Architecture.AMD64,
+                firmware_delay=0,
+                menu_path=(1, 1),
+                kernel_arguments=arguments,
+                extra_kernel_arguments=("locale=zh_CN.UTF-8",),
+                spice_socket=Path("/test/spice.sock"),
+            )
+
+        menu.return_value.wait_for_top_menu.assert_called_once_with(timeout=30)
+        menu.return_value.open_editor.assert_not_called()
+        menu.return_value.close.assert_called_once_with()
+        input_client.return_value.connect.assert_called_once_with(require_agent=False)
+        prompt.return_value.open.assert_called_once_with(
+            timeout=120, menu_is_ready=True
+        )
+        self.assertEqual(
+            [
+                call(
+                    "linux /LiveOS/vmlinuz root=live:CDLABEL=AOS_LIVE"
+                    " rd.live.dir=LiveOS rd.overlay=LABEL=ANDUINOS-PERSIST"
+                    " rd.live.overlay.cowfs=ext4 quiet splash locale=zh_CN.UTF-8"
+                    + debug_kernel_arguments(Architecture.AMD64),
+                    timeout=120,
+                ),
+                call("initrd /LiveOS/initrd", timeout=120),
+            ],
+            prompt.return_value.submit.call_args_list,
+        )
+        prompt.return_value.boot.assert_called_once_with()
+
+    def test_optical_media_rejection_still_runs_real_to_go_menu_entry(self):
+        qmp = Mock()
+        with (
+            patch("framework.grub._GraphicalGrubMenuEditor") as menu,
+            patch("framework.grub._GraphicalGrubCommandLine") as prompt,
+        ):
+            boot_iso_with_debug_shell(
+                qmp, Mock(), Architecture.AMD64,
+                firmware_delay=0,
+                menu_path=(1, 1),
+                serial_debug=False,
+            )
+
+        menu.return_value.wait_for_top_menu.assert_called_once_with(timeout=30)
+        menu.return_value.move_top_selection_down.assert_called_once_with()
+        menu.return_value.enter_advanced_submenu.assert_called_once_with()
+        menu.return_value.move_selection_down.assert_called_once_with(
+            minimum_visible_unselected_entries=0
+        )
+        menu.return_value.open_editor.assert_not_called()
+        prompt.assert_not_called()
+        qmp.send_key.assert_called_once_with("ret", hold_ms=150)
+
     _GOOD_KERNEL_HASH = "a" * 64
     _ESP_PARTUUID = "b184c004-3eda-4770-a6c9-ba0a38cb71cb"
 
@@ -768,7 +878,7 @@ class BootContractTests(unittest.TestCase):
 
         with (
             patch("framework.grub.SpiceInputClient") as input_client,
-            patch("framework.grub._ArmGraphicalGrubCommandLine") as controller,
+            patch("framework.grub._GraphicalGrubCommandLine") as controller,
         ):
             keyboard = input_client.return_value
             command_line = controller.return_value
@@ -792,7 +902,9 @@ class BootContractTests(unittest.TestCase):
                 spice_socket=Path("/test/spice.sock"),
             )
 
-        command_line.open.assert_called_once_with(timeout=120)
+        command_line.open.assert_called_once_with(
+            timeout=120, menu_is_ready=False
+        )
         self.assertEqual(
             [
                 call(
@@ -864,7 +976,8 @@ class BootContractTests(unittest.TestCase):
             vm = QemuVm(config)
             vm._runtime = tempfile.TemporaryDirectory(prefix="anduinos-unit-")
             try:
-                rendered = " ".join(vm.command(attach_iso=True))
+                command = vm.command(attach_iso=True)
+                rendered = " ".join(command)
             finally:
                 vm._runtime.cleanup()
                 vm._runtime = None
@@ -875,6 +988,7 @@ class BootContractTests(unittest.TestCase):
             self.assertIn("spicevmc,id=vdagent,name=vdagent", rendered)
             self.assertIn("com.redhat.spice.0", rendered)
             self.assertIn("virtio-gpu-pci,id=video0", rendered)
+            self.assertIn("-S", command)
             self.assertNotIn("grubserial", rendered)
             self.assertNotIn("pci-serial", rendered)
 
@@ -893,7 +1007,7 @@ class BootContractTests(unittest.TestCase):
         qmp = Mock()
         qmp.screendump.side_effect = ProtocolError("injected framebuffer failure")
         keyboard = Mock()
-        command_line = _ArmGraphicalGrubCommandLine(qmp, keyboard)
+        command_line = _GraphicalGrubCommandLine(qmp, keyboard)
         try:
             with self.assertRaisesRegex(ProtocolError, "injected framebuffer"):
                 command_line.open(timeout=1)
@@ -904,6 +1018,28 @@ class BootContractTests(unittest.TestCase):
             keyboard.send_boot_key.call_args_list,
         )
         keyboard.type_boot_text.assert_not_called()
+
+    def test_grub_prompt_types_commands_through_acknowledged_qmp_keys(self):
+        qmp = Mock()
+        keyboard = Mock()
+        command_line = _GraphicalGrubCommandLine(qmp, keyboard)
+        try:
+            command_line.current_frame = Path("previous-frame.ppm")
+            with patch.object(command_line, "_wait_for_stable_prompt") as wait:
+                command_line.submit("linux /LiveOS/vmlinuz rd.overlay=LABEL=ANDUINOS-PERSIST", timeout=30)
+            qmp.type_text.assert_called_once_with(
+                "linux /LiveOS/vmlinuz rd.overlay=LABEL=ANDUINOS-PERSIST"
+            )
+            keyboard.type_boot_text.assert_not_called()
+            keyboard.send_boot_key.assert_called_once_with("ret")
+            wait.assert_called_once_with(
+                timeout=30, changed_from=Path("previous-frame.ppm")
+            )
+            command_line.boot()
+            qmp.type_text.assert_called_with("boot")
+            self.assertEqual(2, qmp.type_text.call_count)
+        finally:
+            command_line.close()
 
     def test_q35_does_not_add_a_second_i8042_controller(self):
         with tempfile.TemporaryDirectory() as directory:

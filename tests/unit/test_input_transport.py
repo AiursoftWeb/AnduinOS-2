@@ -1247,38 +1247,33 @@ class InstallerUiContractTests(unittest.TestCase):
 
 
 class VisualOracleTests(unittest.TestCase):
-    def test_grub_top_menu_waits_for_three_stable_frames(self):
+    def test_grub_top_menu_cancels_countdown_on_first_valid_frame(self):
         editor = object.__new__(_GraphicalGrubMenuEditor)
         editor.qmp = Mock()
         editor.current_frame = None
         editor.capture = Mock(
             side_effect=[
                 Path("painting.ppm"),
-                Path("stable-1.ppm"),
-                Path("stable-2.ppm"),
-                Path("stable-3.ppm"),
+                Path("menu.ppm"),
             ]
         )
         ticks = iter(range(100))
 
         def layout(frame):
-            return SimpleNamespace(
-                visible_unselected_entries=3,
-                highlight_center=(70 if frame.name == "painting.ppm" else 80),
-            )
-
-        def difference(first, second):
-            return 200 if first.name == "painting.ppm" else 0
+            if frame.name == "painting.ppm":
+                return None
+            return SimpleNamespace(visible_unselected_entries=3)
 
         with (
             patch("framework.grub.time.monotonic", side_effect=lambda: next(ticks)),
             patch("framework.grub.time.sleep"),
             patch("framework.grub.grub_menu_layout", side_effect=layout),
-            patch("framework.grub.grub_frame_difference", side_effect=difference),
+            patch.object(editor, "cancel_timeout") as cancel,
         ):
             editor.wait_for_top_menu(30)
 
-        self.assertEqual(Path("stable-3.ppm"), editor.current_frame)
+        self.assertEqual(Path("menu.ppm"), editor.current_frame)
+        cancel.assert_called_once_with()
 
     def test_signed_grub_locale_menu_may_finish_after_ten_seconds(self):
         editor = object.__new__(_GraphicalGrubMenuEditor)
@@ -1597,18 +1592,27 @@ class VisualOracleTests(unittest.TestCase):
             crowded_draw.rectangle(
                 (12, 67, 1267, 675), outline=(190, 190, 190), width=2
             )
+            crowded_draw.rectangle((16, 95, 1263, 111), fill=(180, 180, 180))
             for index in range(20):
-                crowded_draw.text(
-                    (24, 82 + index * 24),
-                    f"Locale entry {index}",
-                    fill="white",
-                )
+                if index != 1:
+                    crowded_draw.text(
+                        (24, 82 + index * 24),
+                        f"Locale entry {index}",
+                        fill="white",
+                    )
             crowded_menu.save(crowded)
             layout = grub_editor_layout(frame)
             self.assertIsNotNone(layout)
             self.assertGreaterEqual(layout.visible_command_lines, 3)
             self.assertIsNone(grub_editor_layout(missing))
             self.assertIsNone(grub_editor_layout(crowded))
+            long_editor = image.copy()
+            long_draw = ImageDraw.Draw(long_editor)
+            for index in range(13):
+                long_draw.text((80, 190 + index * 22), f"guard command {index}", fill="white")
+            long_path = root / "long-editor.ppm"
+            long_editor.save(long_path)
+            self.assertGreater(grub_editor_layout(long_path).visible_command_lines, 12)
             wrapped_image = image.copy()
             wrapped_draw = ImageDraw.Draw(wrapped_image)
             wrapped_draw.text(

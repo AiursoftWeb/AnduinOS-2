@@ -30,6 +30,12 @@ tests/
 
 The JSON files under `cases/` are the executable inventory. Declared checks without implementations fail unit tests. Every selected installation and suite must produce a verdict.
 
+Test outcomes, not incidental UI timing or source layout. A VM is paused until
+its control channels are ready; GRUB input is acknowledged by observed menu
+state, while installation and recovery pass only after their guest-visible
+effects are verified. If instrumentation bypasses a menu entry, an independent
+case must exercise that entry's user-visible behavior.
+
 The `public-ghex` suite verifies a fresh installation of GHex from the configured public Flathub remote, checking commit, origin, desktop entry,
 application version and ArcMenu launch into a real GTK window; it does not test editing.
 External catalog/download failures are reported as failures, not skipped passes.
@@ -48,10 +54,14 @@ It requires Home-only support in the ISO; older packages fail, never skip.
 `rescue-center-offline-restore` takes a system snapshot, uninstalls GNOME Shell, proves the installed desktop cannot start, then boots the tested Live ISO and drives the real Rescue Center UI with host QMP pointer clicks. It selects the damaged installation and baseline, keeps the default safety snapshot enabled, restores offline, removes the Live ISO, and requires a healthy graphical boot, restored package state, preserved newer Home data, and an archived transaction.
 
 The installation matrix boots temporary Live overlays on the original
-read-only ISO. One amd64/arm64 scenario additionally boots a writable hybrid
-copy through the real Dracut persistent menu entry, writes a sentinel, powers
-off, and boots the same media again before installation. Persistence is not
-credited from GRUB text inspection alone.
+read-only ISO. One amd64/arm64 scenario also boots a writable hybrid copy,
+writes a sentinel, powers off, and boots the same media again before
+installation. The test obtains the persistent kernel arguments from the
+actual ISO and enters them through that ISO's GRUB command prompt; it does
+not depend on the editor's visual line count. The separate optical-media
+case executes the real To Go menu entry and requires its rejection warning.
+Persistence is credited only when the running guest retains the sentinel
+across boots, not from GRUB text inspection alone.
 
 ## Results
 

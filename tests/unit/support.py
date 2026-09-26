@@ -117,7 +117,7 @@ from business.desktop import (
     _tty6_probe_command,
 )
 from framework.grub import (
-    _ArmGraphicalGrubCommandLine,
+    _GraphicalGrubCommandLine,
     _GraphicalGrubMenuEditor,
     InstalledBootFiles,
     boot_iso_with_debug_shell,

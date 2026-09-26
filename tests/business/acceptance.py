@@ -340,7 +340,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--firmware-delay",
         type=float,
-        help="seconds from VM start to the GRUB keyboard sequence",
+        help="ARM64 firmware guard only; AMD64 synchronizes on the visible GRUB menu",
     )
     parser.add_argument("--uefi-code", type=Path)
     parser.add_argument("--uefi-vars", type=Path)
@@ -362,9 +362,14 @@ def _options(
         if args.artifacts
         else (Path.cwd() / "test-results" / timestamp).resolve()
     )
-    delay = args.firmware_delay
-    if delay is None:
-        delay = 8.0 if args.arch == Architecture.ARM64.value else 3.0
+    if args.arch == Architecture.AMD64.value:
+        if args.firmware_delay is not None:
+            raise ConfigurationError(
+                "--firmware-delay does not apply to AMD64; GRUB is observed directly"
+            )
+        delay = 0.0
+    else:
+        delay = args.firmware_delay if args.firmware_delay is not None else 8.0
     values = {
         "memory_mib": args.memory or defaults.memory_mib,
         "cpus": args.cpus or defaults.cpus,
@@ -380,7 +385,7 @@ def _options(
     for key, value in values.items():
         if value <= 0:
             raise ConfigurationError(f"{key} must be positive")
-    if delay <= 0:
+    if args.arch == Architecture.ARM64.value and delay <= 0:
         raise ConfigurationError("firmware delay must be positive")
     if args.free_space_reserve < 1:
         raise ConfigurationError("free-space reserve must be at least 1 GiB")

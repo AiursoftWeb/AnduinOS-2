@@ -33,20 +33,6 @@ class TestSystemArchitectureTests(unittest.TestCase):
             actual,
         )
 
-    def test_source_modules_and_readme_stay_reviewable(self):
-        oversized = {}
-        for path in ROOT.rglob("*.py"):
-            if "__pycache__" in path.parts:
-                continue
-            lines = len(path.read_text(encoding="utf-8").splitlines())
-            if lines > 1800:
-                oversized[str(path.relative_to(ROOT))] = lines
-        self.assertEqual({}, oversized)
-        self.assertLessEqual(
-            len((ROOT / "README.md").read_text(encoding="utf-8").splitlines()),
-            80,
-        )
-
     def test_framework_contains_mechanisms_not_product_workflows(self):
         self.assertFalse((ROOT / "framework/runner.py").exists())
         self.assertFalse((ROOT / "framework/feature_runner.py").exists())

@@ -20,6 +20,23 @@ FRAMES = ROOT / "tests/fixtures/hyperfluent"
 
 
 class HyperfluentVisualTests(unittest.TestCase):
+    def test_full_hd_stock_grub_menu_is_visible_below_old_crop(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            frame = Path(temporary) / "full-hd-menu.ppm"
+            image = Image.new("RGB", (1920, 1080), "black")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((21, 65, 1893, 962), outline=(190, 190, 190), width=2)
+            draw.rectangle((24, 74, 1890, 90), fill=(180, 180, 180))
+            draw.text((120, 77), "Try or Install AnduinOS", fill="black")
+            draw.text((120, 97), "Advanced Options", fill="white")
+            image.save(frame, format="PPM")
+
+            layout = grub_menu_layout(frame)
+            self.assertIsNotNone(layout)
+            self.assertEqual((65, 962), (layout.top, layout.bottom))
+            self.assertEqual(1, layout.visible_unselected_entries)
+            self.assertIsNone(grub_editor_layout(frame))
+
     def test_left_editor_lower_border_below_three_quarters_is_detected(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             frame = Path(temporary) / "left-editor.ppm"
