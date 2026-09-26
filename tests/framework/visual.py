@@ -191,7 +191,9 @@ def grub_editor_left_cursor_y(frame: Path) -> int | None:
                 start = None
     groups: dict[tuple[int, int], list[int]] = {}
     for left, right, y in candidates:
-        if left <= (layout.left + width // 35 if themed else width // 35):
+        # Stock GRUB keeps a roughly 26 px text inset even at 640x480.
+        # A purely proportional limit (640 // 35 == 18) misses its cursor.
+        if left <= (layout.left + width // 35 if themed else max(32, width // 35)):
             groups.setdefault((left, right), []).append(y)
     candidates: list[tuple[int, int, int]] = []
     for (left, right), rows in groups.items():

@@ -500,7 +500,13 @@ class _GraphicalGrubMenuEditor:
                 layout is not None
                 and layout.visible_unselected_entries
                 >= minimum_visible_unselected_entries
-                and layout.highlight_center != previous.highlight_center
+                # Once the highlight reaches the bottom of a scrollable
+                # submenu, Down changes the visible entries but keeps the
+                # highlight at the same screen coordinate.
+                and (
+                    layout.highlight_center != previous.highlight_center
+                    or grub_frame_difference(self.current_frame, frame) >= 100
+                )
             ):
                 self.current_frame = frame
                 return

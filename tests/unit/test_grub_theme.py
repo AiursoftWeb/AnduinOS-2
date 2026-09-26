@@ -4,10 +4,12 @@ import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import Mock
 
 from PIL import Image, ImageDraw
 
 from framework.iso import _parse_live_entries, _parse_persistent_entry
+from framework.grub import _GraphicalGrubMenuEditor
 from framework.visual import (
     grub_editor_left_cursor_y,
     grub_editor_layout,
@@ -22,6 +24,58 @@ FRAMES = ROOT / "tests/fixtures/hyperfluent"
 
 
 class HyperfluentVisualTests(unittest.TestCase):
+    def test_scrolled_submenu_acknowledges_changed_entries_at_fixed_highlight(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            before = Path(temporary) / "before.ppm"
+            after = Path(temporary) / "after.ppm"
+            with Image.open(FRAMES / "submenu-scrolled.png") as source:
+                image = source.convert("RGB")
+            image.save(before, format="PPM")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((145, 346, 360, 365), fill=(13, 24, 39))
+            draw.text((145, 347), "Japanese", fill="white")
+            image.save(after, format="PPM")
+
+            first = grub_menu_layout(before)
+            second = grub_menu_layout(after)
+            self.assertIsNotNone(first)
+            self.assertIsNotNone(second)
+            self.assertEqual(first.highlight_center, second.highlight_center)
+            self.assertGreater(grub_frame_difference(before, after), 100)
+
+            qmp = Mock()
+            editor = _GraphicalGrubMenuEditor(qmp)
+            try:
+                editor.current_frame = before
+                editor.capture = Mock(return_value=after)
+                editor.move_selection_down(minimum_visible_unselected_entries=4)
+                self.assertEqual(after, editor.current_frame)
+                qmp.send_key.assert_called_once_with("down")
+            finally:
+                editor.close()
+
+    def test_stock_grub_640_editor_cursor_uses_fixed_text_inset(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            frame = Path(temporary) / "editor-640.ppm"
+            image = Image.new("RGB", (640, 480), "black")
+            draw = ImageDraw.Draw(image)
+            draw.rectangle((22, 65, 614, 322), outline=(190, 190, 190))
+            for text, x, y in (
+                ("setparams 'English'", 26, 78),
+                ("set gfxpayload=auto", 90, 110),
+                ("linux /LiveOS/vmlinuz", 90, 142),
+                ("initrd /LiveOS/initrd", 90, 174),
+            ):
+                draw.text((x, y), text, fill="white")
+            image.save(frame, format="PPM")
+            self.assertIsNone(grub_editor_left_cursor_y(frame))
+
+            draw.rectangle((26, 88, 33, 89), fill="white")
+            image.save(frame, format="PPM")
+
+            self.assertIsNotNone(grub_editor_layout(frame))
+            self.assertEqual(88, grub_editor_left_cursor_y(frame))
+
     def test_full_hd_stock_grub_menu_is_visible_below_old_crop(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             frame = Path(temporary) / "full-hd-menu.ppm"
