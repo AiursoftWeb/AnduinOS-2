@@ -438,9 +438,10 @@ def observe_installed_region_zh_cn(evidence: Path) -> None:
             f"markers={markers!r}, setup_markers={setup_markers!r}"
         )
     (evidence / "installed-region-zh-cn.txt").write_text(
-        "\n".join(f"{item_role}\t{item_name}" for item_role, item_name in markers)
-        + "\n"
-        + "\n".join(f"{item_role}\t{item_name}" for item_role, item_name in setup_markers)
+        "\n".join(
+            f"{item_role}\t{item_name}"
+            for item_role, item_name in [*markers, *setup_markers]
+        )
         + "\n",
         encoding="utf-8",
     )
