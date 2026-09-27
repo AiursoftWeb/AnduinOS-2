@@ -144,7 +144,7 @@ def restore_offline_system(
         break
 
     find_candidates(
-        ("Choose an AnduinOS installation",),
+        ("Find the system you want to repair",),
         label="Rescue Center installation chooser",
         timeout=180,
     )
@@ -162,8 +162,8 @@ def restore_offline_system(
     )
 
     snapshots = find_candidates(
-        ("Manage Btrfs snapshots",),
-        label="Btrfs snapshot manager action",
+        ("Open Snapshots & restore page", "Snapshots & restore"),
+        label="Rescue Center snapshot page",
         timeout=180,
         require_enabled=True,
     )
@@ -171,7 +171,7 @@ def restore_offline_system(
     request_node_click(
         snapshots,
         "rescue-open-snapshots",
-        semantic_target="Manage Btrfs snapshots",
+        semantic_target="Open Snapshots & restore page",
         window_origin=_rescue_window_origin(snapshots),
     )
 

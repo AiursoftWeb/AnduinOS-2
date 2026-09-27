@@ -182,14 +182,52 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             [call.args[1] for call in pointer.call_args_list],
         )
 
-    def test_rescue_center_guest_driver_uses_pointer_and_checks_safety_default(self):
-        source = (ROOT / "assertions/guest/ui/rescue.py").read_text(
-            encoding="utf-8"
-        )
-        self.assertEqual(4, source.count("request_node_click("))
-        self.assertNotIn("do_action(", source)
-        self.assertIn("if not checked(protect):", source)
-        self.assertIn('"System restore complete"', source)
+    def test_rescue_center_guest_driver_follows_new_pages_and_requires_safety_default(self):
+        labels = []
+        clicks = []
+
+        def find(candidates, **_kwargs):
+            labels.append(candidates[0])
+            return candidates[0]
+
+        def click(_node, request, **_kwargs):
+            clicks.append(request)
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(rescue_ui, "visible_nodes", return_value=()),
+                patch.object(rescue_ui, "find_candidates", side_effect=find),
+                patch.object(rescue_ui, "request_node_click", side_effect=click),
+                patch.object(rescue_ui, "_rescue_window_origin", return_value=(0, 0)),
+                patch.object(rescue_ui, "_scroll_rescue_target_into_view"),
+                patch.object(rescue_ui, "_ancestor_containing", return_value="snapshot row"),
+                patch.object(rescue_ui, "_named_descendant", return_value="Restore"),
+                patch.object(rescue_ui, "checked", return_value=True),
+                patch.object(rescue_ui, "dump_accessibility"),
+                patch.object(rescue_ui, "event"),
+            ):
+                rescue_ui.restore_offline_system("AnduinOS Test", "Baseline", Path(directory))
+
+        self.assertIn("Find the system you want to repair", labels)
+        self.assertIn("Open Snapshots & restore page", labels)
+        self.assertEqual(clicks, [
+            "rescue-select-installation", "rescue-open-snapshots",
+            "rescue-select-snapshot", "rescue-confirm-restore",
+        ])
+
+        with tempfile.TemporaryDirectory() as directory:
+            with (
+                patch.object(rescue_ui, "visible_nodes", return_value=()),
+                patch.object(rescue_ui, "find_candidates", side_effect=find),
+                patch.object(rescue_ui, "request_node_click", side_effect=click),
+                patch.object(rescue_ui, "_rescue_window_origin", return_value=(0, 0)),
+                patch.object(rescue_ui, "_scroll_rescue_target_into_view"),
+                patch.object(rescue_ui, "_ancestor_containing", return_value="snapshot row"),
+                patch.object(rescue_ui, "_named_descendant", return_value="Restore"),
+                patch.object(rescue_ui, "checked", return_value=False),
+            ):
+                with self.assertRaisesRegex(rescue_ui.UiFailure, "not enabled by default"):
+                    rescue_ui.restore_offline_system("AnduinOS Test", "Baseline", Path(directory))
 
     def test_rescue_pointer_maps_gtk_window_coordinates_to_screen(self):
         window = SimpleNamespace(x=0, y=0, width=900, height=640)
