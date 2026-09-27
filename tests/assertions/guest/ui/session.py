@@ -408,14 +408,39 @@ def observe_installed_region_zh_cn(evidence: Path) -> None:
             in {("menu", "系统"), ("toggle button", "显示应用")}
         }
     )
-    expected = [("menu", "系统"), ("toggle button", "显示应用")]
-    if markers != expected:
+    shell_expected = [("menu", "系统"), ("toggle button", "显示应用")]
+    setup_expected = [
+        ("button", "开始设置"),
+        ("frame", "AnduinOS 设置"),
+        ("label", "欢迎回家。"),
+    ]
+    setup_markers: list[tuple[str, str]] = []
+    if markers == [("menu", "系统")]:
+        # OOBE can cover the dock on first login, hiding Show Applications.
+        # In that state, verify Chinese in the actual foreground setup window
+        # instead of requiring a shell control that is not visible.
+        for frame in visible_nodes():
+            if (role(frame), name(frame)) != ("frame", "AnduinOS 设置"):
+                continue
+            observed = {
+                (role(item), name(item))
+                for item in walk(frame)
+                if showing(item)
+            }
+            setup_markers = sorted(observed.intersection(set(setup_expected)))
+            if setup_markers == setup_expected:
+                break
+    if markers != shell_expected and not (
+        markers == [("menu", "系统")] and setup_markers == setup_expected
+    ):
         raise UiFailure(
             "GNOME Shell is not visibly localized to Simplified Chinese; "
-            f"markers={markers!r}"
+            f"markers={markers!r}, setup_markers={setup_markers!r}"
         )
     (evidence / "installed-region-zh-cn.txt").write_text(
         "\n".join(f"{item_role}\t{item_name}" for item_role, item_name in markers)
+        + "\n"
+        + "\n".join(f"{item_role}\t{item_name}" for item_role, item_name in setup_markers)
         + "\n",
         encoding="utf-8",
     )
@@ -425,6 +450,10 @@ def observe_installed_region_zh_cn(evidence: Path) -> None:
         markers=[
             {"role": item_role, "name": item_name}
             for item_role, item_name in markers
+        ],
+        setup_markers=[
+            {"role": item_role, "name": item_name}
+            for item_role, item_name in setup_markers
         ],
     )
 

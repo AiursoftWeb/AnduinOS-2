@@ -337,12 +337,22 @@ def _validate_installed_region_ui_events(output: str) -> None:
             "Installed GNOME region probe did not emit one exact UI observation"
         )
     value = values[0]
-    if value.get("application") != "gnome-shell" or value.get("markers") != [
+    markers = value.get("markers")
+    setup_markers = value.get("setup_markers", [])
+    shell_visible = markers == [
         {"role": "menu", "name": "系统"},
         {"role": "toggle button", "name": "显示应用"},
-    ]:
+    ] and setup_markers == []
+    setup_visible = markers == [{"role": "menu", "name": "系统"}] and setup_markers == [
+        {"role": "button", "name": "开始设置"},
+        {"role": "frame", "name": "AnduinOS 设置"},
+        {"role": "label", "name": "欢迎回家。"},
+    ]
+    if value.get("application") != "gnome-shell" or not (
+        shell_visible or setup_visible
+    ):
         raise TestFailure(
-            "Installed GNOME Shell is not visibly localized to Simplified Chinese"
+            "Installed GNOME session is not visibly localized to Simplified Chinese"
         )
 
 

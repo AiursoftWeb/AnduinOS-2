@@ -857,15 +857,33 @@ class BootContractTests(unittest.TestCase):
                     {"role": "menu", "name": "系统"},
                     {"role": "toggle button", "name": "显示应用"},
                 ],
+                "setup_markers": [],
             },
             ensure_ascii=False,
         )
         _validate_installed_region_ui_events(passing)
+        setup_visible = json.dumps(
+            {
+                "event": "installed-region-zh-cn",
+                "application": "gnome-shell",
+                "markers": [{"role": "menu", "name": "系统"}],
+                "setup_markers": [
+                    {"role": "button", "name": "开始设置"},
+                    {"role": "frame", "name": "AnduinOS 设置"},
+                    {"role": "label", "name": "欢迎回家。"},
+                ],
+            },
+            ensure_ascii=False,
+        )
+        _validate_installed_region_ui_events(setup_visible)
         faults = (
             passing.replace("显示应用", "Show Applications"),
             passing.replace('"application": "gnome-shell"', '"application": "fixture"'),
             passing.replace('"role": "menu"', '"role": "label"'),
             passing + "\n" + passing,
+            setup_visible.replace("欢迎回家。", "Welcome home."),
+            setup_visible.replace('"role": "menu"', '"role": "label"'),
+            setup_visible.replace('"application": "gnome-shell"', '"application": "fixture"'),
         )
         for broken in faults:
             with self.subTest(broken=broken):
