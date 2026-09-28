@@ -63,6 +63,22 @@ case executes the real To Go menu entry and requires its rejection warning.
 Persistence is credited only when the running guest retains the sentinel
 across boots, not from GRUB text inspection alone.
 
+## Firmware regression coverage
+
+The `uefi-unsupported-offline-btrfs` and `uefi-unsupported-offline-ext4`
+scenarios use the non-Secure-Boot OVMF image (`OVMF_CODE_4M.fd`). Override that
+specific image with `--uefi-unsupported-code`; `--uefi-code` remains the image
+for enabled/disabled Secure Boot scenarios. Each VM gets a fresh variable store.
+
+Both the Live environment and the installed disk boot must independently
+report UEFI with an absent SecureBoot variable and the customer's real
+`mokutil` exit 255. A disabled toggle is not accepted as unsupported. The GUI
+must complete the firmware check and skip the Secure Boot recommendation for
+unsupported UEFI and BIOS. Unknown detection cannot pass this UI gate. Installed
+boot verification runs after removing the ISO, with no MOK request left pending.
+The ISO must contain installer, toolkit, and Live settings versions at least
+`2.0.4-1`, including the initial firmware diagnostic written by Live setup.
+
 ## Results
 
 Each run writes `summary.json`, `junit.xml`, screenshots, logs and per-check diagnostics

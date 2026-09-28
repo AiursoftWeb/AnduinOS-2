@@ -31,6 +31,8 @@ class UiFailure(RuntimeError):
 ALIASES = {
     "next": ("Next", "下一步", "Continue Installation", "继续安装"),
     "skip": ("Skip", "跳过"),
+    "firmware_complete": ("Firmware check complete", "固件检测完成"),
+    "firmware_continue": ("Continue", "继续"),
     "welcome": (
         "Welcome to AnduinOS",
         "欢迎使用 AnduinOS",
