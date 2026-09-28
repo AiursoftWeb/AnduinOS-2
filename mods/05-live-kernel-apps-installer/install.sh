@@ -52,15 +52,10 @@ apt install -y anduinos-hyperfluent-grub-theme \
     --no-install-recommends
 judge "Install anduinos-hyperfluent-grub-theme"
 
-print_ok "Installing AnduinOS native installer..."
+print_ok "Installing AnduinOS native installer and its recommended recovery tools..."
 apt install -y anduinos-installer-beta \
-    --no-install-recommends
+    --install-recommends
 judge "Install anduinos-installer-beta"
-
-print_ok "Installing AnduinOS Rescue Center for the Live session..."
-apt install -y anduinos-rescue-center \
-    --no-install-recommends
-judge "Install anduinos-rescue-center"
 
 # Carry the Btrfs recovery UI inside the ISO without making it a desktop
 # metapackage dependency. The native installer retains this package for Btrfs
