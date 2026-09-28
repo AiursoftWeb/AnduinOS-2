@@ -108,10 +108,9 @@ export TARGET_UBUNTU_VERSION="resolute"
 
 # This is the apt source for both the build process and the live system.
 # It can be any Ubuntu mirror that you prefer.
-# The default is the Aiursoft mirror.
-# You can change it to any other mirror that you prefer.
+# The default is the official Ubuntu archive; you can choose another mirror.
 # See https://docs.anduinos.com/Install/Select-Best-Apt-Source.html
-export APT_SOURCE="http://mirror.aiursoft.com/ubuntu/"
+export APT_SOURCE="http://archive.ubuntu.com/ubuntu/"
 
 # This is the name of the target OS.
 # Must be lowercase without special characters and spaces
@@ -134,11 +133,11 @@ export TARGET_ARCH="${TARGET_ARCH:-$(dpkg --print-architecture)}"
 # AnduinOS APKG server configuration
 #============================
 
-# AnduinOS APT config package name (can also be anduinos-apt-config-dev).
-export APT_CONFIG_PACKAGE="anduinos-apt-config-dev"
+# AnduinOS APT config package name.
+export APT_CONFIG_PACKAGE="anduinos-apt-config"
 
-# APKG server URL for AnduinOS-branded overlay packages (dev: apkg-dev.aiursoft.com).
-export APKG_SERVER="https://apkg-dev.aiursoft.com"
+# Public APKG server URL for AnduinOS-branded overlay packages.
+export APKG_SERVER="https://packages.anduinos.com"
 
 # GPG certificate name on the APKG server (used to download and verify the repo).
 # The cert is fetched from: $APKG_SERVER/artifacts/certs/$APKG_CERT_NAME
