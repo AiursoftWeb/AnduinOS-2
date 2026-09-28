@@ -19,6 +19,7 @@ from .visual import (
     grub_editor_layout,
     grub_frame_difference,
     grub_menu_layout,
+    hyperfluent_grub_visible,
 )
 
 
@@ -86,6 +87,13 @@ def boot_iso_with_debug_shell(
         editor = _GraphicalGrubMenuEditor(qmp, scratch_dir=scratch_dir)
         try:
             editor.wait_for_top_menu(timeout=30)
+            if editor.current_frame is None or not hyperfluent_grub_visible(
+                editor.current_frame
+            ):
+                raise ProtocolError(
+                    "ISO GRUB reached its text fallback instead of rendering "
+                    "the HyperFluent theme"
+                )
             if menu_path == (1, 1) and serial_debug:
                 # The To Go entry contains an optical-media guard before its
                 # linux command. Its source lines and visual wrapping are not

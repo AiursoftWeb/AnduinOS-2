@@ -481,8 +481,8 @@ EOF
         grub-mkstandalone \
             --format=i386-pc \
             --output=isolinux/core.img \
-            --install-modules="linux16 linux normal iso9660 biosdisk memdisk search tar ls font gfxterm gfxmenu png all_video" \
-            --modules="linux16 linux normal iso9660 biosdisk search font gfxterm gfxmenu png all_video" \
+            --install-modules="linux16 linux normal iso9660 biosdisk memdisk search tar ls font gfxterm gfxmenu png all_video configfile test regexp halt" \
+            --modules="linux16 linux normal iso9660 biosdisk search font gfxterm gfxmenu png all_video configfile test regexp halt" \
             --locales="" \
             --fonts="" \
             "boot/grub/grub.cfg=isolinux/grub.cfg"

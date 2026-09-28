@@ -15,6 +15,7 @@ from framework.visual import (
     grub_editor_layout,
     grub_frame_difference,
     grub_menu_layout,
+    hyperfluent_grub_visible,
 )
 from unit.support import render_live_grub
 
@@ -24,6 +25,15 @@ FRAMES = ROOT / "tests/fixtures/hyperfluent"
 
 
 class HyperfluentVisualTests(unittest.TestCase):
+    def test_visual_gate_rejects_stock_grub_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            frame = Path(temporary) / "stock.ppm"
+            Image.new("RGB", (1024, 768), "black").save(frame, format="PPM")
+            self.assertFalse(hyperfluent_grub_visible(frame))
+            with Image.open(FRAMES / "top.png") as themed:
+                themed.convert("RGB").save(frame, format="PPM")
+            self.assertTrue(hyperfluent_grub_visible(frame))
+
     def test_scrolled_submenu_acknowledges_changed_entries_at_fixed_highlight(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             before = Path(temporary) / "before.ppm"

@@ -111,6 +111,12 @@ def grub_menu_layout(frame: Path) -> GrubMenuLayout | None:
     )
 
 
+def hyperfluent_grub_visible(frame: Path) -> bool:
+    """Require the actual branded artwork, not GRUB's functional text fallback."""
+
+    return _is_hyperfluent_frame(*_read_ppm_rgb(frame))
+
+
 def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
     """Return a semantic editor layout; blank, menu, and boot frames fail."""
 
