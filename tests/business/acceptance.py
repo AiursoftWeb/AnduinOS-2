@@ -56,6 +56,7 @@ def main(argv: list[str] | None = None) -> int:
             uefi_code=args.uefi_code,
             uefi_vars_no_secure_boot=args.uefi_vars,
             uefi_vars_secure_boot=args.secure_boot_vars,
+            uefi_unsupported_code=args.uefi_unsupported_code,
         )
         artifacts_root = (
             args.artifacts.expanduser().resolve() if args.artifacts else
@@ -343,6 +344,7 @@ def _parser() -> argparse.ArgumentParser:
         help="ARM64 firmware guard only; AMD64 synchronizes on the visible GRUB menu",
     )
     parser.add_argument("--uefi-code", type=Path)
+    parser.add_argument("--uefi-unsupported-code", type=Path)
     parser.add_argument("--uefi-vars", type=Path)
     parser.add_argument("--secure-boot-vars", type=Path)
     return parser
@@ -404,6 +406,7 @@ def _options(
             uefi_code=args.uefi_code,
             uefi_vars_no_secure_boot=args.uefi_vars,
             uefi_vars_secure_boot=args.secure_boot_vars,
+            uefi_unsupported_code=args.uefi_unsupported_code,
         ),
         firmware_delay_seconds=delay,
         free_space_reserve_gib=args.free_space_reserve,

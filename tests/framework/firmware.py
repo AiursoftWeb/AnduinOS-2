@@ -15,6 +15,7 @@ class FirmwareOverrides:
     uefi_code: Path | None = None
     uefi_vars_no_secure_boot: Path | None = None
     uefi_vars_secure_boot: Path | None = None
+    uefi_unsupported_code: Path | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +59,18 @@ def resolve_firmware(
 ) -> FirmwareSelection | None:
     if firmware is Firmware.BIOS:
         return None
+    if firmware is Firmware.UEFI_UNSUPPORTED:
+        if architecture is not Architecture.AMD64:
+            raise ConfigurationError("Unsupported Secure Boot firmware fixture is only defined for amd64")
+        code = _resolve(overrides.uefi_unsupported_code,
+                        (Path("/usr/share/OVMF/OVMF_CODE_4M.fd"),),
+                        "UEFI firmware without Secure Boot")
+        variables = _resolve(overrides.uefi_vars_no_secure_boot,
+                             _DEFAULTS[architecture]["vars-nosb"],
+                             "UEFI variable-store template")
+        if code == variables:
+            raise ConfigurationError("UEFI code and variables must be different files")
+        return FirmwareSelection(code=code, variables_template=variables)
     code = _resolve(
         overrides.uefi_code,
         _DEFAULTS[architecture]["code"],

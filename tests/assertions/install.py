@@ -11,6 +11,32 @@ from framework.model import Architecture, Firmware, Network, Scenario, SshPolicy
 from framework.serial import SerialConsole
 
 
+# Both boots must independently prove unsupported UEFI, not merely a disabled
+# toggle or a failed mokutil command. These checks run in the guest as root.
+_UNSUPPORTED_FIRMWARE_ASSERTION = r"""
+set -e
+python3 - <<'FIRMWARE'
+import json
+import os
+from pathlib import Path
+import subprocess
+from anduinos_secureboot.firmware import probe_firmware
+state = probe_firmware()
+print(state.to_json())
+assert state.uefi is True and state.status.value == "unsupported", state
+assert state.reason == "secureboot-variable-absent", state
+variables = Path('/sys/firmware/efi/efivars')
+assert variables.is_dir()
+assert 'SecureBoot-8be4df61-93ca-11d2-aa0d-00e098032b8c' not in os.listdir(variables)
+result = subprocess.run(['mokutil', '--sb-state'], capture_output=True, text=True,
+                        env=dict(os.environ, LC_ALL='C'), timeout=10)
+print(json.dumps(dict(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr)))
+assert result.returncode == 255, result
+assert "This system doesn't support Secure Boot" in result.stderr, result
+assert not list(variables.glob('MokNew-*')), 'Unexpected MOK enrollment request'
+FIRMWARE
+"""
+
 LIVE_ONLY_PACKAGES = (
     "anduinos-live-layers",
     "anduinos-rescue-center",
@@ -253,7 +279,12 @@ grep -Fq 'LABEL=ANDUINOS-PERSIST' <<< "$overlay_wrapper"
 dpkg-query -W -f='${db:Status-Abbrev}' spice-vdagent | grep -q '^ii '
 dpkg-query -W -f='${db:Status-Abbrev}' openssh-server | grep -q '^ii '
 installer_version=$(dpkg-query -W -f='${Version}' anduinos-installer-beta)
-dpkg --compare-versions "$installer_version" ge '2.0.1-66'
+dpkg --compare-versions "$installer_version" ge '2.0.4-1'
+for package in anduinos-secureboot-toolkit anduinos-live-settings; do
+    version=$(dpkg-query -W -f='${Version}' "$package")
+    dpkg --compare-versions "$version" ge '2.0.4-1'
+done
+test -s /var/log/installer/firmware-initial.json
 dpkg-query -W -f='${db:Status-Abbrev}' anduinos-rescue-center | grep -q '^ii '
 test -x /usr/bin/anduinos-rescue-center
 test -x /usr/libexec/anduinos-rescue-center-helper
@@ -271,6 +302,8 @@ printf 'dracut-live-contract=ok\n'
             "test ! -d /sys/firmware/efi; echo 'legacy BIOS confirmed'",
             evidence / "live-firmware.txt",
         )
+    elif scenario.firmware is Firmware.UEFI_UNSUPPORTED:
+        _record(console, _UNSUPPORTED_FIRMWARE_ASSERTION, evidence / "live-firmware.txt")
     else:
         expected = "enabled" if scenario.firmware.secure_boot else "disabled"
         _record(
@@ -1226,6 +1259,8 @@ def _assert_secure_boot(
 ) -> None:
     if scenario.firmware is Firmware.BIOS:
         script = "test ! -d /sys/firmware/efi; echo 'firmware=bios'"
+    elif scenario.firmware is Firmware.UEFI_UNSUPPORTED:
+        script = _UNSUPPORTED_FIRMWARE_ASSERTION
     elif scenario.firmware.secure_boot:
         script = r"""
 set -e

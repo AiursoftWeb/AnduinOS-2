@@ -19,6 +19,7 @@ class Firmware(str, Enum):
     BIOS = "bios"
     UEFI_NO_SECURE_BOOT = "uefi-nosb"
     UEFI_SECURE_BOOT = "uefi-sb"
+    UEFI_UNSUPPORTED = "uefi-unsupported"
 
     @property
     def is_uefi(self) -> bool:

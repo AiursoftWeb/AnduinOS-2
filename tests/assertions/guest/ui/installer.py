@@ -427,7 +427,9 @@ def install(config: dict[str, object], evidence: Path) -> None:
     click("next")
 
     firmware = str(config["firmware"])
-    if firmware != "uefi-sb":
+    wait_page("firmware_complete")
+    click("firmware_continue")
+    if firmware == "uefi-nosb":
         wait_page("secure_boot")
         click("skip")
     network = str(config["network"])

@@ -20,7 +20,9 @@
   "cases": [
     {
       "id": "bios-offline-btrfs",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64"
+      ],
       "firmware": "bios",
       "network": "offline",
       "filesystem": "btrfs",
@@ -36,7 +38,9 @@
     },
     {
       "id": "bios-online-btrfs",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64"
+      ],
       "firmware": "bios",
       "network": "online",
       "filesystem": "btrfs",
@@ -52,7 +56,9 @@
     },
     {
       "id": "bios-online-ext4",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64"
+      ],
       "firmware": "bios",
       "network": "online",
       "filesystem": "ext4",
@@ -68,7 +74,10 @@
     },
     {
       "id": "uefi-nosb-offline-btrfs",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "btrfs",
@@ -84,7 +93,10 @@
     },
     {
       "id": "uefi-nosb-online-btrfs-ssh-enabled",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "online",
       "filesystem": "btrfs",
@@ -100,7 +112,10 @@
     },
     {
       "id": "uefi-nosb-online-btrfs-ssh-toggle",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "online",
       "filesystem": "btrfs",
@@ -116,7 +131,9 @@
     },
     {
       "id": "uefi-nosb-online-btrfs-japanese-live-chinese-rime",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64"
+      ],
       "firmware": "uefi-nosb",
       "network": "online",
       "filesystem": "btrfs",
@@ -138,7 +155,10 @@
     },
     {
       "id": "uefi-nosb-offline-ext4",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "ext4",
@@ -154,7 +174,9 @@
     },
     {
       "id": "uefi-nosb-wifi-btrfs",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64"
+      ],
       "firmware": "uefi-nosb",
       "network": "wifi",
       "filesystem": "btrfs",
@@ -170,7 +192,10 @@
     },
     {
       "id": "uefi-sb-offline-btrfs",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-sb",
       "network": "offline",
       "filesystem": "btrfs",
@@ -186,7 +211,10 @@
     },
     {
       "id": "uefi-sb-online-btrfs",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-sb",
       "network": "online",
       "filesystem": "btrfs",
@@ -202,7 +230,10 @@
     },
     {
       "id": "uefi-sb-online-ext4",
-      "architectures": ["amd64", "arm64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-sb",
       "network": "online",
       "filesystem": "ext4",
@@ -218,7 +249,9 @@
     },
     {
       "id": "uefi-nosb-offline-manual-small-disk",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64"
+      ],
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "btrfs",
@@ -232,6 +265,42 @@
       "automatic_login": false,
       "desktop_contracts": false,
       "snapshots_manager": true,
+      "mok_enrollment": false
+    },
+    {
+      "id": "uefi-unsupported-offline-btrfs",
+      "architectures": [
+        "amd64"
+      ],
+      "firmware": "uefi-unsupported",
+      "network": "offline",
+      "filesystem": "btrfs",
+      "live_mode": "temporary",
+      "rime": false,
+      "online_features": false,
+      "ssh": "disabled",
+      "passwordless_sudo": false,
+      "automatic_login": false,
+      "desktop_contracts": false,
+      "snapshots_manager": true,
+      "mok_enrollment": false
+    },
+    {
+      "id": "uefi-unsupported-offline-ext4",
+      "architectures": [
+        "amd64"
+      ],
+      "firmware": "uefi-unsupported",
+      "network": "offline",
+      "filesystem": "ext4",
+      "live_mode": "temporary",
+      "rime": false,
+      "online_features": false,
+      "ssh": "disabled",
+      "passwordless_sudo": false,
+      "automatic_login": false,
+      "desktop_contracts": false,
+      "snapshots_manager": false,
       "mok_enrollment": false
     }
   ]
