@@ -37,7 +37,7 @@ apt install -y \
     firefox-anduinos \
     gnome-shell-extension-appindicator-anduinos \
     gnome-shell-extension-dash-to-panel-anduinos \
-    gnome-shell-extension-desktop-icons-ng-anduinos \
+    gnome-shell-extension-desktop-icons-ng-gtk-3-anduinos \
     plymouth-anduinos \
     alsa-ucm-conf-anduinos \
     firmware-sof-anduinos \
