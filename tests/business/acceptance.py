@@ -43,8 +43,7 @@ def main(argv: list[str] | None = None) -> int:
         matrix = TestMatrix.load(root / "cases/install.json")
         registry = FeatureSuiteRegistry.load(root / "cases/desktop.json", matrix)
         architecture = Architecture(args.arch)
-        selected = matrix.select(architecture, ())
-        suites = registry.select(architecture)
+        selected, suites = _selection(matrix, registry, architecture, args.case)
         registry.validate_sources(
             suites,
             matrix,
@@ -64,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
              datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')).resolve()
         )
         usb_suites = {}
-        if architecture is Architecture.AMD64 or args.live_usb_only:
+        if (architecture is Architecture.AMD64 and not args.case) or args.live_usb_only:
             from .live_usb import USB_CASE_ID, live_usb_suite_checks, run_live_usb
 
             usb_suites = live_usb_suite_checks(inspection)
@@ -253,6 +252,8 @@ def main(argv: list[str] | None = None) -> int:
                         suite['artifacts'] = feature_by_source[(record['id'], suite['id'])]['artifacts']
             summary = {
                 "schema_version": 2,
+                "scope": "selected-cases" if args.case else "full-matrix",
+                "requested_cases": args.case,
                 "iso": str(inspection.path),
                 "iso_sha256": inspection.sha256,
                 "architecture": architecture.value,
@@ -292,6 +293,20 @@ def main(argv: list[str] | None = None) -> int:
             dashboard.close()
 
 
+def _selection(matrix, registry, architecture, identifiers):
+    selected = matrix.select(architecture, tuple(identifiers))
+    selected_ids = {scenario.id for scenario in selected}
+    unsupported = set(identifiers) - selected_ids
+    if unsupported:
+        raise ConfigurationError("Cases unavailable for this architecture: " + ", ".join(sorted(unsupported)))
+    suites = registry.select(architecture)
+    if identifiers:
+        suites = tuple(suite for suite in suites
+                       if suite.source_for(architecture) in selected_ids)
+        print("TARGETED REGRESSION ONLY (not a full release verdict): " + ", ".join(sorted(selected_ids)))
+    return selected, suites
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Boot and install an AnduinOS ISO in disposable QEMU guests",
@@ -303,7 +318,10 @@ def _parser() -> argparse.ArgumentParser:
         choices=tuple(item.value for item in Architecture),
     )
     parser.add_argument("--artifacts", type=Path)
-    parser.add_argument(
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--case", action="append", default=[],
+                           help="run a named installation case and its suites; repeatable, not a release verdict")
+    selection.add_argument(
         '--live-usb-only', action='store_true',
         help='run only the AMD64 Rufus ISO-mode USB boot regression (default and custom FAT labels)',
     )

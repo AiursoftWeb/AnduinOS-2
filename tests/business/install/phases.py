@@ -605,7 +605,7 @@ fi
                 instrumentation.stdout + "\n",
                 encoding="utf-8",
             )
-        _power_off(vm)
+        _power_off(vm, unmount_esp=scenario.storage_mode.coexistence)
         if scenario.desktop_contracts:
             self._collect_gate_failure(
                 scenario,

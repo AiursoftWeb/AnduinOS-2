@@ -337,11 +337,16 @@ test -z "$listeners"
         )
 
 
-def _power_off(vm: QemuVm) -> None:
+def _power_off(vm: QemuVm, *, unmount_esp: bool = False) -> None:
     """Flush guest filesystems and close the disposable VM through QMP."""
 
     assert vm.serial is not None and vm.qmp is not None
     try:
+        if unmount_esp:
+            # A/B tests reuse this ESP. sync + QMP quit leaves a mounted FAT
+            # volume dirty, so it is not a valid healthy-ESP baseline for B.
+            # Fail on unmount errors; never repair the disk to make tests pass.
+            vm.serial.run("umount /boot/efi", timeout=180)
         vm.serial.run("sync", timeout=180)
         # The harness exits the Live VM through QMP instead of asking the
         # desktop session to shut down.  Flush the named target block node

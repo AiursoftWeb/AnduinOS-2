@@ -144,7 +144,7 @@ efibootmgr -v
         if _graphical_user(vm.serial) != self.defaults.username:
             raise TestFailure("Installed desktop login reached the wrong user")
         vm.screenshot(phase + "-desktop")
-        _power_off(vm)
+        _power_off(vm, unmount_esp=True)
 
     def _run_coexistence(self, vm, scenario, artifacts):
         shared = scenario.storage_mode is StorageMode.COEXISTENCE_SHARED_ESP
@@ -165,6 +165,13 @@ efibootmgr -v
             initial = self._coexistence_snapshot(vm, b_dir, "initial-layout")
             a = installation_parts(initial)
             vendor_entry(initial["nvram"], a["vfat"])
+            health = vm.serial.run(
+                "fsck.fat -n " + shlex.quote(a["vfat"]["path"]),
+                timeout=180, check=False,
+            )
+            (b_dir / "a-esp-health.txt").write_text(health.stdout + "\n", encoding="utf-8")
+            if health.returncode != 0:
+                raise TestFailure("A's ESP is not clean before planning B:\n" + health.stdout)
             paths = tuple(item["path"] for item in initial["partitions"])
             before = self._coexistence_snapshot(vm, b_dir, "before-b", paths)
         check = "coexistence.reject-shared-esp" if shared else "coexistence.install-b-independent"

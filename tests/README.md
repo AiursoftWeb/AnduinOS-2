@@ -15,6 +15,18 @@ Pass `ISO=/path/to/image.iso` and `ARCH=amd64|arm64` only when the newest image
 cannot be selected automatically. `TEST_ARGS=--no-tui` switches to persistent
 plain output without changing which tests run.
 
+For a targeted regression, repeat `--case` with exact installation case IDs:
+
+```bash
+make test ISO=dist/your-image-amd64.iso TEST_ARGS="--case uefi-nosb-coexistence-shared-esp-rejected --case uefi-nosb-coexistence-separate-esp --case uefi-nosb-offline-manual-small-disk"
+```
+
+This still runs all unit tests and any desktop suites belonging to the selected
+cases, but skips the ISO USB suites and other installations. The console and
+summary explicitly mark it as a partial regression, **not a release verdict**.
+Unknown or architecture-incompatible IDs fail; `--case` cannot be combined with
+`--live-usb-only`. Plain `make test` continues to run the full release matrix.
+
 ## Layout
 
 ```text
@@ -97,7 +109,10 @@ disabled cases (Btrfs, one disposable 112 GiB sparse disk per case):
   distinguish the two systems and reject accidental firmware fallback.
 
 Each installation uses 1 GiB ESP + 50 GiB Root + 3 GiB Swap. There is no shrink,
-shared-ESP override or installer modification. These cases require ISO packages
+shared-ESP override or installer modification. Before an installed A/B guest is
+closed through QMP, its ESP is explicitly unmounted: `sync` alone leaves FAT's
+dirty bit set. Before planning B, a read-only `fsck.fat -n` must pass; the harness
+never repairs an unhealthy ESP to satisfy the test. These cases require ISO packages
 `anduinos-installer-beta >= 2.0.4-3` and `anduinos-secureboot-toolkit >= 2.0.4-2`; old ISOs
 fail the version check. Build with `make` after publication, then `make test`.
 They do not cover Secure Boot/MOK, Ubuntu coexistence, or ext4/Btrfs resizing.

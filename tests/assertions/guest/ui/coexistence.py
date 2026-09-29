@@ -25,19 +25,65 @@ def dropdown_display_text(node) -> tuple[str, ...]:
     raise UiFailure("Unexpectedly large ESP dropdown accessible tree")
 
 
+def accessible_identity(node):
+    """Identify a remote object, not its label or local Python proxy."""
+    try:
+        bus, path = node.app.bus_name, node.path
+        if bus and path:
+            return (bus, path)
+    except Exception:
+        pass
+    return None
+
+
+def in_storage_editor(node):
+    """Reject other windows and hidden/stale navigation pages."""
+    storage = False
+    seen = set()
+    for _ in range(50):
+        identity = accessible_identity(node)
+        if identity is None or identity in seen:
+            return False
+        seen.add(identity)
+        if role(node) == "grouping" and name(node) in ("Advanced Storage", "高级存储"):
+            storage = showing(node)
+        if role(node) == "frame":
+            return storage and showing(node) and name(node) in (
+                "AnduinOS Installer", "AnduinOS 安装程序",
+            )
+        try:
+            node = node.get_parent()
+        except Exception:
+            return False
+        if node is None:
+            return False
+    return False
+
+
 def selected_esp_dropdown(expected_path: str):
     deadline = time.monotonic() + 30
+    diagnostic = []
     while time.monotonic() < deadline:
-        matches = [
-            item for item in visible_nodes()
-            if role(item) == "combo box"
-            and any(re.search(re.escape(expected_path) + r"(?=\s|\(|$)", value)
-                    for value in dropdown_display_text(item))
-        ]
+        matches = {}
+        diagnostic = []
+        for item in visible_nodes():
+            if role(item) != "combo box":
+                continue
+            displayed = dropdown_display_text(item)
+            if not any(re.search(re.escape(expected_path) + r"(?=\s|\(|$)", value)
+                       for value in displayed):
+                continue
+            identity = accessible_identity(item)
+            scoped = in_storage_editor(item)
+            diagnostic.append({"identity": identity, "displayed": displayed,
+                               "in_storage_editor": scoped})
+            if identity is not None and scoped:
+                matches.setdefault(identity, item)
         if len(matches) == 1:
-            return matches[0]
+            return next(iter(matches.values()))
         time.sleep(0.25)
-    raise UiFailure(f"Cannot identify the ESP selector reusing {expected_path}")
+    event("esp-selector-ambiguous", expected_path=expected_path, candidates=diagnostic)
+    raise UiFailure(f"Cannot identify the ESP selector reusing {expected_path}: {diagnostic!r}")
 
 
 def select_new_esp(expected_path: str) -> None:
@@ -52,14 +98,20 @@ def select_new_esp(expected_path: str) -> None:
         dropdown = selected_esp_dropdown(expected_path)
     else:
         raise UiFailure("Could not focus/scroll the existing ESP dropdown")
-    request_node_click(dropdown, "open-esp-selector")
+    # GTK4/Wayland may expose widget-local (0, 0) as SCREEN coordinates.
+    # The exact dropdown already owns keyboard focus; use its normal keyboard
+    # interaction and verify the selected value instead of guessing pixels.
+    event("qmp-key", request="open-esp-selector", key="spc")
     choices = ("Create a new ESP partition", "创建新的 ESP 分区")
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         nodes = [item for item in visible_nodes() if name(item) in choices]
         if nodes:
-            # Use the actual option's accessible geometry, never fixed pixels.
-            request_node_click(nodes[-1], "choose-new-esp")
+            # The editor puts "Create a new ESP partition" first. Selection is
+            # accepted only after the collapsed face confirms that exact text.
+            event("qmp-key", request="choose-first-esp-option", key="home")
+            time.sleep(0.3)
+            event("qmp-key", request="choose-new-esp", key="ret")
             break
         time.sleep(0.25)
     else:
