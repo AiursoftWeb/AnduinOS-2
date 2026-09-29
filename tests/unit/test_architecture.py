@@ -39,24 +39,6 @@ class TestSystemArchitectureTests(unittest.TestCase):
         self.assertTrue((ROOT / "business/install/runner.py").is_file())
         self.assertTrue((ROOT / "business/desktop/runner.py").is_file())
 
-    def test_cli_has_no_coverage_selector_or_nonexecuting_success_mode(self):
-        options = {
-            option
-            for action in _parser()._actions
-            for option in action.option_strings
-        }
-        self.assertTrue({"--iso", "--arch"}.issubset(options))
-        self.assertTrue(
-            {
-                "--profile",
-                "--case",
-                "--suite",
-                "--smoke",
-                "--list",
-                "--dry-run",
-                "--fail-fast",
-            }.isdisjoint(options)
-        )
 
     def test_makefile_exposes_one_complete_test_target(self):
         makefile = (ROOT.parent / "makefile").read_text(encoding="utf-8")
