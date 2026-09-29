@@ -61,6 +61,7 @@ from framework.model import (
     Network,
     Scenario,
     SshPolicy,
+    StorageMode,
     scenario_live_region,
 )
 from framework.qemu import (

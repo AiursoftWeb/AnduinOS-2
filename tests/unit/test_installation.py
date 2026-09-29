@@ -251,6 +251,35 @@ class FactoryRecoveryContractTests(unittest.TestCase):
 
 
 class BootContractTests(unittest.TestCase):
+    def test_bios_live_menu_requires_a_readable_framebuffer(self):
+        qmp = Mock()
+        with (
+            patch("framework.grub._GraphicalGrubMenuEditor") as menu,
+            patch("framework.grub.hyperfluent_grub_visible", return_value=True),
+            patch("framework.grub.grub_frame_size", return_value=(640, 480)),
+        ):
+            with self.assertRaisesRegex(ProtocolError, "below 800x600"):
+                boot_iso_with_debug_shell(
+                    qmp, Mock(), Architecture.AMD64,
+                    firmware_delay=0,
+                    serial_debug=False,
+                    require_bios_resolution=True,
+                )
+            menu.return_value.enter_language_submenu.assert_not_called()
+
+        with (
+            patch("framework.grub._GraphicalGrubMenuEditor") as menu,
+            patch("framework.grub.hyperfluent_grub_visible", return_value=True),
+            patch("framework.grub.grub_frame_size", return_value=(1024, 768)),
+        ):
+            boot_iso_with_debug_shell(
+                qmp, Mock(), Architecture.AMD64,
+                firmware_delay=0,
+                serial_debug=False,
+                require_bios_resolution=True,
+            )
+            menu.return_value.enter_language_submenu.assert_called_once_with()
+
     def test_vm_starts_only_after_control_channels_are_ready(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -304,6 +333,7 @@ class BootContractTests(unittest.TestCase):
         )
         with (
             patch("framework.grub._GraphicalGrubMenuEditor") as menu,
+            patch("framework.grub.hyperfluent_grub_visible", return_value=True),
             patch("framework.grub.SpiceInputClient") as input_client,
             patch("framework.grub._GraphicalGrubCommandLine") as prompt,
         ):
@@ -342,6 +372,7 @@ class BootContractTests(unittest.TestCase):
         qmp = Mock()
         with (
             patch("framework.grub._GraphicalGrubMenuEditor") as menu,
+            patch("framework.grub.hyperfluent_grub_visible", return_value=True),
             patch("framework.grub._GraphicalGrubCommandLine") as prompt,
         ):
             boot_iso_with_debug_shell(

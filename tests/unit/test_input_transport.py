@@ -1296,6 +1296,40 @@ class VisualOracleTests(unittest.TestCase):
             patch("framework.grub.time.monotonic", side_effect=lambda: next(ticks)),
             patch("framework.grub.time.sleep"),
             patch("framework.grub.grub_menu_layout", side_effect=layout),
+            patch(
+                "framework.grub.grub_frame_difference",
+                side_effect=lambda before, after: (
+                    800 if after.name == "locale-menu.ppm" else 0
+                ),
+            ),
+        ):
+            editor.enter_language_submenu()
+
+        editor.qmp.send_key.assert_called_once_with("ret")
+        self.assertEqual(Path("locale-menu.ppm"), editor.current_frame)
+
+    def test_bios_locale_menu_accepts_small_visible_viewport(self):
+        editor = object.__new__(_GraphicalGrubMenuEditor)
+        editor.qmp = Mock()
+        editor.current_frame = Path("top-menu.ppm")
+        editor.capture = Mock(
+            side_effect=[Path("top-repaint.ppm"), Path("locale-menu.ppm")]
+        )
+        ticks = iter(range(100))
+
+        with (
+            patch("framework.grub.time.monotonic", side_effect=lambda: next(ticks)),
+            patch("framework.grub.time.sleep"),
+            patch(
+                "framework.grub.grub_menu_layout",
+                return_value=SimpleNamespace(visible_unselected_entries=2),
+            ),
+            patch(
+                "framework.grub.grub_frame_difference",
+                side_effect=lambda before, after: (
+                    800 if after.name == "locale-menu.ppm" else 20
+                ),
+            ),
         ):
             editor.enter_language_submenu()
 

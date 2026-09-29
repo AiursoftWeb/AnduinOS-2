@@ -11,6 +11,7 @@ class InstallationPhases:
         artifacts: Path,
         *,
         wifi_lab: WifiLab | None = None,
+        config_overrides: dict[str, object] | None = None,
     ) -> InstalledBootFiles | None:
         live_region = scenario_live_region(self.defaults, scenario)
         with self._check(scenario, "regional.grub-contract"):
@@ -114,6 +115,9 @@ class InstallationPhases:
                 artifacts,
                 session_timeout_seconds=self.options.boot_timeout_seconds,
             )
+        if scenario.storage_mode.coexistence:
+            with self._check(scenario, "coexistence.package-versions"):
+                self._assert_coexistence_versions(vm, artifacts)
         with self._check(scenario, "installer-ui"):
             self._run_installer_driver(
                 vm,
@@ -121,6 +125,7 @@ class InstallationPhases:
                 artifacts,
                 wifi_lab=wifi_lab,
                 wifi_state=wifi_state,
+                config_overrides=config_overrides,
             )
         with self._check(scenario, "target-boot-files"):
             boot_files = self._show_target_grub_once(vm, scenario, artifacts)
@@ -173,6 +178,7 @@ class InstallationPhases:
             menu_path=((1, 1) if persistent else None),
             kernel_arguments=entry.kernel_arguments,
             extra_kernel_arguments=extra_arguments,
+            require_bios_resolution=vm.config.firmware is Firmware.BIOS,
             spice_socket=vm.spice_socket,
             scratch_dir=artifacts,
         )
@@ -270,6 +276,7 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
         *,
         wifi_lab: WifiLab | None = None,
         wifi_state: WifiLabState | None = None,
+        config_overrides: dict[str, object] | None = None,
     ) -> None:
         assert vm.serial is not None
         remote_root = "/run/anduinos-acceptance"
@@ -292,6 +299,8 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
         if wifi_lab is not None:
             config["wifi_ssid"] = wifi_lab.ssid
             config["wifi_password_length"] = len(wifi_lab.password)
+        if config_overrides:
+            config.update(config_overrides)
         config_path.write_text(
             json.dumps(config, ensure_ascii=False, indent=2) + "\n",
             encoding="utf-8",
@@ -334,6 +343,11 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
             raise TestFailure(
                 "AT-SPI installer driver failed:\n" + result.stdout[-8000:]
             )
+        if config.get("coexistence_stage") == "b-shared":
+            from assertions.coexistence import validate_rejection_events
+
+            validate_rejection_events(result.stdout)
+            return
         output_path = artifacts / "guest-ui-evidence" / "installer-output.txt"
         try:
             output = output_path.read_text(encoding="utf-8")

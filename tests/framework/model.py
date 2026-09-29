@@ -55,6 +55,15 @@ class LiveMode(str, Enum):
 class StorageMode(str, Enum):
     AUTOMATIC = "automatic"
     MANUAL_SMALL_DISK = "manual-small-disk"
+    COEXISTENCE_SHARED_ESP = "coexistence-shared-esp"
+    COEXISTENCE_SEPARATE_ESP = "coexistence-separate-esp"
+
+    @property
+    def coexistence(self) -> bool:
+        return self in (
+            StorageMode.COEXISTENCE_SHARED_ESP,
+            StorageMode.COEXISTENCE_SEPARATE_ESP,
+        )
 
 
 @dataclass(frozen=True)
@@ -289,6 +298,20 @@ def _load_scenario(value: object) -> Scenario:
     if storage_mode is StorageMode.MANUAL_SMALL_DISK and disk_gib != 23:
         raise ConfigurationError(
             f"{identifier}: manual-small-disk requires a 23 GiB target"
+        )
+    if storage_mode.coexistence and (
+        architectures != (Architecture.AMD64,)
+        or firmware is not Firmware.UEFI_NO_SECURE_BOOT
+        or network is not Network.OFFLINE
+        or filesystem is not Filesystem.BTRFS
+        or live_mode is not LiveMode.TEMPORARY
+        or disk_gib != 112
+        or value["desktop_contracts"]
+        or value["automatic_login"]
+    ):
+        raise ConfigurationError(
+            f"{identifier}: coexistence requires amd64, uefi-nosb, offline, "
+            "temporary Live, Btrfs, 112 GiB, and normal desktop login"
         )
     live_region = None
     if "live_region" in value:

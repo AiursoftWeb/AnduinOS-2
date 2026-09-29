@@ -4,6 +4,27 @@ from unit.support import *  # noqa: F403
 
 
 class DesktopShellOracleTests(FeatureOracleCase):
+    def test_desktop_checks_wait_for_greeter_shutdown(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        serial = Mock()
+        serial.run.side_effect = (
+            CommandResult("greeter-shell-running=gdm-greeter\n", 1),
+            CommandResult("greeter-transition-complete\n", 0),
+        )
+        with patch("business.desktop.runner.time.sleep") as sleep:
+            runner._wait_for_gdm_greeter_exit(SimpleNamespace(serial=serial))
+        self.assertEqual(2, serial.run.call_count)
+        sleep.assert_called_once_with(0.5)
+
+    def test_desktop_checks_fail_when_greeter_shutdown_never_finishes(self):
+        runner = object.__new__(FeatureSuiteRunner)
+        serial = Mock()
+        serial.run.return_value = CommandResult("greeter-session-running=c1\n", 1)
+        with patch(
+            "business.desktop.runner.time.monotonic", side_effect=(0, 0, 31)
+        ), self.assertRaisesRegex(TestFailure, "greeter-session-running=c1"):
+            runner._wait_for_gdm_greeter_exit(SimpleNamespace(serial=serial))
+
     def test_panel_pin_oracle_rejects_missing_session_persistence(self):
         initial_output = self._events(
             {

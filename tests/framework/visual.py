@@ -117,6 +117,13 @@ def hyperfluent_grub_visible(frame: Path) -> bool:
     return _is_hyperfluent_frame(*_read_ppm_rgb(frame))
 
 
+def grub_frame_size(frame: Path) -> tuple[int, int]:
+    """Return the video mode actually painted by GRUB, not a config promise."""
+
+    width, height, _ = _read_ppm_rgb(frame)
+    return width, height
+
+
 def grub_editor_layout(frame: Path) -> GrubEditorLayout | None:
     """Return a semantic editor layout; blank, menu, and boot frames fail."""
 

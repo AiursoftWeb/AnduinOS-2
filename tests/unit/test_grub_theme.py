@@ -193,10 +193,12 @@ class HyperfluentVisualTests(unittest.TestCase):
         self.assertIn("if regexp '^cd[0-9]+$' \"$root\"; then", generated.stdout)
         self.assertIn("This boot medium is not supported. Powering off in 15 seconds.", generated.stdout)
 
-    def test_live_grub_uses_automatic_display_mode(self) -> None:
+    def test_live_grub_prefers_readable_bios_modes_with_automatic_fallback(self) -> None:
         generated = render_live_grub()
         self.assertEqual(0, generated.returncode, generated.stderr)
-        self.assertIn("\nset gfxmode=auto\n", generated.stdout)
+        self.assertIn('if [ "$grub_platform" = "pc" ]; then', generated.stdout)
+        self.assertIn("set gfxmode=1024x768,800x600,auto", generated.stdout)
+        self.assertIn("    set gfxmode=auto\n", generated.stdout)
         self.assertNotIn("set gfxmode=1920x1080", generated.stdout)
 
     def test_live_grub_rejects_incomplete_regional_policy_before_output(self) -> None:

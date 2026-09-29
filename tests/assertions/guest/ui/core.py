@@ -54,6 +54,10 @@ ALIASES = {
     "confirm_initialize_gpt": ("Initialize GPT", "初始化 GPT"),
     "partition_size": ("Size (MiB)", "大小 (MiB)"),
     "add_partition": ("Add Partition", "添加分区"),
+    "separate_esp_required": (
+        "A separate EFI System Partition is required", "需要独立的 EFI 系统分区",
+    ),
+    "esp_conflict_ok": ("OK", "确定"),
     "capacity_minimum": (
         "25 GiB minimum; 50 GiB recommended.",
         "最低 25 GiB，推荐 50 GiB。",

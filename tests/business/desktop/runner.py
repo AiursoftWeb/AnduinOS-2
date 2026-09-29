@@ -347,6 +347,39 @@ class FeatureSuiteRunner(
         _login_gdm(vm, self.username, self.password, timeout=120)
         if _graphical_user(vm.serial) != self.username:
             raise TestFailure("Feature overlay opened an unexpected GNOME session")
+        self._wait_for_gdm_greeter_exit(vm)
+
+    def _wait_for_gdm_greeter_exit(self, vm: QemuVm) -> None:
+        """Keep GDM's old session shutdown out of user-action journal scopes."""
+
+        assert vm.serial is not None
+        probe = (
+            "set -eu; "
+            "for user in gdm-greeter gdm; do "
+            "uid=$(id -u \"$user\" 2>/dev/null) || continue; "
+            "if pgrep -u \"$uid\" -f 'gnome-shell --mode=gdm' >/dev/null; then "
+            "printf 'greeter-shell-running=%s\\n' \"$user\"; exit 1; fi; "
+            "done; "
+            "for session in $(loginctl list-sessions --no-legend | awk '{print $1}'); do "
+            "class=$(loginctl show-session \"$session\" -p Class --value 2>/dev/null || true); "
+            "if [ \"$class\" = greeter ]; then "
+            "printf 'greeter-session-running=%s\\n' \"$session\"; exit 1; fi; "
+            "done; "
+            "journalctl --sync; "
+            "printf 'greeter-transition-complete\\n'"
+        )
+        deadline = time.monotonic() + 30
+        last_output = ""
+        while time.monotonic() < deadline:
+            result = vm.serial.run(probe, timeout=20, check=False)
+            last_output = result.stdout.strip()
+            if result.returncode == 0 and last_output == "greeter-transition-complete":
+                return
+            time.sleep(0.5)
+        raise TestFailure(
+            "GDM greeter did not finish exiting before desktop checks: "
+            + last_output[-1000:]
+        )
 
     @contextmanager
     def _check(self, case: str, suite: str, identifier: str):

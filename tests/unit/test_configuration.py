@@ -35,16 +35,18 @@ class MatrixTests(unittest.TestCase):
         self.assertIn('"installer-confirm-installation",', installer)
         self.assertNotIn('click("confirm", timeout=180)', installer)
 
-    def test_matrix_has_the_intended_fifteen_unique_scenarios(self):
+    def test_matrix_has_the_intended_seventeen_unique_scenarios(self):
         matrix = TestMatrix.load(ROOT / "cases/install.json")
-        self.assertEqual(15, len(matrix.scenarios))
-        self.assertEqual(15, len({item.id for item in matrix.scenarios}))
+        self.assertEqual(17, len(matrix.scenarios))
+        self.assertEqual(17, len({item.id for item in matrix.scenarios}))
         self.assertEqual(
             {
                 "bios-offline-btrfs",
                 "uefi-unsupported-offline-btrfs",
                 "uefi-unsupported-offline-ext4",
                 "uefi-nosb-offline-manual-small-disk",
+                "uefi-nosb-coexistence-shared-esp-rejected",
+                "uefi-nosb-coexistence-separate-esp",
                 "bios-online-btrfs",
                 "bios-online-ext4",
                 "uefi-nosb-offline-btrfs",
@@ -59,7 +61,7 @@ class MatrixTests(unittest.TestCase):
             },
             {item.id for item in matrix.scenarios},
         )
-        self.assertEqual(15, len(matrix.select(Architecture.AMD64)))
+        self.assertEqual(17, len(matrix.select(Architecture.AMD64)))
         self.assertEqual(7, len(matrix.select(Architecture.ARM64)))
 
         scenarios = matrix.scenarios
@@ -71,7 +73,7 @@ class MatrixTests(unittest.TestCase):
         self.assertEqual(4, sum(item.filesystem is Filesystem.EXT4 for item in scenarios))
         self.assertEqual(1, sum(item.ssh is SshPolicy.ENABLED for item in scenarios))
         self.assertEqual(1, sum(item.ssh is SshPolicy.TOGGLE for item in scenarios))
-        self.assertEqual(7, sum(item.network is Network.OFFLINE for item in scenarios))
+        self.assertEqual(9, sum(item.network is Network.OFFLINE for item in scenarios))
         self.assertEqual(1, sum(item.network is Network.WIFI for item in scenarios))
         self.assertEqual(4, sum(item.rime for item in scenarios))
         self.assertEqual(1, sum(item.passwordless_sudo for item in scenarios))

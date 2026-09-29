@@ -79,6 +79,41 @@ boot verification runs after removing the ISO, with no MOK request left pending.
 The ISO must contain installer, toolkit, and Live settings versions at least
 `2.0.4-1`, including the initial firmware diagnostic written by Live setup.
 
+## Sequential AnduinOS coexistence
+
+The default AMD64 `make test` matrix includes two offline, UEFI Secure Boot
+disabled cases (Btrfs, one disposable 112 GiB sparse disk per case):
+
+- `uefi-nosb-coexistence-shared-esp-rejected`: install A through Advanced/manual
+  partitioning, boot and log into A, reboot the ISO, plan B using A's ESP, require
+  the occupied-ESP dialog and disabled Next button. GPT, firmware entries and
+  SHA-256 of **all A partitions** must remain unchanged; A must still boot and
+  accept a desktop login without the ISO.
+- `uefi-nosb-coexistence-separate-esp`: install/boot A the same way, then install
+  B through Advanced with its own ESP in the remaining space. A's partition
+  identities, boundaries, contents and firmware entry must be preserved. Boot B
+  without the ISO, then execute B's generated GRUB chainloader entry for A and
+  log into A. Root UUID, mounted ESP UUID, distinct hostnames and BootCurrent
+  distinguish the two systems and reject accidental firmware fallback.
+
+Each installation uses 1 GiB ESP + 50 GiB Root + 3 GiB Swap. There is no shrink,
+shared-ESP override or installer modification. These cases require ISO packages
+`anduinos-installer-beta >= 2.0.4-3` and `anduinos-secureboot-toolkit >= 2.0.4-2`; old ISOs
+fail the version check. Build with `make` after publication, then `make test`.
+They do not cover Secure Boot/MOK, Ubuntu coexistence, or ext4/Btrfs resizing.
+
+The harness adds the existing reversible serial debug arguments only to the
+target's generated kernel lines and restores the original GRUB file after boot.
+For B → A it uses GRUB's `next_entry` (the `grub-reboot` mechanism) to select the
+**existing generated menuentry**; it does not synthesize boot commands or test
+keyboard menu navigation. The full A hashes are captured before any B writes
+and compared before adding A's next-boot instrumentation. Full-partition hashing
+adds runtime; the existing disk-capacity safety checks apply to the larger disk.
+These two cases use the results filesystem even when other cases use tmpfs:
+two installations must not exceed the existing single-install 12 GiB RAM-disk
+limit. Allow at least 122 GiB free there (112 GiB disk plus the default 10 GiB
+reserve); qcow2 only allocates written data and is removed after each case.
+
 ## Results
 
 Each run writes `summary.json`, `junit.xml`, screenshots, logs and per-check diagnostics

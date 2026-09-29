@@ -513,6 +513,11 @@ def install(config: dict[str, object], evidence: Path) -> None:
     filesystem = str(config["filesystem"])
     if str(config.get("storage_mode")) == "manual-small-disk":
         configure_manual_small_disk(config, evidence)
+    elif str(config.get("storage_mode", "")).startswith("coexistence-"):
+        from .coexistence import configure_coexistence
+
+        if not configure_coexistence(config, evidence):
+            return
     else:
         set_toggle(filesystem, True)
         click("next")
@@ -545,6 +550,7 @@ def install(config: dict[str, object], evidence: Path) -> None:
     confirmation_dialog = (
         "manual_layout_confirmation"
         if str(config.get("storage_mode")) == "manual-small-disk"
+        or str(config.get("storage_mode", "")).startswith("coexistence-")
         else "erase_disk_confirmation"
     )
     request_dialog_focused_activation(

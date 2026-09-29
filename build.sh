@@ -266,8 +266,14 @@ function generate_live_grub_config() {
     cat <<EOF
 search --set=root --file /$TARGET_NAME
 
-# Match the installed system: let GRUB and the firmware choose the display mode.
-set gfxmode=auto
+# BIOS firmware can pick 640x480 for "auto" even when larger VBE modes work.
+# Prefer a readable menu there, but retain auto for older BIOS implementations.
+# UEFI keeps the same automatic policy as an installed AnduinOS system.
+if [ "\$grub_platform" = "pc" ]; then
+    set gfxmode=1024x768,800x600,auto
+else
+    set gfxmode=auto
+fi
 insmod all_video
 insmod gfxterm
 insmod font

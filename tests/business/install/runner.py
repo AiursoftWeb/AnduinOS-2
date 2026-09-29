@@ -8,9 +8,11 @@ from .desktop import DesktopIntegrationChecks
 from .files import FileIntegrationChecks
 from .journal import JournalChecks
 from .phases import InstallationPhases
+from .coexistence import CoexistenceChecks
 
 
 class ScenarioRunner(
+    CoexistenceChecks,
     AccessChecks,
     BootChecks,
     DesktopIntegrationChecks,
@@ -111,7 +113,7 @@ class ScenarioRunner(
         # after the initial CLI preflight. Capacity failures abort the run;
         # they are host safety failures, not product failures.
         assert_disk_storage_ready(
-            self.options.disk_storage,
+            self._scenario_disk_storage(scenario),
             disk_gib=getattr(scenario, "disk_gib", None) or self.options.disk_gib,
             filesystem_reserve_gib=self.options.free_space_reserve_gib,
             memory_mib=self.options.memory_mib,
@@ -131,6 +133,15 @@ class ScenarioRunner(
             vm.create_disk()
             vm.create_live_media()
             self._write_manifest(scenario, vm.config, artifacts)
+            if getattr(scenario, "storage_mode", StorageMode.AUTOMATIC).coexistence:
+                if promote:
+                    raise TestFailure("Coexistence disks cannot be desktop-suite bases")
+                self._run_coexistence(vm, scenario, artifacts)
+                self._assert_check_completion(scenario)
+                passed = True
+                return ScenarioResult(
+                    scenario.id, "passed", time.monotonic() - started, artifacts
+                )
             boot_files = self._run_live_phase(
                 vm,
                 scenario,
@@ -278,6 +289,17 @@ class ScenarioRunner(
             message, encoding="utf-8"
         )
 
+    def _scenario_disk_storage(self, scenario: Scenario) -> DiskStorage:
+        if (getattr(scenario, "storage_mode", StorageMode.AUTOMATIC).coexistence
+                and self.options.disk_storage.is_ramdisk):
+            # Two installed systems can exceed the single-install 12 GiB
+            # tmpfs/RLIMIT_FSIZE budget. Do not raise that host safety limit.
+            return DiskStorage(
+                self.options.artifacts_root, "filesystem",
+                "two-install coexistence uses persistent storage, not the single-install RAM budget",
+            )
+        return self.options.disk_storage
+
     def _create_vm(self, scenario: Scenario, artifacts: Path) -> QemuVm:
         selection = resolve_firmware(
             self.architecture,
@@ -288,6 +310,7 @@ class ScenarioRunner(
         if selection is not None:
             variables = copy_variables(selection, artifacts / "uefi-vars.fd")
         qemu_binary, acceleration = resolve_qemu(self.architecture)
+        storage = self._scenario_disk_storage(scenario)
         config = QemuConfig(
             architecture=self.architecture,
             firmware=scenario.firmware,
@@ -297,15 +320,15 @@ class ScenarioRunner(
             disk_gib=getattr(scenario, "disk_gib", None) or self.options.disk_gib,
             ssh_forward_port=allocate_tcp_port(),
             iso=self.inspection.path,
-            disk=self.options.disk_storage.root / scenario.id / "target.qcow2",
+            disk=storage.root / scenario.id / "target.qcow2",
             variables=variables,
             firmware_selection=selection,
             artifacts=artifacts,
             qemu_binary=qemu_binary,
             acceleration=acceleration,
-            file_size_limit_bytes=self.options.disk_storage.qcow_limit_bytes,
+            file_size_limit_bytes=storage.qcow_limit_bytes,
             live_media=(
-                self.options.disk_storage.root / scenario.id / "live-media.raw"
+                storage.root / scenario.id / "live-media.raw"
                 if scenario.live_mode is LiveMode.PERSISTENT
                 else None
             ),
@@ -318,6 +341,7 @@ class ScenarioRunner(
         config: QemuConfig,
         artifacts: Path,
     ) -> None:
+        storage = self._scenario_disk_storage(scenario)
         value = {
             "iso": str(self.inspection.path),
             "iso_sha256": self.inspection.sha256,
@@ -329,9 +353,9 @@ class ScenarioRunner(
                 "memory_mib": config.memory_mib,
                 "cpus": config.cpus,
                 "disk_gib": config.disk_gib,
-                "disk_backend": self.options.disk_storage.backend,
-                "disk_workspace": str(self.options.disk_storage.root),
-                "disk_backend_reason": self.options.disk_storage.reason,
+                "disk_backend": storage.backend,
+                "disk_workspace": str(storage.root),
+                "disk_backend_reason": storage.reason,
                 "disk_file_size_limit_bytes": config.file_size_limit_bytes,
                 "ssh_forward_port": config.ssh_forward_port,
                 "live_media": (

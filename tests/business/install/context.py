@@ -96,6 +96,10 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
                 "boot.plymouth-anduinos-logo",
             )
         )
+    if getattr(scenario, "storage_mode", StorageMode.AUTOMATIC).coexistence:
+        from .coexistence import coexistence_check_ids
+
+        checks.extend(coexistence_check_ids(scenario))
     return tuple(checks)
 
 

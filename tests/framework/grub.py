@@ -18,6 +18,7 @@ from .visual import (
     grub_editor_left_cursor_y,
     grub_editor_layout,
     grub_frame_difference,
+    grub_frame_size,
     grub_menu_layout,
     hyperfluent_grub_visible,
 )
@@ -57,6 +58,7 @@ def boot_iso_with_debug_shell(
     kernel_arguments: tuple[str, ...] = (),
     extra_kernel_arguments: tuple[str, ...] = (),
     serial_debug: bool = True,
+    require_bios_resolution: bool = False,
     spice_socket: Path | None = None,
     scratch_dir: Path | None = None,
 ) -> None:
@@ -94,6 +96,13 @@ def boot_iso_with_debug_shell(
                     "ISO GRUB reached its text fallback instead of rendering "
                     "the HyperFluent theme"
                 )
+            if require_bios_resolution:
+                width, height = grub_frame_size(editor.current_frame)
+                if width < 800 or height < 600:
+                    raise ProtocolError(
+                        "BIOS ISO GRUB menu is below 800x600 "
+                        f"({width}x{height}); inspect supported VBE modes"
+                    )
             if menu_path == (1, 1) and serial_debug:
                 # The To Go entry contains an optical-media guard before its
                 # linux command. Its source lines and visual wrapping are not
@@ -121,7 +130,7 @@ def boot_iso_with_debug_shell(
                 editor.enter_advanced_submenu()
             for _ in range(child_index):
                 editor.move_selection_down(
-                    minimum_visible_unselected_entries=(4 if top_index == 0 else 0)
+                    minimum_visible_unselected_entries=0
                 )
             if not serial_debug and not suffix:
                 # Preserve the entry exactly as a user boots it. In
@@ -408,15 +417,21 @@ class _GraphicalGrubMenuEditor:
     def enter_language_submenu(self) -> None:
         if self.current_frame is None:
             raise ProtocolError("Graphical GRUB menu was not synchronized")
+        top_frame = self.current_frame
         self.qmp.send_key("ret")
-        # The theme deliberately shows only five of the 28 scrollable locale
-        # entries at once. Stock GRUB shows many more. Four unselected visible
-        # rows distinguish either submenu from the three-entry top menu.
+        # The number of visible locales depends on the firmware video mode:
+        # a 640x480 BIOS menu shows only three entries in total. Require a
+        # painted menu whose contents changed substantially from the top menu
+        # instead of assuming a fixed number of visible rows.
         deadline = time.monotonic() + 30
         while time.monotonic() < deadline:
             frame = self.capture()
             layout = grub_menu_layout(frame)
-            if layout is not None and layout.visible_unselected_entries >= 4:
+            if (
+                layout is not None
+                and layout.visible_unselected_entries >= 1
+                and grub_frame_difference(top_frame, frame) >= 500
+            ):
                 self.current_frame = frame
                 return
             time.sleep(0.1)

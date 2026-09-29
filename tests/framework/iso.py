@@ -205,8 +205,13 @@ def _read_live_entries(
         _extract(path, "/boot/grub/grub.cfg", destination)
         content = destination.read_text(encoding="utf-8", errors="replace")
     _validate_dracut_live_contract(content, expected_label=volume_label(path))
-    if re.search(r"(?m)^set gfxmode=auto$", content) is None:
-        raise ConfigurationError("ISO GRUB must use the automatic display mode")
+    if (
+        re.search(r"(?m)^\s*set gfxmode=auto$", content) is None
+        or re.search(r"(?m)^\s*set gfxmode=1024x768,800x600,auto$", content) is None
+    ):
+        raise ConfigurationError(
+            "ISO GRUB must prefer readable BIOS modes and retain automatic fallback"
+        )
     required_theme_lines = (
         "if loadfont unicode ; then",
         "source /boot/grub/themes/anduinos-hyperfluent/live-grub.cfg",

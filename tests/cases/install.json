@@ -248,6 +248,42 @@
       "mok_enrollment": true
     },
     {
+      "id": "uefi-nosb-coexistence-shared-esp-rejected",
+      "architectures": ["amd64"],
+      "firmware": "uefi-nosb",
+      "network": "offline",
+      "filesystem": "btrfs",
+      "live_mode": "temporary",
+      "storage_mode": "coexistence-shared-esp",
+      "disk_gib": 112,
+      "rime": false,
+      "online_features": false,
+      "ssh": "disabled",
+      "passwordless_sudo": false,
+      "automatic_login": false,
+      "desktop_contracts": false,
+      "snapshots_manager": true,
+      "mok_enrollment": false
+    },
+    {
+      "id": "uefi-nosb-coexistence-separate-esp",
+      "architectures": ["amd64"],
+      "firmware": "uefi-nosb",
+      "network": "offline",
+      "filesystem": "btrfs",
+      "live_mode": "temporary",
+      "storage_mode": "coexistence-separate-esp",
+      "disk_gib": 112,
+      "rime": false,
+      "online_features": false,
+      "ssh": "disabled",
+      "passwordless_sudo": false,
+      "automatic_login": false,
+      "desktop_contracts": false,
+      "snapshots_manager": true,
+      "mok_enrollment": false
+    },
+    {
       "id": "uefi-nosb-offline-manual-small-disk",
       "architectures": [
         "amd64"
