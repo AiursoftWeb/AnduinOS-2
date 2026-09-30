@@ -101,6 +101,8 @@ done
         package_result = vm.serial.run(
             "set -uo pipefail\n"
             f"for package in {packages}; do\n"
+            "  status=$(dpkg-query -W -f='${db:Status-Status}' \"$package\" 2>/dev/null || true)\n"
+            "  [ \"$status\" = installed ] || continue\n"
             "  dpkg-query -W -f='${Package}\\t${Version}\\n' \"$package\" "
             "2>/dev/null || true\n"
             "done",

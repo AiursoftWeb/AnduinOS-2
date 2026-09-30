@@ -348,7 +348,38 @@ class ShellChecks:
             timeout=30,
         ).stdout.strip()
         if not session or not re.fullmatch(r"[A-Za-z0-9_.-]+", session):
-            raise TestFailure(f"Could not identify the graphical session for {user!r}")
+            # Display can remain empty after a real GDM relogin even though
+            # the seat's active Wayland session already exists. Identify that
+            # session by its properties; never substitute the user manager.
+            deadline = time.monotonic() + 30
+            evidence = ""
+            while time.monotonic() < deadline:
+                result = vm.serial.run(
+                    "set -euo pipefail\n"
+                    f"for sid in $(loginctl show-user {shlex.quote(user)} -p Sessions --value); do\n"
+                    "  printf 'Session=%s\\n' \"$sid\"\n"
+                    "  loginctl show-session \"$sid\" -p Name -p Class -p Type "
+                    "-p Active -p Remote -p Seat\n"
+                    "  printf '\\n'\n"
+                    "done", timeout=30,
+                )
+                evidence = result.stdout
+                candidates = []
+                for block in evidence.strip().split("\n\n"):
+                    values = dict(line.split("=", 1) for line in block.splitlines() if "=" in line)
+                    if (values.get("Name") == user
+                            and values.get("Class") == "user"
+                            and values.get("Type") in {"wayland", "x11"}
+                            and values.get("Active") == "yes"
+                            and values.get("Remote") == "no"
+                            and values.get("Seat")):
+                        candidates.append(values.get("Session", ""))
+                if len(candidates) == 1 and re.fullmatch(r"[A-Za-z0-9_.-]+", candidates[0]):
+                    return candidates[0]
+                if len(candidates) > 1:
+                    raise TestFailure(f"Ambiguous graphical sessions for {user!r}: {evidence}")
+                time.sleep(0.5)
+            raise TestFailure(f"Could not identify the graphical session for {user!r}: {evidence}")
         return session
 
     def _install_shell_fixture(

@@ -568,8 +568,27 @@ def exercise_desktop_terminal(evidence: Path) -> None:
     event("desktop-terminal", phase="closed", visible=False)
 
 
+def _ding_gtk_major() -> int:
+    """Use the running desktop's GTK library, not the ISO's default package."""
+    frames = _desktop_frames()
+    if len(frames) != 1:
+        raise UiFailure(f"Expected one DING desktop frame, observed {len(frames)}")
+    try:
+        pid = frames[0].get_application().get_process_id()
+        mappings = Path(f"/proc/{pid}/maps").read_text()
+    except Exception as error:
+        raise UiFailure(f"Could not identify running DING GTK version: {error}") from error
+    majors = [major for major in (3, 4)
+              if re.search(rf"/libgtk-{major}\.so(?:\.|\s)", mappings)]
+    if len(majors) != 1:
+        raise UiFailure(f"Running DING has ambiguous/unsupported GTK libraries: {majors}")
+    event("ding-runtime", pid=pid, gtk_major=majors[0])
+    return majors[0]
+
+
 def exercise_desktop_shortcut(evidence: Path) -> None:
     dismiss_initial_setup()
+    gtk_major = _ding_gtk_major()
     destination = _desktop_fixture_path()
     destination.unlink(missing_ok=True)
     _semantic, _target, search_entry = _open_arcmenu_search(
@@ -659,11 +678,15 @@ def exercise_desktop_shortcut(evidence: Path) -> None:
         time.sleep(0.1)
     if find_optional("ding_find_title", timeout=0.25):
         raise UiFailure("DING Find Files dialog did not close after Return")
-    event(
-        "qmp-key",
-        request="desktop-shortcut-open-menu",
-        key="shift-f10",
-    )
+    if gtk_major == 4:
+        event(
+            "qmp-key",
+            request="desktop-shortcut-open-menu",
+            key="shift-f10",
+        )
+    # GTK3's Return handler opens the selected icon directly. Its Gtk.Menu
+    # has no initially active item after Shift+F10, so Return there does not
+    # launch. GTK4 retains its existing menu activation path.
     event("qmp-key", request="desktop-shortcut-launch", key="ret")
     find(PANEL_WINDOW_TITLE, timeout=60)
     event(
@@ -676,6 +699,7 @@ def exercise_desktop_shortcut(evidence: Path) -> None:
         visible=True,
         launched_windows=[PANEL_WINDOW_TITLE],
         activation="ding-keyboard-find",
+        gtk_major=gtk_major,
     )
 
 

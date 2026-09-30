@@ -285,25 +285,37 @@ class PublicApplicationChecks:
         source = None
         cleanup = None
         try:
-            command = vm.serial.run(
-                _desktop_command(
-                    self.username,
-                    (
-                        "bash",
-                        "-lc",
-                        "set -euo pipefail; "
-                        "printf 'invoking-user=%s\\n' \"$(id -un)\"; "
-                        "printf '%s\\n' "
-                        "'command=sudo add-apt-repository -y "
-                        "ppa:nextcloud-devs/client'; "
-                        "sudo -n /usr/bin/add-apt-repository -y "
-                        "ppa:nextcloud-devs/client; "
-                        "printf 'repository-command=passed\\n'",
+            for attempt in range(1, 4):
+                command = vm.serial.run(
+                    _desktop_command(
+                        self.username,
+                        (
+                            "bash",
+                            "-lc",
+                            "set -euo pipefail; "
+                            "printf 'invoking-user=%s\\n' \"$(id -un)\"; "
+                            "printf '%s\\n' "
+                            "'command=sudo add-apt-repository -y "
+                            "ppa:nextcloud-devs/client'; "
+                            "sudo -n /usr/bin/add-apt-repository -y "
+                            "ppa:nextcloud-devs/client; "
+                            "printf 'repository-command=passed\\n'",
+                        ),
                     ),
-                ),
-                timeout=600,
-                check=False,
-            )
+                    timeout=600,
+                    check=False,
+                )
+                (artifacts / f"nextcloud-ppa-command-attempt-{attempt}.txt").write_text(
+                    command.stdout + "\n", encoding="utf-8"
+                )
+                # Only retry an interrupted Launchpad transport response.
+                # Permission, package, source, and product errors still fail
+                # immediately; final source and journal checks stay mandatory.
+                transient = ("http.client.IncompleteRead" in command.stdout
+                             and "launchpadlib" in command.stdout)
+                if command.returncode == 0 or not transient or attempt == 3:
+                    break
+                time.sleep(5 * attempt)
             (artifacts / "nextcloud-ppa-command.txt").write_text(
                 command.stdout + "\n", encoding="utf-8"
             )
