@@ -6,17 +6,11 @@ class AcceptanceWiringTests(unittest.TestCase):
         composition = Path(
             "mods/05-live-kernel-apps-installer/install.sh"
         ).read_text(encoding="utf-8")
-        payload_section = composition.split(
-            "Installing conditional Disk Snapshots Manager payload", 1
-        )[1]
-        payload_install = payload_section.split(
-            'judge "Install anduinos-btrfs-snapshots-manager payload"', 1
-        )[0]
-        self.assertIn(
-            "apt install -y anduinos-btrfs-snapshots-manager",
-            payload_install,
-        )
-        self.assertIn("--no-install-recommends", payload_install)
+        payload_install = composition.split("apt install -y", 2)[2].split(
+            "\njudge ", 1
+        )[0].replace("\\\n", "").split()
+        self.assertIn("anduinos-btrfs-snapshots-manager", payload_install)
+        self.assertIn("--install-recommends", payload_install)
 
     def test_action_scoped_journal_is_real_in_base_and_overlay_drivers(self):
         runner = _source_tree(ROOT / "business/install")

@@ -6,23 +6,37 @@ set -u                  # treat unset variable as error
 
 wait_network
 
-print_ok "Installing the AnduinOS Dracut Live stack..."
+# Complete kernel configuration, depmod, and triggers before initrd consumers.
+# The core metapackage selects the kernel for the target suite and architecture.
+print_ok "Installing the AnduinOS core system and kernel..."
 apt install -y \
+    anduinos-core-system \
     dracut \
     dracut-core \
     dracut-install \
-    anduinos-live-layers \
     discover \
     laptop-detect \
     os-prober \
     keyutils \
-    --no-install-recommends
-judge "Install live-boot"
+    build-essential- \
+    --install-recommends
+judge "Install AnduinOS core system and kernel"
 
-print_ok "Installing anduinos-desktop (full AnduinOS desktop metapackage)..."
+guest_packages=()
+# Carry VMware integration on amd64; the installer retains it only on VMware.
+if [ "$TARGET_ARCH" = "amd64" ]; then
+    guest_packages+=(open-vm-tools-desktop)
+fi
+
+print_ok "Installing AnduinOS Live components, desktop, and installer..."
+# The kernel is configured; resolve the remaining Live and desktop payloads together.
 # DKMS legitimately needs gcc/make/dpkg-dev, but dpkg-dev only recommends the
 # unrelated build-essential C++ stack. Keep that soft dependency out of the ISO.
+# The GRUB theme remains standalone and removable. Disk Snapshots Manager is
+# included in the Live image; the installer retains it on Btrfs and purges it
+# from ext4 targets. Neither becomes a desktop metapackage dependency here.
 apt install -y \
+    anduinos-live-layers \
     anduinos-desktop \
     anduinos-desktop-apps \
     anduinos-gnome-extensions \
@@ -41,36 +55,10 @@ apt install -y \
     plymouth-anduinos \
     alsa-ucm-conf-anduinos \
     firmware-sof-anduinos \
+    anduinos-hyperfluent-grub-theme \
+    anduinos-installer-beta \
+    anduinos-btrfs-snapshots-manager \
+    "${guest_packages[@]}" \
     build-essential- \
     --install-recommends
-judge "Install anduinos-desktop"
-
-# A standalone, removable theme package. Keep it installed on the target so
-# the installed GRUB uses the same artwork; no desktop meta-package depends on it.
-print_ok "Installing the optional AnduinOS GRUB theme..."
-apt install -y anduinos-hyperfluent-grub-theme \
-    --no-install-recommends
-judge "Install anduinos-hyperfluent-grub-theme"
-
-print_ok "Installing AnduinOS native installer and its recommended recovery tools..."
-apt install -y anduinos-installer-beta \
-    --install-recommends
-judge "Install anduinos-installer-beta"
-
-# Carry the Btrfs recovery UI inside the ISO without making it a desktop
-# metapackage dependency. The native installer retains this package for Btrfs
-# targets and purges it from ext4 targets through its explicit cleanup policy.
-print_ok "Installing conditional Disk Snapshots Manager payload..."
-apt install -y anduinos-btrfs-snapshots-manager \
-    --no-install-recommends
-judge "Install anduinos-btrfs-snapshots-manager payload"
-
-# Carry VMware desktop integration in the amd64 Live image so VMware guests
-# can resize dynamically before and after installation. The native installer
-# retains it for VMware targets and purges it everywhere else.
-if [ "$TARGET_ARCH" = "amd64" ]; then
-    print_ok "Installing conditional VMware guest integration payload..."
-    apt install -y open-vm-tools-desktop \
-        --install-recommends
-    judge "Install VMware guest integration payload"
-fi
+judge "Install AnduinOS Live components, desktop, and installer"

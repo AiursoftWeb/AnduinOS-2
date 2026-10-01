@@ -180,7 +180,7 @@ class HyperfluentVisualTests(unittest.TestCase):
         install = (ROOT / "mods/05-live-kernel-apps-installer/install.sh").read_text(
             encoding="utf-8"
         )
-        self.assertIn("apt install -y anduinos-hyperfluent-grub-theme", install)
+        self.assertRegex(install, r"(?m)^\s+anduinos-hyperfluent-grub-theme\s+\\$")
         self.assertIn("generate_live_grub_config > image/isolinux/grub.cfg", build)
         self.assertIn('gfxterm gfxmenu png all_video', build)
         self.assertIn('--size="16"', build)
