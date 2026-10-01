@@ -427,12 +427,21 @@ def install(config: dict[str, object], evidence: Path) -> None:
     click("next")
 
     firmware = str(config["firmware"])
-    wait_page("firmware_complete")
-    click("firmware_continue")
+    network = str(config["network"])
+    next_page = ("secure_boot" if firmware == "uefi-nosb"
+                 else "keyboard" if network == "online" else "network")
+    node = find_candidates(
+        ALIASES[next_page] + ALIASES["firmware_complete"],
+        label="firmware detection or its next page", timeout=60,
+    )
+    # Older installers require Continue; new installers advance automatically.
+    # The expected next page is still required below in either case.
+    if matches(node, ALIASES["firmware_complete"]):
+        if find_optional("firmware_continue") is not None:
+            click("firmware_continue")
     if firmware == "uefi-nosb":
         wait_page("secure_boot")
         click("skip")
-    network = str(config["network"])
     if network == "offline":
         wait_page("network")
         click("next")
