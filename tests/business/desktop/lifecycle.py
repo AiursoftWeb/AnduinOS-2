@@ -322,6 +322,22 @@ class LifecycleChecks:
             f"did not start after GDM login; attempts={attempts}"
         )
 
+    def _exercise_kernel_theme_upgrade(self, vm, base, artifacts):
+        assert vm.serial is not None
+        remote = "/run/anduinos-kernel-theme-upgrade.sh"
+        vm.serial.upload(
+            self.framework_root / "assertions/guest/kernel_theme_upgrade.sh",
+            remote,
+            0o755,
+        )
+        result = vm.serial.run(f"bash {remote}", timeout=900, check=False)
+        (artifacts / "kernel-theme-upgrade.txt").write_text(result.stdout + "\n")
+        if result.returncode != 0:
+            raise TestFailure(
+                "Theme configuration with a pending kernel failed:\n"
+                + result.stdout[-8000:]
+            )
+
     def _exercise_ordinary_reboot(
         self,
         vm: QemuVm,

@@ -54,6 +54,15 @@ External catalog/download failures are reported as failures, not skipped passes.
 GHex uses an isolated local search; Spotify suites retain the Software provider.
 Plymouth is checked before debug injection and retains failed frames; **BLOCKED** prerequisites prevent release.
 
+`system-lifecycle` reinstalls the actual installed kernel and theme packages in
+its disposable VM, removes generated module dependency indexes, and configures
+Plymouth and Disk Snapshots Manager before the pending kernel. Their updates
+must defer through the official Dracut trigger. Kernel configuration must then
+restore the indexes, generate valid images with both modules, and leave dpkg
+healthy; the existing ordinary reboot check follows this transaction. This
+regression covers package configuration ordering, not every historical upgrade
+or every future kernel. Exact installed package versions must remain downloadable.
+
 `factory-reset-repeat` removes GNOME Clocks and creates Home files, then resets the same
 disposable VM twice: preserve Home, then roll back Home while retaining browsable snapshot history.
 Both boots must restore baseline GNOME Clocks, package health and desktop login, with QEMU blocking Internet access. Dependency-checked `dpkg` removes only GNOME Clocks; the snapshot manager must remain installed. Package edge cases stay in AnduinOS-Packages.

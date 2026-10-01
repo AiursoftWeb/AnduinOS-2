@@ -37,6 +37,7 @@ class FeatureSuiteRunner(
 
     IMPLEMENTATION_METHODS = {
         "input.super-space-rime": "_exercise_rime_input",
+        "system.kernel-theme-upgrade": "_exercise_kernel_theme_upgrade",
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
         "storage.btrfs-home-rollback": "_exercise_btrfs_home_rollback",
