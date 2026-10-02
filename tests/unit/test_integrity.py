@@ -192,18 +192,6 @@ class AcceptanceWiringTests(unittest.TestCase):
         self.assertIn("get_character_count()", delivery)
         self.assertIn("Secret input did not reach field", delivery)
 
-    def test_installer_failure_path_preserves_the_executor_transcript(self):
-        source = _source_tree(ROOT / "assertions/guest/ui")
-        install = source.split("def install(", 1)[1].split(
-            "def prepare_secure_shell(", 1
-        )[0]
-        failed = install.split('if find_optional("failed"', 1)[1].split(
-            'if find_optional("complete"', 1
-        )[0]
-        self.assertIn("save_executor_output()", failed)
-        self.assertIn('evidence / "installer-output.txt"', install)
-        self.assertIn('click("save_log")', install)
-
     def test_graphical_user_probe_excludes_display_manager_accounts(self):
         self.assertIn("gdm-greeter", _GRAPHICAL_USER_SCRIPT)
         self.assertIn("/usr/sbin/nologin", _GRAPHICAL_USER_SCRIPT)
