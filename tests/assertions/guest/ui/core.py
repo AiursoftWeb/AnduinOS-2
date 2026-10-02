@@ -945,8 +945,12 @@ def dialog_control(dialog_key: str, key: str):
 
     dialog_names = {semantic_name(item) for item in aliases(dialog_key)}
     control_names = {semantic_name(item) for item in aliases(key)}
+    dialog_roles = {"dialog", "file chooser"}
+    if dialog_key == "save_log":
+        # GNOME 50's Nautilus chooser exposes its titled window as a frame.
+        dialog_roles.add("frame")
     for candidate in visible_nodes():
-        if role(candidate) not in {"dialog", "file chooser"}:
+        if role(candidate) not in dialog_roles:
             continue
         if semantic_name(name(candidate)) not in dialog_names:
             continue

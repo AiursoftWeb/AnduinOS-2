@@ -416,7 +416,7 @@ def save_installer_log(destination: Path, evidence: Path) -> None:
         if destination.is_file() and destination.stat().st_size:
             return
         chooser = next((node for node in visible_nodes()
-                        if role(node) in {"dialog", "file chooser"}
+                        if role(node) in {"dialog", "file chooser", "frame"}
                         and semantic_name(name(node)) in {
                             semantic_name(value) for value in aliases("save_log")
                         }), None)
@@ -431,6 +431,7 @@ def save_installer_log(destination: Path, evidence: Path) -> None:
     # Scope the lookup to the chooser so no installer account field is edited.
     filename_names = {semantic_name(value) for value in (
         "Name:", "Name", "名称:", "名称：", "名称", "名字:", "名字：",
+        "Filename", "File name", "文件名", "文件名:", "文件名：",
     )}
     chooser_nodes = [node for node in walk(chooser) if showing(node)]
     entry = next((node for node in chooser_nodes
@@ -445,7 +446,10 @@ def save_installer_log(destination: Path, evidence: Path) -> None:
                           if field.is_editable_text()), None)
             if entry is not None:
                 break
-    if entry is None or not entry.set_text_contents(str(destination)):
+    # Nautilus rejects slashes in its filename field. Its save chooser starts
+    # in the live user's home; this transcript is saved there and checked below.
+    filename = destination.name if role(chooser) == "frame" else str(destination)
+    if entry is None or not entry.set_text_contents(filename):
         dump_accessibility(evidence / "save-log-chooser.txt")
         raise UiFailure("Save Log chooser has no writable filename entry")
     event("set-text", target="installer-log-destination", path=str(destination))
