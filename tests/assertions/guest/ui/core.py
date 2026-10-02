@@ -116,6 +116,9 @@ ALIASES = {
     "complete_tab": ("Complete", "完成"),
     "copy_log": ("Copy Log", "复制日志"),
     "save_log": ("Save Log", "保存日志"),
+    "file_save": ("Save", "保存", "保存(S)"),
+    "log_saved": ("Saved", "已保存"),
+    "dialog_ok": ("OK", "确定"),
     "connect": ("Connect", "连接"),
     "connected": ("Connected", "已连接"),
     "use_wps": ("Use WPS", "使用 WPS"),
@@ -938,12 +941,12 @@ def control(key: str):
 
 
 def dialog_control(dialog_key: str, key: str):
-    """Resolve an exact button only inside one visible modal dialog."""
+    """Resolve an exact button inside a visible modal dialog or file chooser."""
 
     dialog_names = {semantic_name(item) for item in aliases(dialog_key)}
     control_names = {semantic_name(item) for item in aliases(key)}
     for candidate in visible_nodes():
-        if role(candidate) != "dialog":
+        if role(candidate) not in {"dialog", "file chooser"}:
             continue
         if semantic_name(name(candidate)) not in dialog_names:
             continue

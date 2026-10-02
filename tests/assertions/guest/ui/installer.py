@@ -400,6 +400,80 @@ def choose_chinese() -> None:
     raise UiFailure("Simplified Chinese selection did not update the installer")
 
 
+def show_installer_output() -> None:
+    """Open output once, through either the old tab or the new toggle."""
+    if find_optional("copy_log", 0.25) is None:
+        click("output_tab")
+    find("copy_log", timeout=10)
+
+
+def save_installer_log(destination: Path, evidence: Path) -> None:
+    """Use the actual save chooser; older installers save without a dialog."""
+    click("save_log")
+    deadline = time.monotonic() + 30
+    chooser = None
+    while time.monotonic() < deadline:
+        if destination.is_file() and destination.stat().st_size:
+            return
+        chooser = next((node for node in visible_nodes()
+                        if role(node) in {"dialog", "file chooser"}
+                        and semantic_name(name(node)) in {
+                            semantic_name(value) for value in aliases("save_log")
+                        }), None)
+        if chooser is not None:
+            break
+        time.sleep(0.25)
+    if chooser is None:
+        dump_accessibility(evidence / "save-log-missing.txt")
+        raise UiFailure("Save Log opened no chooser and wrote no non-empty log")
+
+    # Both GTK's chooser and the GNOME portal expose the filename entry.
+    # Scope the lookup to the chooser so no installer account field is edited.
+    filename_names = {semantic_name(value) for value in (
+        "Name:", "Name", "名称:", "名称：", "名称", "名字:", "名字：",
+    )}
+    chooser_nodes = [node for node in walk(chooser) if showing(node)]
+    entry = next((node for node in chooser_nodes
+                  if node.is_editable_text()
+                  and semantic_name(name(node)) in filename_names), None)
+    if entry is None:
+        # The portal may expose Name as a sibling label of an unnamed entry.
+        for index, node in enumerate(chooser_nodes):
+            if semantic_name(name(node)) not in filename_names:
+                continue
+            entry = next((field for field in chooser_nodes[index + 1:index + 8]
+                          if field.is_editable_text()), None)
+            if entry is not None:
+                break
+    if entry is None or not entry.set_text_contents(str(destination)):
+        dump_accessibility(evidence / "save-log-chooser.txt")
+        raise UiFailure("Save Log chooser has no writable filename entry")
+    event("set-text", target="installer-log-destination", path=str(destination))
+    time.sleep(0.25)
+    dump_accessibility(evidence / "save-log-chooser.txt")
+    button = dialog_control("save_log", "file_save")
+    if perform_named_activation(button) is None:
+        request_dialog_focused_activation(
+            "save_log", "file_save", "installer-save-log", timeout=10,
+        )
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if destination.is_file() and destination.stat().st_size:
+            # The new installer confirms the asynchronous write in a modal.
+            # Dismiss it before inspecting steps or switching to the result.
+            find("log_saved", timeout=10)
+            button = dialog_control("log_saved", "dialog_ok")
+            if perform_named_activation(button) is None:
+                request_dialog_focused_activation(
+                    "log_saved", "dialog_ok", "installer-log-saved", timeout=10,
+                )
+            time.sleep(0.35)
+            return
+        time.sleep(0.25)
+    dump_accessibility(evidence / "save-log-failed.txt")
+    raise UiFailure("Save Log did not create a non-empty installer log")
+
+
 def install(config: dict[str, object], evidence: Path) -> None:
     saved_log = Path.home() / "anduinos-install.log"
     saved_log.unlink(missing_ok=True)
@@ -408,16 +482,9 @@ def install(config: dict[str, object], evidence: Path) -> None:
         # Both success and failure must preserve the executor transcript.  A
         # red result without its privileged-step log is not actionable and can
         # hide the original error behind the final UI banner.
-        click("output_tab")
-        find("copy_log", timeout=10)
+        show_installer_output()
         dump_accessibility(evidence / "output.txt")
-        click("save_log")
-        for _ in range(40):
-            if saved_log.is_file() and saved_log.stat().st_size:
-                break
-            time.sleep(0.25)
-        else:
-            raise UiFailure("Save Log did not create a non-empty installer log")
+        save_installer_log(saved_log, evidence)
         output = saved_log.read_text(encoding="utf-8")
         (evidence / "installer-output.txt").write_text(output, encoding="utf-8")
         return output
@@ -568,7 +635,10 @@ def install(config: dict[str, object], evidence: Path) -> None:
         "installer-confirm-installation",
         timeout=30,
     )
+    # The presentation-first UI hides the step list until Output is opened.
+    # The NavigationPage still exposes its title through accessibility.
     wait_page("progress", timeout=30)
+    show_installer_output()
     wait_step_started("detect_boot_environment", timeout=60)
 
     deadline = time.monotonic() + float(config["install_timeout_seconds"])
@@ -585,8 +655,8 @@ def install(config: dict[str, object], evidence: Path) -> None:
             )
         if find_optional("complete", 0.25) is not None:
             dump_accessibility(evidence / "complete.txt")
-            # The final page hides the scrollable executor log behind the
-            # StackSwitcher.  Open the real Output page so the host harness
+            # The final page hides the scrollable executor log. Open Output
+            # through the real control so the host harness
             # can verify command execution and fatal-error markers instead of
             # trusting only the green completion banner.
             output = save_executor_output()
@@ -596,7 +666,17 @@ def install(config: dict[str, object], evidence: Path) -> None:
                 assert_step_completed("driver_step")
             if network == "wifi":
                 assert_step_completed("wifi_migration")
-            click("complete_tab")
+            # Match the old tab exactly: a fuzzy "Complete" lookup also
+            # matches the new "Installation complete" status label.
+            complete_tab_names = {
+                semantic_name(value) for value in aliases("complete_tab")
+            }
+            if any(semantic_name(name(node)) in complete_tab_names
+                   for node in visible_nodes()):
+                click("complete_tab")
+            else:
+                click("output_tab")
+            find("complete", timeout=10)
             event("installation-complete")
             return
     dump_accessibility(evidence / "timeout.txt")
