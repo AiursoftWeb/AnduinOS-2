@@ -432,6 +432,7 @@ def save_installer_log(destination: Path, evidence: Path) -> None:
     filename_names = {semantic_name(value) for value in (
         "Name:", "Name", "名称:", "名称：", "名称", "名字:", "名字：",
         "Filename", "File name", "文件名", "文件名:", "文件名：",
+        "ファイル名", "ファイル名:", "ファイル名：", "名前", "名前:", "名前：",
     )}
     chooser_nodes = [node for node in walk(chooser) if showing(node)]
     entry = next((node for node in chooser_nodes
