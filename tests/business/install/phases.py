@@ -32,6 +32,17 @@ class InstallationPhases:
                 persistent=persistent,
                 phase=("live-persistent-first" if persistent else "live-temporary"),
             )
+            if scenario.network is Network.OFFLINE:
+                # Observe the first desktop before slower package/network
+                # assertions or any installer interaction.
+                with self._check(scenario, "live.offline-no-notifications"):
+                    assert_live_identity(
+                        vm.serial, artifacts,
+                        session_timeout_seconds=self.options.boot_timeout_seconds,
+                    )
+                    self.status(scenario.id, "Checking offline Live notifications for 10 seconds")
+                    assert_live_notifications_quiet(vm.serial, vm.qmp, artifacts)
+                    vm.screenshot("live-notifications-quiet")
             wifi_state = None
             if wifi_lab is not None:
                 self.status(scenario.id, "Creating isolated in-guest WPA2 lab")

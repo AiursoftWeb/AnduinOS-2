@@ -50,6 +50,8 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
         "installer-ui",
         "target-boot-files",
     ]
+    if scenario.network is Network.OFFLINE:
+        checks.insert(checks.index("live-boot") + 1, "live.offline-no-notifications")
     if scenario.firmware.is_uefi:
         checks.append("boot.uefi-vendor-registration")
     if scenario.mok_enrollment:

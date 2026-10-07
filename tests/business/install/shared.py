@@ -33,6 +33,7 @@ from assertions.install import (
     assert_release_contract,
 )
 from framework.base import PromotedBase, _discard_variable_store, promote_base
+from assertions.notifications import assert_live_notifications_quiet
 from framework.errors import ProtocolError, TestFailure
 from framework.display import SpiceDisplayController
 from fixtures.builder import build_appimage_fixture, build_windows_executable_fixture

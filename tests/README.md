@@ -48,6 +48,19 @@ state, while installation and recovery pass only after their guest-visible
 effects are verified. If instrumentation bypasses a menu entry, an independent
 case must exercise that entry's user-visible behavior.
 
+`live.offline-no-notifications` checks every offline installation's first Live
+desktop before opening the installer. QEMU disconnects its NIC before boot.
+The check inventories retained startup notifications and observes new Shell
+MessageTray notifications for at least 10 seconds, recording title/body in
+`live-notifications.json`. It catches Shell extensions' native notifications as
+well as D-Bus app notifications, in any language. A test-only module is loaded
+through Looking Glass, which immediately closes; it neither clears notifications
+nor disables extensions, changes notification settings, or enables unsafe D-Bus
+Eval. A missing observer, unavailable API or Shell restart fails the check.
+The window begins once the Live desktop is ready and the observer attaches, not
+at kernel boot; transient notifications already destroyed before attachment are
+not covered. The current offline matrix uses the US Live keyboard for QMP input.
+
 `localization.english-fallback` runs Firewall, Swap Control, YubiKey Manager,
 Disk Snapshots Manager and Control Panel with
 `--help` under a temporary Croatian locale and requires successful, nonempty

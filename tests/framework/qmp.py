@@ -24,6 +24,9 @@ _KEY_NAMES = {
     "!": "shift-1",
     "@": "shift-2",
     "$": "shift-4",
+    '"': "shift-apostrophe",
+    "(": "shift-9",
+    ")": "shift-0",
 }
 
 
