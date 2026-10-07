@@ -161,6 +161,7 @@
       },
       "checks": [
         "localization.zh-cn-contract",
+        "localization.english-fallback",
         "shell.initial-overview-hidden",
         "shortcut.super-u",
         "shortcut.super-shift-s",

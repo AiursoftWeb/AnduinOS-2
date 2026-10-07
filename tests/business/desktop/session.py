@@ -4,6 +4,19 @@ from .context import *  # noqa: F403
 
 
 class SessionChecks:
+    def _exercise_locale_fallback(
+        self, vm: QemuVm, base: PromotedBase, artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        result = vm.serial.run(
+            _desktop_command(self.username, ("bash", "-c", _locale_fallback_script())),
+            timeout=150,
+            check=False,
+        )
+        (artifacts / "locale-fallback.txt").write_text(result.stdout + "\n", encoding="utf-8")
+        if result.returncode != 0 or "locale-fallback=passed" not in result.stdout:
+            raise TestFailure("Applications failed Croatian locale initialization:\n" + result.stdout)
+
     def _exercise_theme_selector(
         self,
         vm: QemuVm,

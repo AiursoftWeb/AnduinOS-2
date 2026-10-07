@@ -8,6 +8,32 @@ from .catalog import _CPU_Z_MEMBER
 from .events import _all_event_objects, _one_event
 
 
+def _locale_fallback_script() -> str:
+    """Probe installed applications' gettext initialization without opening UI."""
+    return r"""
+set -eu
+probe_locale=$(mktemp -d)
+trap 'rm -r -- "$probe_locale"' EXIT
+localedef --no-archive -i hr_HR -f UTF-8 "$probe_locale/hr_HR.utf8"
+export LOCPATH="$probe_locale"
+python3 -c 'import locale; locale.setlocale(locale.LC_ALL, "hr_HR.UTF-8")'
+failed=0
+for app in ufwall-gtk swapcontrol-gtk anduinos-yubikey-manager \
+    anduinos-btrfs-snapshots-manager anduinos-control-panel; do
+    status=0
+    output=$(env LC_ALL=hr_HR.UTF-8 LANG=hr_HR.UTF-8 LANGUAGE=hr \
+        timeout --kill-after=2s 10s "$app" --help 2>&1) || status=$?
+    printf 'locale-fallback-app=%s status=%s\n%s\n' "$app" "$status" "$output"
+    if [ "$status" -ne 0 ] || [ -z "$output" ] || \
+        printf '%s\n' "$output" | grep -Eq 'panicked at|Traceback \(most recent call last\)'; then
+        failed=1
+    fi
+done
+test "$failed" -eq 0
+printf 'locale-fallback=passed\n'
+"""
+
+
 def _validate_alt_tab_events(output: str) -> None:
     events = _all_event_objects(output)
     before, before_event = _one_event(

@@ -48,6 +48,12 @@ state, while installation and recovery pass only after their guest-visible
 effects are verified. If instrumentation bypasses a menu entry, an independent
 case must exercise that entry's user-visible behavior.
 
+`localization.english-fallback` runs Firewall, Swap Control, YubiKey Manager,
+Disk Snapshots Manager and Control Panel with
+`--help` under a temporary Croatian locale and requires successful, nonempty
+output from each. It catches missing-translation startup panics without opening
+windows or changing the desktop language; it does not verify English GUI text.
+
 The `public-ghex` suite verifies a fresh installation of GHex from the configured public Flathub remote, checking commit, origin, desktop entry,
 application version and ArcMenu launch into a real GTK window; it does not test editing.
 External catalog/download failures are reported as failures, not skipped passes.
