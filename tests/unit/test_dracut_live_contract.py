@@ -126,6 +126,8 @@ class DracutLiveContractTests(unittest.TestCase):
             (
                 f"linux /LiveOS/vmlinuz {common} rd.overlay nomodeset\n"
                 "initrd /LiveOS/initrd",
+                f"linux /LiveOS/vmlinuz {common} rd.overlay quiet splash console=tty0\n"
+                "initrd /LiveOS/initrd",
                 f"linux /LiveOS/vmlinuz {common} "
                 "rd.overlay=LABEL=ANDUINOS-PERSIST "
                 "rd.live.overlay.cowfs=ext4\ninitrd /LiveOS/initrd",

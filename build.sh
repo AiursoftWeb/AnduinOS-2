@@ -305,6 +305,11 @@ submenu "Advanced Options..." --class recovery {
         linux   /LiveOS/vmlinuz $live_boot_args nomodeset ---
         initrd  /LiveOS/initrd
     }
+    menuentry "$try_text (Console Compatibility)" --class recovery {
+        set gfxpayload=auto
+        linux   /LiveOS/vmlinuz $live_boot_args quiet splash console=tty0 ---
+        initrd  /LiveOS/initrd
+    }
     menuentry "$togo_text" --class anduinos {
         # Optical media cannot hold a writable persistence partition.
         insmod regexp
