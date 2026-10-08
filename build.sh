@@ -227,6 +227,7 @@ function generate_live_grub_config() {
     local togo_text="$TARGET_BUSINESS_NAME To Go (Persistent on USB)"
     # Our Live checker owns media verification; do not enable rd.live.check.
     local live_boot_args="root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1"
+    local verified_boot_args="$live_boot_args rd.anduinos.media-check=1"
     local regional_entries=""
     local region_count=0
     local code label timezone keyboard extra
@@ -254,7 +255,7 @@ function generate_live_grub_config() {
         regional_entries="$regional_entries
     menuentry \"$label\" --class lang {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $live_boot_args locale=$code.UTF-8 timezone=$timezone systemd.timezone=$timezone rd.anduinos.keyboard=$keyboard quiet splash ---
+        linux   /LiveOS/vmlinuz $verified_boot_args locale=$code.UTF-8 timezone=$timezone systemd.timezone=$timezone rd.anduinos.keyboard=$keyboard quiet splash ---
         initrd  /LiveOS/initrd
     }"
     done <<< "$SUPPORTED_LIVE_REGIONS"
@@ -302,12 +303,17 @@ $regional_entries
 submenu "Advanced Options..." --class recovery {
     menuentry "$try_text (Safe Graphics)" --class driver {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $live_boot_args nomodeset ---
+        linux   /LiveOS/vmlinuz $verified_boot_args nomodeset ---
         initrd  /LiveOS/initrd
     }
     menuentry "$try_text (Console Compatibility)" --class recovery {
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz $live_boot_args quiet splash console=tty0 ---
+        linux   /LiveOS/vmlinuz $verified_boot_args quiet splash console=tty0 ---
+        initrd  /LiveOS/initrd
+    }
+    menuentry "$try_text (Skip Media Check)" --class recovery {
+        set gfxpayload=auto
+        linux   /LiveOS/vmlinuz $live_boot_args quiet splash ---
         initrd  /LiveOS/initrd
     }
     menuentry "$togo_text" --class anduinos {
@@ -322,7 +328,7 @@ submenu "Advanced Options..." --class recovery {
             halt
         fi
         set gfxpayload=auto
-        linux   /LiveOS/vmlinuz root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 quiet splash ---
+        linux   /LiveOS/vmlinuz root=live:CDLABEL=$LIVE_MEDIA_LABEL rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay=LABEL=ANDUINOS-PERSIST rd.live.overlay.cowfs=ext4 rd.anduinos.live=1 rd.anduinos.media-check=1 quiet splash ---
         initrd  /LiveOS/initrd
     }
 }

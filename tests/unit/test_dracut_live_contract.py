@@ -1,5 +1,7 @@
 from pathlib import Path
 import struct
+import re
+import shlex
 import tempfile
 import unittest
 
@@ -30,11 +32,37 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertNotIn("ANDUINOS-PERSISTENCE", generated.stdout)
         self.assertIn("rd.live.overlay.cowfs=ext4", generated.stdout)
         self.assertNotIn("rd.live.check=1", generated.stdout)
-        self.assertNotIn("rd.anduinos.media-check=", generated.stdout)
+        self.assertEqual(generated.stdout.count("rd.anduinos.media-check=1"), 31)
         self.assertEqual(build.count("-partition_offset 16"), 2)
         self.assertIn("implantisomd5 --force", build)
         self.assertNotIn("Check installation media for defects", generated.stdout)
         self.assertNotIn("boot=casper", generated.stdout)
+
+    def test_skip_entry_preserves_ordinary_boot_without_verification(self) -> None:
+        generated = render_live_grub()
+        entries = re.findall(r'menuentry "([^"\n]+)"[^\n]*\{(.*?)^    \}',
+                             generated.stdout, re.MULTILINE | re.DOTALL)
+        advanced = [(name, body) for name, body in entries if any(
+            marker in name for marker in ("Safe Graphics", "Console Compatibility",
+                                         "Skip Media Check", "Persistent on USB"))]
+        self.assertEqual([name for name, _ in advanced], [
+            "Try or Install AnduinOS (Safe Graphics)",
+            "Try or Install AnduinOS (Console Compatibility)",
+            "Try or Install AnduinOS (Skip Media Check)",
+            "AnduinOS To Go (Persistent on USB)",
+        ])
+        for name, body in entries:
+            match = re.search(r'^\s*linux\s+/LiveOS/vmlinuz\s+(.+)$', body, re.MULTILINE)
+            if match is None:
+                continue
+            arguments = shlex.split(match[1])
+            if "Skip Media Check" in name:
+                self.assertFalse(any(arg.startswith("rd.anduinos.media-check") for arg in arguments))
+                self.assertTrue({"rd.overlay", "quiet", "splash", "---"} <= set(arguments))
+                self.assertNotIn("nomodeset", arguments)
+                self.assertNotIn("console=tty0", arguments)
+            else:
+                self.assertIn("rd.anduinos.media-check=1", arguments)
 
     def test_dedicated_live_initrd_recipe_only_builds_the_image(self) -> None:
         script = (ROOT / "mods/80-dracut-live-image/install.sh").read_text()
@@ -115,7 +143,7 @@ class DracutLiveContractTests(unittest.TestCase):
     def test_grub_acceptance_contract_covers_temporary_and_persistent_modes(self) -> None:
         common = (
             "root=live:CDLABEL=anduinos rd.live.dir=LiveOS "
-            "rd.live.squashimg=rootfs.squashfs rd.anduinos.live=1"
+            "rd.live.squashimg=rootfs.squashfs rd.anduinos.live=1 rd.anduinos.media-check=1"
         )
         entries = [
             f"linux /LiveOS/vmlinuz {common} rd.overlay locale=l{index}\n"
@@ -128,6 +156,8 @@ class DracutLiveContractTests(unittest.TestCase):
                 "initrd /LiveOS/initrd",
                 f"linux /LiveOS/vmlinuz {common} rd.overlay quiet splash console=tty0\n"
                 "initrd /LiveOS/initrd",
+                f"linux /LiveOS/vmlinuz {common.replace(' rd.anduinos.media-check=1', '')} "
+                "rd.overlay quiet splash\ninitrd /LiveOS/initrd",
                 f"linux /LiveOS/vmlinuz {common} "
                 "rd.overlay=LABEL=ANDUINOS-PERSIST "
                 "rd.live.overlay.cowfs=ext4\ninitrd /LiveOS/initrd",

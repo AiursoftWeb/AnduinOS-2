@@ -75,7 +75,7 @@ def boot_iso_with_debug_shell(
     top_index, child_index = menu_path
     if not (
         (top_index == 0 and 0 <= child_index < 28)
-        or (top_index == 1 and 0 <= child_index < 2)
+        or (top_index == 1 and 0 <= child_index < 4)
     ):
         raise ProtocolError(f"Unsafe ISO GRUB menu path: {menu_path}")
     suffix = (
@@ -103,7 +103,7 @@ def boot_iso_with_debug_shell(
                         "BIOS ISO GRUB menu is below 800x600 "
                         f"({width}x{height}); inspect supported VBE modes"
                     )
-            if menu_path == (1, 1) and serial_debug:
+            if menu_path == (1, 3) and serial_debug:
                 # The To Go entry contains an optical-media guard before its
                 # linux command. Its source lines and visual wrapping are not
                 # a stable way to locate that command in GRUB's editor. Use
@@ -193,6 +193,7 @@ def _boot_iso_from_grub_prompt(
             "rd.live.squashimg=rootfs.squashfs",
             "rd.overlay",
             "rd.anduinos.live=1",
+            "rd.anduinos.media-check=1",
         )
     arguments += extra_kernel_arguments
     commands = (
@@ -445,9 +446,10 @@ class _GraphicalGrubMenuEditor:
         while time.monotonic() < deadline:
             frame = self.capture()
             layout = grub_menu_layout(frame)
-            # The dedicated media-check entry was removed; Advanced now has
-            # two entries total, one of which is selected.
-            if layout is not None and layout.visible_unselected_entries == 1:
+            # Four advanced entries can scroll on smaller firmware displays.
+            # Require a changed submenu rather than a fixed visible row count.
+            if (layout is not None and layout.visible_unselected_entries >= 1
+                    and grub_frame_difference(self.current_frame, frame) >= 500):
                 self.current_frame = frame
                 return
             time.sleep(0.1)

@@ -340,7 +340,7 @@ class BootContractTests(unittest.TestCase):
             boot_iso_with_debug_shell(
                 qmp, console, Architecture.AMD64,
                 firmware_delay=0,
-                menu_path=(1, 1),
+                menu_path=(1, 3),
                 kernel_arguments=arguments,
                 extra_kernel_arguments=("locale=zh_CN.UTF-8",),
                 spice_socket=Path("/test/spice.sock"),
@@ -378,16 +378,15 @@ class BootContractTests(unittest.TestCase):
             boot_iso_with_debug_shell(
                 qmp, Mock(), Architecture.AMD64,
                 firmware_delay=0,
-                menu_path=(1, 1),
+                menu_path=(1, 3),
                 serial_debug=False,
             )
 
         menu.return_value.wait_for_top_menu.assert_called_once_with(timeout=30)
         menu.return_value.move_top_selection_down.assert_called_once_with()
         menu.return_value.enter_advanced_submenu.assert_called_once_with()
-        menu.return_value.move_selection_down.assert_called_once_with(
-            minimum_visible_unselected_entries=0
-        )
+        self.assertEqual(menu.return_value.move_selection_down.call_args_list,
+                         [call(minimum_visible_unselected_entries=0)] * 3)
         menu.return_value.open_editor.assert_not_called()
         prompt.assert_not_called()
         qmp.send_key.assert_called_once_with("ret", hold_ms=150)

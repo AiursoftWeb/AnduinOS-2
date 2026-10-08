@@ -168,7 +168,7 @@ echo ISO_USB_DESKTOP_PASSED
                 vm.create_disk()
                 vm.start(attach_iso=True)
                 boot_iso_with_debug_shell(vm.qmp, vm.serial, Architecture.AMD64,
-                                          firmware_delay=delay, menu_path=(1, 1),
+                                          firmware_delay=delay, menu_path=(1, 3),
                                           serial_debug=False, scratch_dir=case)
                 # Boot unmodified, with the real screen console. A forced
                 # serial console would invalidate this user-visible check.

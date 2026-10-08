@@ -186,7 +186,7 @@ class InstallationPhases:
                 if persistent
                 else self.inspection.live_entries.index(regional_entry)
             ),
-            menu_path=((1, 1) if persistent else None),
+            menu_path=((1, 3) if persistent else None),
             kernel_arguments=entry.kernel_arguments,
             extra_kernel_arguments=extra_arguments,
             require_bios_resolution=vm.config.firmware is Firmware.BIOS,
