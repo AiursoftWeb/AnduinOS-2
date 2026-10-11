@@ -500,8 +500,7 @@ def install(config: dict[str, object], evidence: Path) -> None:
 
     firmware = str(config["firmware"])
     network = str(config["network"])
-    next_page = ("secure_boot" if firmware == "uefi-nosb"
-                 else "keyboard" if network == "online" else "network")
+    next_page = "secure_boot" if firmware == "uefi-nosb" else "keyboard"
     node = find_candidates(
         ALIASES[next_page] + ALIASES["firmware_complete"],
         label="firmware detection or its next page", timeout=60,
@@ -514,6 +513,10 @@ def install(config: dict[str, object], evidence: Path) -> None:
     if firmware == "uefi-nosb":
         wait_page("secure_boot")
         click("skip")
+    # Confirm/apply the physical keyboard before any Wi-Fi password dialog.
+    wait_page("keyboard")
+    click("next")
+
     if network == "offline":
         wait_page("network")
         click("next")
@@ -522,7 +525,8 @@ def install(config: dict[str, object], evidence: Path) -> None:
         connect_wifi_from_installer(config, evidence)
         click("next")
 
-    wait_page("keyboard")
+    # Optional input methods are software downloads, not physical layouts.
+    wait_page("software")
     online = network == "online"
     rime = bool(config["rime"])
     assert_toggle("rime", sensitive=online, active=online)
@@ -532,9 +536,6 @@ def install(config: dict[str, object], evidence: Path) -> None:
         raise UiFailure("Offline scenario cannot request AnduinOS Rime")
     if not online:
         find("offline_input")
-    click("next")
-
-    wait_page("software")
     assert_toggle("updates", sensitive=online, active=online)
     if online and bool(config["online_features"]):
         set_toggle("drivers", True)
