@@ -1,14 +1,18 @@
 """Fail-closed notification regression and offline matrix wiring."""
 
+import importlib.util
 import json
 import shlex
 import subprocess
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from assertions.notifications import assert_live_notifications_quiet, validate_quiet_start
+from assertions.notifications import (
+    _wait_shell_prompt, assert_live_notifications_quiet, validate_quiet_start,
+)
 from business.install import scenario_check_ids
 from framework.errors import TestFailure
 from framework.model import Network, TestMatrix
@@ -18,6 +22,16 @@ from framework.serial import CommandResult
 
 def quiet_report():
     return dict(complete=True, seconds=10.01, notifications=[], error=None)
+
+
+def ready_prompt(prompt, text=''):
+    return CommandResult(json.dumps(dict(ready=True, expected_prompt=prompt, expected_text=text)), 0)
+
+
+def prompt_results():
+    return [ready_prompt('run-dialog'), ready_prompt('run-dialog', 'lg'),
+            ready_prompt('looking-glass'), ready_prompt(
+                'looking-glass', 'import("file:///tmp/anduinos-live-notifications.mjs")')]
 
 
 class LiveNotificationTests(unittest.TestCase):
@@ -71,6 +85,7 @@ class LiveNotificationTests(unittest.TestCase):
         console = Mock()
         console.run.side_effect = [
             CommandResult("shell-pid=42\ninput-sources=[('xkb', 'us')]\n", 0),
+            *prompt_results(),
             CommandResult(json.dumps(report), rc),
             CommandResult(pid, 0),
             CommandResult('', 0),
@@ -78,8 +93,7 @@ class LiveNotificationTests(unittest.TestCase):
         qmp = Mock()
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)
-            with patch('assertions.notifications.time.sleep'):
-                assert_live_notifications_quiet(console, qmp, evidence)
+            assert_live_notifications_quiet(console, qmp, evidence)
             self.assertEqual(report, json.loads((evidence / 'live-notifications.json').read_text()))
         return console, qmp
 
@@ -122,6 +136,64 @@ class LiveNotificationTests(unittest.TestCase):
         console.upload.assert_not_called()
         qmp.send_key.assert_not_called()
 
+    def test_dialog_open_is_retried_only_after_a_failed_readiness_probe(self):
+        console = Mock()
+        console.run.side_effect = [
+            CommandResult('shell-pid=42\n', 0),
+            CommandResult('{"ready":false}', 1),
+            *prompt_results(),
+            CommandResult(json.dumps(quiet_report()), 0),
+            CommandResult('42', 0), CommandResult('', 0),
+        ]
+        qmp = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            assert_live_notifications_quiet(console, qmp, Path(directory))
+        self.assertEqual(2, sum(call.args[0] == 'alt-f2' for call in qmp.send_key.call_args_list))
+        self.assertEqual(2, qmp.type_text.call_count)
+
+    def test_unready_dialog_fails_without_typing_and_retains_ui_evidence(self):
+        console = Mock()
+        console.run.side_effect = [CommandResult('shell-pid=42\n', 0),
+                                  *[CommandResult('{"ready":false}', 1)] * 3,
+                                  CommandResult('', 0)]
+        qmp = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(TestFailure, 'Run dialog never became ready'):
+                assert_live_notifications_quiet(console, qmp, Path(directory))
+            self.assertEqual(3, len((Path(directory) / 'live-notifications-ui.jsonl').read_text().splitlines()))
+        qmp.type_text.assert_not_called()
+        self.assertIn('anduinos-shell-prompt.py', console.run.call_args_list[-1].args[0])
+
+    def test_missing_looking_glass_never_sends_javascript_to_run_dialog(self):
+        console = Mock()
+        console.run.side_effect = [CommandResult('shell-pid=42\n', 0),
+                                  *prompt_results()[:2],
+                                  ready_prompt('run-dialog', 'lg'), CommandResult('', 0)]
+        qmp = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(TestFailure, 'UI not ready: looking-glass'):
+                assert_live_notifications_quiet(console, qmp, Path(directory))
+        qmp.type_text.assert_called_once_with('lg', interval=0.15)
+
+    def test_corrupt_typed_expression_is_never_submitted(self):
+        console = Mock()
+        console.run.side_effect = [CommandResult('shell-pid=42\n', 0),
+                                  *prompt_results()[:3],
+                                  ready_prompt('looking-glass', 'imprt('), CommandResult('', 0)]
+        qmp = Mock()
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(TestFailure, 'UI not ready: looking-glass'):
+                assert_live_notifications_quiet(console, qmp, Path(directory))
+        self.assertEqual(1, sum(call.args[0] == 'ret' for call in qmp.send_key.call_args_list))
+
+    def test_invalid_prompt_report_never_passes(self):
+        for output in ('not json', '[]', '{"ready":true}',
+                       json.dumps(dict(ready=True, expected_prompt='run-dialog', expected_text='wrong'))):
+            with self.subTest(output=output), tempfile.TemporaryDirectory() as directory:
+                console = Mock()
+                console.run.return_value = CommandResult(output, 0)
+                self.assertFalse(_wait_shell_prompt(console, Path(directory), 'looking-glass', check=False))
+
     def test_observer_timeout_is_not_a_quiet_pass(self):
         with self.assertRaisesRegex(TestFailure, 'never completed'):
             self.exercise({}, rc=1)
@@ -131,13 +203,94 @@ class LiveNotificationTests(unittest.TestCase):
         console = Mock()
         console.run.side_effect = [
             CommandResult('shell-pid=42\n', 0),
+            *prompt_results(),
             CommandResult(json.dumps(report), 0),
             CommandResult('42', 0),
             CommandResult('', 0),
         ]
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)
-            with patch('assertions.notifications.time.sleep'), self.assertRaises(TestFailure):
+            with self.assertRaises(TestFailure):
                 assert_live_notifications_quiet(console, Mock(), evidence)
             self.assertEqual(report, json.loads((evidence / 'live-notifications.json').read_text()))
         self.assertIn('rm -f ', console.run.call_args_list[-1].args[0])
+
+
+class ShellPromptTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        spec = importlib.util.spec_from_file_location(
+            'shell_prompt', Path(__file__).parents[1] / 'fixtures/shell_prompt.py')
+        cls.probe = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(cls.probe)
+
+    def test_accessibility_detector_requires_real_prompt_context_and_focus(self):
+        class Node:
+            def __init__(self, role='panel', name='', children=(), *, focused=False):
+                self.role, self.name, self.children = role, name, list(children)
+                self.parent = None
+                self.states = {'showing'} | ({'focused', 'editable'} if focused else set())
+                for child in self.children:
+                    child.parent = self
+
+            def get_child_count(self): return len(self.children)
+            def get_child_at_index(self, index): return self.children[index]
+            def get_parent(self): return self.parent
+            def get_role(self): return self.role
+            def get_name(self): return self.name
+            def get_state_set(self): return SimpleNamespace(contains=self.states.__contains__)
+
+        atspi = SimpleNamespace(
+            StateType=SimpleNamespace(SHOWING='showing', DEFUNCT='defunct',
+                                      FOCUSED='focused', EDITABLE='editable'),
+            Role=SimpleNamespace(TEXT='text', LABEL='label', DIALOG='dialog', PUSH_BUTTON='button'),
+            Text=SimpleNamespace(get_text=lambda node, start, end: node.name),
+        )
+        def shell_context(*, dialog=False, title='Run a Command', buttons=True, focused=True):
+            entry = Node('text', children=(), focused=focused)
+            area = Node(children=[Node('label', title if dialog else '>>> '), Node(children=[entry])])
+            shell = Node(children=[
+                Node(children=[Node('button' if buttons else 'label', name)
+                               for name in ('Evaluator', 'Windows', 'Extensions')]),
+                Node('dialog' if dialog else 'panel', children=[area]),
+            ])
+            return shell
+
+        for options, expected in (({}, 'looking-glass'), ({'dialog': True}, 'run-dialog'),
+                                  ({'buttons': False}, None), ({'dialog': True, 'title': 'Other dialog'}, None),
+                                  ({'focused': False}, None)):
+            with self.subTest(options=options), patch.object(self.probe, 'shell_language', return_value=['C']):
+                snapshot = self.probe.prompt_snapshot(shell_context(**options), atspi)
+                self.assertEqual(expected, snapshot['entries'][0]['prompt'] if snapshot['entries'] else None)
+
+        with patch.object(self.probe, 'shell_language', return_value=['zh_CN']), \
+                patch.object(self.probe.gettext, 'translation') as translation:
+            translation.return_value.gettext.return_value = '运行一个命令'
+            snapshot = self.probe.prompt_snapshot(shell_context(dialog=True, title='运行一个命令'), atspi)
+            self.assertTrue(self.probe.matches_prompt(snapshot, 'run-dialog', ''))
+            translation.assert_called_once_with('gnome-shell', languages=['zh_CN'], fallback=True)
+
+    def test_wrong_focus_partial_text_and_ambiguous_entries_are_not_ready(self):
+        entry = dict(prompt='looking-glass', text='import("fixture")')
+        for entries in ([], [dict(entry, prompt='run-dialog')],
+                        [dict(entry, prompt=None)], [dict(entry, text='imprt(')], [entry, entry]):
+            with self.subTest(entries=entries):
+                self.assertFalse(self.probe.matches_prompt(dict(entries=entries), 'looking-glass', entry['text']))
+
+    def test_delayed_window_and_focus_are_polled_until_ready(self):
+        time = [0.0]
+        states = iter([dict(entries=[]), dict(entries=[dict(prompt='run-dialog', text='lg')]),
+                       dict(entries=[dict(prompt='looking-glass', text='')])])
+        with patch.object(self.probe, 'matches_prompt', wraps=self.probe.matches_prompt) as matches:
+            result = self.probe.wait_for_prompt(
+                lambda: next(states), 'looking-glass', '', 5,
+                clock=lambda: time[0], sleep=lambda delay: time.__setitem__(0, time[0] + delay))
+        self.assertTrue(result['ready'])
+        self.assertEqual(3, matches.call_count)
+
+    def test_wrong_window_times_out_instead_of_assuming_readiness(self):
+        time = [0.0]
+        result = self.probe.wait_for_prompt(
+            lambda: dict(entries=[dict(prompt='run-dialog', text='lg')]), 'looking-glass', '', 1,
+            clock=lambda: time[0], sleep=lambda delay: time.__setitem__(0, time[0] + delay))
+        self.assertFalse(result['ready'])

@@ -56,7 +56,11 @@ MessageTray notifications for at least 10 seconds, recording title/body in
 well as D-Bus app notifications, in any language. A test-only module is loaded
 through Looking Glass, which immediately closes; it neither clears notifications
 nor disables extensions, changes notification settings, or enables unsafe D-Bus
-Eval. A missing observer, unavailable API or Shell restart fails the check.
+Eval. Before each keyboard submission, a read-only AT-SPI probe verifies the
+correct Shell prompt, focused input and exact typed text. Its handshakes are
+retained in `live-notifications-ui.jsonl`; startup shortcut readiness is retried
+at most three times. A missing observer, unavailable API or Shell restart fails
+the check.
 The window begins once the Live desktop is ready and the observer attaches, not
 at kernel boot; transient notifications already destroyed before attachment are
 not covered. The current offline matrix uses the US Live keyboard for QMP input.

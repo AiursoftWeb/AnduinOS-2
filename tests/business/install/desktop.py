@@ -3,6 +3,58 @@
 from .context import *  # noqa: F403
 
 
+def _gnome_extension_policy_script(
+    extension_dir: Path = Path("/usr/share/gnome-shell/extensions"),
+    evidence_dir: Path = Path("/tmp"),
+) -> str:
+    """Render the same fail-closed guest gate used by isolated regression tests."""
+    excluded = (
+        "simple-weather@romanlefler.com",
+        "network-stats@gnome.noroadsleft.xyz",
+    )
+    return f"""
+set -euo pipefail
+extensions={shlex.quote(str(extension_dir))}
+evidence={shlex.quote(str(evidence_dir))}
+installed=$(find "$extensions" -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort)
+configured=$(gsettings get org.gnome.shell enabled-extensions | tr "'[]," '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort)
+expected=$(printf '%s\\n' "$installed" | grep -Fvx {shlex.quote(excluded[0])} | grep -Fvx {shlex.quote(excluded[1])})
+printf '%s\\n' "$installed" > "$evidence/anduinos-extensions-installed"
+printf '%s\\n' "$configured" > "$evidence/anduinos-extensions-configured"
+printf '%s\\n' "$expected" > "$evidence/anduinos-extensions-expected"
+diff -u "$evidence/anduinos-extensions-expected" "$evidence/anduinos-extensions-configured"
+for uuid in $expected; do
+    info=$(LC_ALL=C gnome-extensions info "$uuid")
+    printf '\\n[%s]\\n%s\\n' "$uuid" "$info"
+    printf '%s\\n' "$info" | grep -Eq '^[[:space:]]*Enabled:[[:space:]]+Yes[[:space:]]*$'
+    mode=$(python3 -c '
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as stream:
+    modes = json.load(stream).get("session-modes", ["user"])
+if not isinstance(modes, list) or not modes or any(not isinstance(mode, str) for mode in modes):
+    raise ValueError("Invalid extension session-modes")
+print("lock-only" if set(modes) == {{"unlock-dialog"}} else "desktop")
+' "$extensions/$uuid/metadata.json")
+    # A lock-only extension is enabled in preferences but deliberately not
+    # running on the desktop: INITIALIZED before locking, INACTIVE after unlock.
+    allowed=ACTIVE
+    if [ "$mode" = lock-only ]; then
+        allowed='INITIALIZED|INACTIVE'
+    fi
+    if ! printf '%s\\n' "$info" | grep -Eq "^[[:space:]]*State:[[:space:]]+($allowed)[[:space:]]*$"; then
+        printf 'Unexpected state for %s (%s); expected %s\\n' "$uuid" "$mode" "$allowed"
+        exit 1
+    fi
+done
+for uuid in {shlex.quote(excluded[0])} {shlex.quote(excluded[1])}; do
+    printf '%s\\n' "$installed" | grep -Fx "$uuid"
+    info=$(LC_ALL=C gnome-extensions info "$uuid")
+    printf '\\n[%s]\\n%s\\n' "$uuid" "$info"
+    ! printf '%s\\n' "$info" | grep -Eq '^[[:space:]]*State:[[:space:]]+ACTIVE[[:space:]]*$'
+done
+"""
+
+
 class DesktopIntegrationChecks:
     def _assert_gnome_extensions(
         self,
@@ -12,31 +64,7 @@ class DesktopIntegrationChecks:
     ) -> None:
         assert vm.serial is not None
         self.status(scenario.id, "Checking every default GNOME extension's live state")
-        excluded = (
-            "simple-weather@romanlefler.com",
-            "network-stats@gnome.noroadsleft.xyz",
-        )
-        script = f"""
-set -euo pipefail
-installed=$(find /usr/share/gnome-shell/extensions -mindepth 1 -maxdepth 1 -type d -printf '%f\\n' | sort)
-configured=$(gsettings get org.gnome.shell enabled-extensions | tr "'[]," '\\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort)
-expected=$(printf '%s\\n' "$installed" | grep -Fvx {shlex.quote(excluded[0])} | grep -Fvx {shlex.quote(excluded[1])})
-printf '%s\\n' "$installed" > /tmp/anduinos-extensions-installed
-printf '%s\\n' "$configured" > /tmp/anduinos-extensions-configured
-printf '%s\\n' "$expected" > /tmp/anduinos-extensions-expected
-diff -u /tmp/anduinos-extensions-expected /tmp/anduinos-extensions-configured
-for uuid in $expected; do
-    info=$(LC_ALL=C gnome-extensions info "$uuid")
-    printf '\\n[%s]\\n%s\\n' "$uuid" "$info"
-    printf '%s\\n' "$info" | grep -Eq '^[[:space:]]*State:[[:space:]]+ACTIVE[[:space:]]*$'
-done
-for uuid in {shlex.quote(excluded[0])} {shlex.quote(excluded[1])}; do
-    printf '%s\\n' "$installed" | grep -Fx "$uuid"
-    info=$(LC_ALL=C gnome-extensions info "$uuid")
-    printf '\\n[%s]\\n%s\\n' "$uuid" "$info"
-    ! printf '%s\\n' "$info" | grep -Eq '^[[:space:]]*State:[[:space:]]+ACTIVE[[:space:]]*$'
-done
-"""
+        script = _gnome_extension_policy_script()
         result = vm.serial.run(
             _desktop_command(
                 self.defaults.username,

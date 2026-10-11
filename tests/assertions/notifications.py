@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-import time
+import shlex
 from pathlib import Path
 
 from framework.errors import TestFailure
@@ -11,6 +11,28 @@ from framework.errors import TestFailure
 
 REPORT = '/tmp/anduinos-live-notifications.json'
 OBSERVER = '/tmp/anduinos-live-notifications.mjs'
+PROMPT_PROBE = '/tmp/anduinos-shell-prompt.py'
+
+
+def _wait_shell_prompt(console, evidence: Path, prompt: str, text: str = '', *,
+                       timeout: int = 15, check: bool = True) -> bool:
+    result = console.run(f"""
+uid=$(id -u live)
+runuser -u live -- env XDG_RUNTIME_DIR="/run/user/$uid" \\
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \\
+    python3 {PROMPT_PROBE} {shlex.quote(prompt)} --text {shlex.quote(text)} --timeout {timeout}
+""", timeout=timeout + 15, check=False)
+    with (evidence / 'live-notifications-ui.jsonl').open('a', encoding='utf-8') as stream:
+        stream.write(result.stdout.strip() + '\n')
+    try:
+        report = json.loads(result.stdout)
+    except (ValueError, TypeError):
+        report = {}
+    ready = (result.returncode == 0 and isinstance(report, dict) and report.get('ready') is True and
+             report.get('expected_prompt') == prompt and report.get('expected_text') == text)
+    if not ready and check:
+        raise TestFailure(f'Live notification UI not ready: {prompt}; see UI evidence')
+    return ready
 
 
 def validate_quiet_start(report: object) -> None:
@@ -63,15 +85,26 @@ test ! -e /tmp/anduinos-live-notifications.json
     (evidence / 'live-notifications-session.txt').write_text(before.stdout, encoding='utf-8')
     if before.returncode:
         raise TestFailure('Offline Live notification prerequisites failed; see session evidence')
-    console.upload(fixture, OBSERVER, 0o644)
     try:
-        qmp.send_key('esc')
-        qmp.send_key('alt-f2', hold_ms=150)
-        time.sleep(1)
+        console.upload(fixture, OBSERVER, 0o644)
+        console.upload(fixture.with_name('shell_prompt.py'), PROMPT_PROBE, 0o644)
+        # A running Shell process does not prove its shortcut handler is ready.
+        # Retry opening the empty dialog, never blindly submit a JS expression
+        # to whatever happens to own keyboard focus during Live startup.
+        for _ in range(3):
+            qmp.send_key('esc')
+            qmp.send_key('alt-f2', hold_ms=150)
+            if _wait_shell_prompt(console, evidence, 'run-dialog', timeout=5, check=False):
+                break
+        else:
+            raise TestFailure('Live Run dialog never became ready; see UI evidence')
         qmp.type_text('lg', interval=0.15)
+        _wait_shell_prompt(console, evidence, 'run-dialog', 'lg')
         qmp.send_key('ret')
-        time.sleep(1)
-        qmp.type_text(f'import("file://{OBSERVER}")', interval=0.05)
+        _wait_shell_prompt(console, evidence, 'looking-glass')
+        expression = f'import("file://{OBSERVER}")'
+        qmp.type_text(expression, interval=0.05)
+        _wait_shell_prompt(console, evidence, 'looking-glass', expression)
         qmp.send_key('ret')
         result = console.run(f"""
 set -euo pipefail
@@ -102,4 +135,4 @@ exit 1
         try:
             qmp.send_key('esc')
         finally:
-            console.run(f'rm -f {OBSERVER} {REPORT}', check=False)
+            console.run(f'rm -f {OBSERVER} {REPORT} {PROMPT_PROBE}', check=False)
