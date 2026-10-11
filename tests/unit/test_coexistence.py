@@ -398,12 +398,14 @@ class CoexistenceUiTests(unittest.TestCase):
         self.assertNotIn("initialize_gpt", [c.args[0] for c in self.core.click.call_args_list])
         self.ui.select_new_esp.assert_not_called()
         self.assertEqual([51200, 3072], [c.args[1] for c in self.core.set_numeric_value.call_args_list])
-        self.core.find.assert_any_call("separate_esp_required", timeout=90)
+        self.core.find.assert_any_call("esp_replacement_warning", timeout=90)
+        self.core.request_dialog_focused_activation.assert_called_once_with(
+            "esp_replacement_warning", "esp_conflict_back", "decline-esp-replacement", timeout=30)
         self.installer.wait_page.assert_called_with("advanced_storage")
 
     def test_missing_rejection_dialog_fails(self):
         def find(key, **_kwargs):
-            if key == "separate_esp_required":
+            if key == "esp_replacement_warning":
                 raise TestFailure("No rejection dialog")
         self.core.find.side_effect = find
         with self.assertRaisesRegex(TestFailure, "No rejection"):

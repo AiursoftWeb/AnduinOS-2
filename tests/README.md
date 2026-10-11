@@ -126,7 +126,8 @@ disabled cases (Btrfs, one disposable 112 GiB sparse disk per case):
 
 - `uefi-nosb-coexistence-shared-esp-rejected`: install A through Advanced/manual
   partitioning, boot and log into A, reboot the ISO, plan B using A's ESP, require
-  the occupied-ESP dialog and disabled Next button. GPT, firmware entries and
+  the occupied-ESP warning, explicitly choose Back (decline replacement), and
+  require a disabled Next button. GPT, firmware entries and
   SHA-256 of **all A partitions** must remain unchanged; A must still boot and
   accept a desktop login without the ISO.
 - `uefi-nosb-coexistence-separate-esp`: install/boot A the same way, then install

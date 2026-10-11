@@ -162,13 +162,13 @@ def configure_coexistence(config: dict[str, object], evidence: Path) -> bool:
         event("coexistence-layout", stage=stage, root_mib=50 * 1024,
               new_esp_mib=1024, swap_mib=3072)
         return True
-    find("separate_esp_required", timeout=90)
+    find("esp_replacement_warning", timeout=90)
     dump_accessibility(evidence / "occupied-esp-dialog.txt")
     event("coexistence-esp-conflict-dialog")
     request_dialog_focused_activation(
-        "separate_esp_required", "esp_conflict_ok", "dismiss-occupied-esp", timeout=30
+        "esp_replacement_warning", "esp_conflict_back", "decline-esp-replacement", timeout=30
     )
-    wait_absent("separate_esp_required")
+    wait_absent("esp_replacement_warning")
     wait_page("advanced_storage")
     if enabled(control("next")):
         raise UiFailure("Next remains enabled after rejecting the occupied ESP")
