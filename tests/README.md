@@ -125,8 +125,8 @@ The ISO must contain installer, toolkit, and Live settings versions at least
 
 ## Sequential AnduinOS coexistence
 
-The default AMD64 `make test` matrix includes two offline, UEFI Secure Boot
-disabled cases (Btrfs, one disposable 112 GiB sparse disk per case):
+The default AMD64 `make test` matrix includes three offline, UEFI Secure Boot
+disabled cases (one disposable 112 GiB sparse disk per case):
 
 - `uefi-nosb-coexistence-shared-esp-rejected`: install A through Advanced/manual
   partitioning, boot and log into A, reboot the ISO, plan B using A's ESP, require
@@ -140,15 +140,32 @@ disabled cases (Btrfs, one disposable 112 GiB sparse disk per case):
   without the ISO, then execute B's generated GRUB chainloader entry for A and
   log into A. Root UUID, mounted ESP UUID, distinct hostnames and BootCurrent
   distinguish the two systems and reject accidental firmware fallback.
+- `uefi-nosb-coexistence-ext4-shrink`: install and boot A with a 96 GiB ext4
+  root, return to Live, plan shrinking A to 40 GiB through the real resize
+  dialog and acknowledge the backup warning. Install B with its own ESP and
+  50 GiB ext4 root in the released space. Verify A's UUID/PARTUUID/start,
+  exact new boundary, read-only file/symlink/mode/owner manifest, and byte hashes
+  of its unchanged ESP/swap. Boot B without ISO, then chainload and log into A
+  through B's generated GRUB entry. This case requires installer >= 2.0.4-15.
+  Installed ext4 guests shut down normally through systemd and QEMU must exit;
+  `sync` followed by a QMP hard stop would leave a mounted root's journal dirty
+  and is not a valid offline-shrink baseline.
 
-Each installation uses 1 GiB ESP + 50 GiB Root + 3 GiB Swap. There is no shrink,
-shared-ESP override or installer modification. Before an installed A/B guest is
+The first two cases use Btrfs with 1 GiB ESP + 50 GiB Root + 3 GiB Swap per
+installation, with no shrinking. All three cases avoid a shared-ESP override
+or installer modification. Before an installed A/B guest is
 closed through QMP, its ESP is explicitly unmounted: `sync` alone leaves FAT's
 dirty bit set. Before planning B, a read-only `fsck.fat -n` must pass; the harness
 never repairs an unhealthy ESP to satisfy the test. These cases require ISO packages
 `anduinos-installer-beta >= 2.0.4-3` and `anduinos-secureboot-toolkit >= 2.0.4-2`; old ISOs
 fail the version check. Build with `make` after publication, then `make test`.
-They do not cover Secure Boot/MOK, Ubuntu coexistence, or ext4/Btrfs resizing.
+They do not cover Secure Boot/MOK, Ubuntu coexistence, Btrfs resizing, or
+power loss during ext4 resizing. The ext4 case's manifest mounts `ro,noload`
+after `e2fsck -f -n`: the harness does not repair the old filesystem to make
+preservation pass. Raw root-partition hashes are inappropriate after resizing
+because filesystem blocks relocate; other original partitions still require
+byte-for-byte preservation. Compare the file manifest before any next-boot
+instrumentation changes GRUB.
 
 The harness adds the existing reversible serial debug arguments only to the
 target's generated kernel lines and restores the original GRUB file after boot.
@@ -157,7 +174,7 @@ For B → A it uses GRUB's `next_entry` (the `grub-reboot` mechanism) to select 
 keyboard menu navigation. The full A hashes are captured before any B writes
 and compared before adding A's next-boot instrumentation. Full-partition hashing
 adds runtime; the existing disk-capacity safety checks apply to the larger disk.
-These two cases use the results filesystem even when other cases use tmpfs:
+These three cases use the results filesystem even when other cases use tmpfs:
 two installations must not exceed the existing single-install 12 GiB RAM-disk
 limit. Allow at least 122 GiB free there (112 GiB disk plus the default 10 GiB
 reserve); qcow2 only allocates written data and is removed after each case.

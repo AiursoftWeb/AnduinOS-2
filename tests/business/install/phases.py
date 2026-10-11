@@ -128,7 +128,8 @@ class InstallationPhases:
             )
         if scenario.storage_mode.coexistence:
             with self._check(scenario, "coexistence.package-versions"):
-                self._assert_coexistence_versions(vm, artifacts)
+                self._assert_coexistence_versions(vm, artifacts,
+                    ext4_shrink=scenario.storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK)
         with self._check(scenario, "installer-ui"):
             self._run_installer_driver(
                 vm,
@@ -616,7 +617,10 @@ fi
                 instrumentation.stdout + "\n",
                 encoding="utf-8",
             )
-        _power_off(vm, unmount_esp=scenario.storage_mode.coexistence)
+        if scenario.storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK:
+            _power_off_clean_ext4(vm)
+        else:
+            _power_off(vm, unmount_esp=scenario.storage_mode.coexistence)
         if scenario.desktop_contracts:
             self._collect_gate_failure(
                 scenario,

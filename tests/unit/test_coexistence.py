@@ -1,6 +1,7 @@
 """Coexistence must fail closed, including wrong-root and firmware fallback."""
 
 import copy
+import contextlib
 import importlib.util
 import json
 import re
@@ -19,7 +20,9 @@ from assertions.coexistence import (
 from business.install import ScenarioRunner, scenario_check_ids
 from business.install.coexistence import (
     chainload_selection_script, coexistence_check_ids, mounted_root_script,
+    ext4_file_manifest_script,
 )
+from business.install.guest import _power_off_clean_ext4
 from framework.errors import ConfigurationError, TestFailure
 from framework.model import Architecture, StorageMode, TestMatrix, _load_scenario
 from framework.serial import CommandResult
@@ -39,9 +42,9 @@ def partition(number, fstype, size_gib, fs_uuid):
     }
 
 
-def snapshot():
+def snapshot(filesystem="btrfs", root_gib=50):
     parts = [partition(1, "vfat", 1, "AAAA-0001"),
-             partition(2, "btrfs", 50, "00000000-0000-4000-8000-100000000002"),
+             partition(2, filesystem, root_gib, "00000000-0000-4000-8000-100000000002"),
              partition(3, "swap", 3, "00000000-0000-4000-8000-100000000003")]
     return {"partitions": parts, "table": {"sectorsize": 512, "partitions": [p["geometry"] for p in parts]},
             "gpt_head": "head", "gpt_tail": "tail",
@@ -52,10 +55,10 @@ def entry(number, esp):
     return f"Boot{number}* AnduinOS\tHD(1,GPT,{esp['partuuid']},0x800,0x200000)/File(\\EFI\\AnduinOS\\shimx64.efi)\n"
 
 
-def second_install(first):
+def second_install(first, filesystem="btrfs"):
     result = copy.deepcopy(first)
     added = [partition(4, "vfat", 1, "BBBB-0002"),
-             partition(5, "btrfs", 50, "00000000-0000-4000-8000-100000000005"),
+             partition(5, filesystem, 50, "00000000-0000-4000-8000-100000000005"),
              partition(6, "swap", 3, "00000000-0000-4000-8000-100000000006")]
     result["partitions"].extend(added)
     result["table"]["partitions"].extend(p["geometry"] for p in added)
@@ -65,6 +68,21 @@ def second_install(first):
 
 
 class CoexistenceOracleTests(unittest.TestCase):
+    def test_ext4_baseline_requires_normal_shutdown_without_repair_or_qmp_kill(self):
+        vm = Mock()
+        vm.wait.return_value = 0
+        _power_off_clean_ext4(vm)
+        self.assertIn("systemctl poweroff --no-block", vm.serial.run.call_args.args[0])
+        self.assertNotIn("e2fsck", vm.serial.run.call_args.args[0])
+        vm.qmp.quit.assert_not_called()
+        vm.wait.assert_called_once_with(180)
+        vm.stop.assert_called_once_with()
+        vm.reset_mock()
+        vm.wait.side_effect = TestFailure("shutdown timed out")
+        with self.assertRaisesRegex(TestFailure, "shutdown timed out"):
+            _power_off_clean_ext4(vm)
+        vm.stop.assert_called_once_with()
+
     def test_shared_rejection_requires_dialog_disabled_next_and_no_advance(self):
         good = [{"event": "coexistence-esp-conflict-dialog"},
                 {"event": "coexistence-esp-rejected", "next_enabled": False, "stage": "advanced-storage"}]
@@ -131,6 +149,52 @@ class CoexistenceOracleTests(unittest.TestCase):
             bad["nvram"] = bad["nvram"].replace(old, new)
             with self.subTest(mutation=new), self.assertRaises(TestFailure):
                 assert_preserved(before, bad, rejected=False)
+
+    def test_ext4_shrink_allows_only_the_exact_declared_tail_change(self):
+        before = snapshot("ext4", 96)
+        before["partitions"][1]["sha256"] = None  # Filesystem bytes necessarily relocate.
+        after = second_install(before, "ext4")
+        after["partitions"][1]["geometry"]["size"] = 40 * 1024**3 // 512
+        options = dict(rejected=False, resized_ext4_path="/dev/vda2",
+                       target_size_bytes=40 * 1024**3)
+        assert_preserved(before, after, **options)
+        mutations = (
+            lambda v: v["partitions"][1].update(uuid="changed"),
+            lambda v: v["partitions"][1].update(partuuid="changed"),
+            lambda v: v["partitions"][1].update(fstype="btrfs"),
+            lambda v: v["partitions"][1]["geometry"].update(start=1),
+            lambda v: v["partitions"][1]["geometry"].update(size=39 * 1024**3 // 512),
+            lambda v: v["partitions"][0].update(sha256="b" * 64),
+            lambda v: v["partitions"].pop(1),
+            lambda v: v["table"].update(id="another-disk"),
+            lambda v: v["table"].update(sectorsize=4096),
+        )
+        for mutate in mutations:
+            bad = copy.deepcopy(after)
+            mutate(bad)
+            with self.subTest(after=bad), self.assertRaises(TestFailure):
+                assert_preserved(before, bad, **options)
+        for changed in ({"rejected": True}, {"resized_ext4_path": "/dev/vda99"},
+                        {"target_size_bytes": 39 * 1024**3}):
+            with self.subTest(changed=changed), self.assertRaises(TestFailure):
+                assert_preserved(before, after, **{**options, **changed})
+        # No explicit shrink allowance must keep the original byte-level oracle.
+        with self.assertRaises(TestFailure):
+            assert_preserved(before, after, rejected=False)
+
+    def test_ext4_manifest_is_read_only_and_hashes_files_links_and_metadata(self):
+        root = installation_parts(snapshot("ext4", 96), filesystem="ext4", root_gib=96)["ext4"]
+        script = ext4_file_manifest_script(root)
+        parsed = subprocess.run(("bash", "-n"), input=script, text=True, capture_output=True)
+        self.assertEqual(0, parsed.returncode, parsed.stderr)
+        self.assertIn('e2fsck -f -n "$device"', script)
+        self.assertIn('mount -o ro,noload "$device"', script)
+        self.assertNotIn("mount -o rw", script)
+        self.assertIn("info.st_mode, info.st_uid, info.st_gid", script)
+        self.assertIn("os.readlink(path)", script)
+        self.assertIn("content.update(block)", script)
+        with self.assertRaises(TestFailure):
+            ext4_file_manifest_script(snapshot()["partitions"][1])
 
     def test_vendor_entry_must_be_active_and_unambiguous(self):
         evidence = snapshot()
@@ -206,8 +270,8 @@ class CoexistenceWiringTests(unittest.TestCase):
         self.matrix = TestMatrix.load(ROOT / "cases/install.json")
         self.cases = [s for s in self.matrix.scenarios if s.storage_mode.coexistence]
 
-    def test_default_matrix_includes_both_modes_and_all_checks_are_unique(self):
-        self.assertEqual(2, len(self.cases))
+    def test_default_matrix_includes_all_three_modes_and_all_checks_are_unique(self):
+        self.assertEqual(3, len(self.cases))
         for case in self.cases:
             self.assertIn(case, self.matrix.select(Architecture.AMD64))
             self.assertEqual(112, case.disk_gib)
@@ -222,6 +286,16 @@ class CoexistenceWiringTests(unittest.TestCase):
         for mutation in ({"disk_gib": 50}, {"architectures": ["arm64"]}, {"network": "online"},
                          {"live_mode": "persistent"}, {"automatic_login": True},
                          {"filesystem": "ext4", "snapshots_manager": False}):
+            with self.subTest(mutation=mutation), self.assertRaises(ConfigurationError):
+                _load_scenario({**case, **mutation})
+
+    def test_ext4_shrink_matrix_does_not_silently_test_btrfs_or_other_storage(self):
+        raw = json.loads((ROOT / "cases/install.json").read_text())
+        case = next(c for c in raw["cases"] if c.get("storage_mode") == "coexistence-ext4-shrink")
+        self.assertEqual(StorageMode.COEXISTENCE_EXT4_SHRINK, _load_scenario(case).storage_mode)
+        for mutation in ({"filesystem": "btrfs"}, {"snapshots_manager": True},
+                         {"architectures": ["arm64"]}, {"disk_gib": 64},
+                         {"network": "online"}, {"automatic_login": True}):
             with self.subTest(mutation=mutation), self.assertRaises(ConfigurationError):
                 _load_scenario({**case, **mutation})
 
@@ -245,9 +319,15 @@ class CoexistenceWiringTests(unittest.TestCase):
                 runner.check_status = None
                 runner._check_details = {}
                 runner._check_states = {scenario.id: dict.fromkeys(scenario_check_ids(scenario), "pending")}
-                first = snapshot()
+                shrinking = scenario.storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK
+                first = snapshot("ext4", 96) if shrinking else snapshot()
+                if shrinking:
+                    first["partitions"][1]["sha256"] = None
                 shared = scenario.storage_mode is StorageMode.COEXISTENCE_SHARED_ESP
-                after = copy.deepcopy(first) if shared else second_install(first)
+                after = copy.deepcopy(first) if shared else second_install(
+                    first, "ext4" if shrinking else "btrfs")
+                if shrinking:
+                    after["partitions"][1]["geometry"]["size"] = 40 * 1024**3 // 512
                 initial = copy.deepcopy(first)
                 for part in initial["partitions"]:
                     part["sha256"] = None
@@ -264,6 +344,7 @@ class CoexistenceWiringTests(unittest.TestCase):
                 runner._coexistence_arm = Mock()
                 runner._coexistence_boot = Mock()
                 runner._assert_live_cleanup = Mock()
+                runner._ext4_manifest = Mock(return_value="d" * 64)
                 vm = Mock()
                 vm.serial.run.return_value = CommandResult("chainload selection", 0)
                 with patch("business.install.coexistence._power_off"):
@@ -276,6 +357,15 @@ class CoexistenceWiringTests(unittest.TestCase):
                 last = runner._coexistence_boot.call_args.args
                 self.assertEqual(first["partitions"][0]["uuid"], last[1]["vfat"]["uuid"])
                 self.assertEqual("AAAA-0001" if shared else "BBBB-0002", last[2]["uuid"])
+                if shrinking:
+                    self.assertEqual(2, runner._ext4_manifest.call_count)
+                    for call in runner._coexistence_snapshot.call_args_list[1:]:
+                        self.assertEqual(("/dev/vda1", "/dev/vda3"), call.args[3])
+                    self.assertEqual("/dev/vda2", runner._run_installer_driver.call_args.kwargs[
+                        "config_overrides"]["resize_ext4_path"])
+                    self.assertEqual(40 * 1024**3 // 512, last[1]["ext4"]["geometry"]["size"])
+                else:
+                    runner._ext4_manifest.assert_not_called()
 
     def test_older_iso_fails_with_recorded_package_versions(self):
         runner = ScenarioRunner.__new__(ScenarioRunner)
@@ -286,6 +376,45 @@ class CoexistenceWiringTests(unittest.TestCase):
             with self.assertRaisesRegex(TestFailure, "rebuild the ISO"):
                 runner._assert_coexistence_versions(vm, path)
             self.assertIn("installer=2.0.4-1", (path / "package-versions.txt").read_text())
+
+    def test_ext4_shrink_requires_the_new_installer_and_strict_manifest_evidence(self):
+        runner = ScenarioRunner.__new__(ScenarioRunner)
+        runner._assert_live_cleanup = Mock()
+        vm = Mock()
+        with tempfile.TemporaryDirectory() as temporary:
+            path = Path(temporary)
+            vm.serial.run.return_value = CommandResult("installer=2.0.4-14", 1)
+            with self.assertRaisesRegex(TestFailure, "2.0.4-15"):
+                runner._assert_coexistence_versions(vm, path, ext4_shrink=True)
+            self.assertIn("ge 2.0.4-15", vm.serial.run.call_args.args[0])
+            root = snapshot("ext4", 96)["partitions"][1]
+            for output in ("", "EXT4_FILES_SHA256=invalid", ("EXT4_FILES_SHA256=" + "a" * 64 + "\n") * 2):
+                vm.serial.run.return_value = CommandResult(output, 0)
+                with self.subTest(output=output), self.assertRaises(TestFailure):
+                    runner._ext4_manifest(vm, root, path, "bad")
+            vm.serial.run.return_value = CommandResult("EXT4_FILES_SHA256=" + "a" * 64, 0)
+            self.assertEqual("a" * 64, runner._ext4_manifest(vm, root, path, "good"))
+
+    def test_changed_ext4_file_manifest_blocks_boot_credit(self):
+        case = next(c for c in self.cases if c.storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK)
+        runner = ScenarioRunner.__new__(ScenarioRunner)
+        runner.defaults = self.matrix.defaults
+        runner._check = Mock(side_effect=lambda *_args: contextlib.nullcontext())
+        first = snapshot("ext4", 96)
+        first["partitions"][1]["sha256"] = None
+        after = second_install(first, "ext4")
+        after["partitions"][1]["geometry"]["size"] = 40 * 1024**3 // 512
+        runner._coexistence_snapshot = Mock(side_effect=[first, first, after])
+        runner._ext4_manifest = Mock(side_effect=["a" * 64, "b" * 64])
+        for method in ("_run_live_phase", "_run_target_phase", "_coexistence_live",
+                       "_run_installer_driver", "_coexistence_boot"):
+            setattr(runner, method, Mock())
+        vm = Mock()
+        vm.serial.run.return_value = CommandResult("clean ESP", 0)
+        with tempfile.TemporaryDirectory() as temporary, \
+                self.assertRaisesRegex(TestFailure, "files, links or metadata changed"):
+            runner._run_coexistence(vm, case, Path(temporary))
+        runner._coexistence_boot.assert_not_called()
 
 
 class CoexistenceProbeTests(unittest.TestCase):
@@ -354,6 +483,9 @@ class CoexistenceUiTests(unittest.TestCase):
                        "dump_accessibility", "find", "event", "control",
                        "request_dialog_focused_activation", "wait_absent"):
             setattr(core, method, Mock())
+        core.visible_nodes = Mock(return_value=[])
+        core.aliases = lambda key: (key,)
+        core.matches = lambda node, candidates: node.text in candidates
         core.enabled = Mock(return_value=False)
         core.find_optional = Mock(return_value=None)
         installer = ModuleType("test_guest_ui.installer")
@@ -425,6 +557,46 @@ class CoexistenceUiTests(unittest.TestCase):
         with self.assertRaises(TestFailure):
             self.configure("unknown")
         self.core.click.assert_not_called()
+
+    def test_ext4_workflow_plans_shrink_before_creating_new_partitions(self):
+        self.ui.plan_ext4_shrink = Mock()
+        self.ui.select_ext4_root = Mock()
+        order = Mock()
+        order.attach_mock(self.ui.plan_ext4_shrink, "shrink")
+        order.attach_mock(self.core.click_button, "button")
+        self.ui.configure_coexistence({"coexistence_stage": "b-separate",
+            "storage_mode": "coexistence-ext4-shrink", "existing_esp_path": "/dev/vda1",
+            "resize_ext4_path": "/dev/vda2"}, Path("/evidence"))
+        self.assertEqual("shrink", order.mock_calls[0][0])
+        self.ui.plan_ext4_shrink.assert_called_once_with("/dev/vda2")
+        self.ui.select_ext4_root.assert_called_once_with()
+        self.assertEqual([1024, 51200, 3072],
+                         [c.args[1] for c in self.core.set_numeric_value.call_args_list])
+
+    def test_ext4_shrink_size_is_set_only_in_the_modal(self):
+        modal = self.node(kind="dialog")
+        background = self.node(kind="frame")
+        spins = []
+        for parent in (background, modal):
+            spin = self.node("partition_size", kind="spin button")
+            spin.get_parent = lambda p=parent: p
+            parent.get_parent = lambda: None
+            spin.is_value = lambda: True
+            spin.set_current_value = Mock(return_value=True)
+            spin.get_current_value = lambda: 40960
+            spins.append(spin)
+        self.core.visible_nodes.return_value = [self.node("/dev/vda2 · ext4"), *spins]
+        self.ui.plan_ext4_shrink("/dev/vda2")
+        spins[0].set_current_value.assert_not_called()
+        spins[1].set_current_value.assert_called_once_with(40960)
+        self.core.set_toggle.assert_called_once_with("resize_backup", True)
+        self.core.click_button.assert_any_call("plan_resize")
+
+    def test_ext4_shrink_cannot_target_a_foreign_or_missing_partition(self):
+        for path in ("/dev/sda1", "/tmp/image", "/dev/vda2"):
+            with self.subTest(path=path), self.assertRaises(TestFailure):
+                self.ui.plan_ext4_shrink(path)
+        self.core.click_button.assert_not_called()
 
     @staticmethod
     def node(text="", kind="label", *, kids=(), visible=True, expanded=False):

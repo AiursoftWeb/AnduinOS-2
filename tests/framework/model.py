@@ -57,12 +57,14 @@ class StorageMode(str, Enum):
     MANUAL_SMALL_DISK = "manual-small-disk"
     COEXISTENCE_SHARED_ESP = "coexistence-shared-esp"
     COEXISTENCE_SEPARATE_ESP = "coexistence-separate-esp"
+    COEXISTENCE_EXT4_SHRINK = "coexistence-ext4-shrink"
 
     @property
     def coexistence(self) -> bool:
         return self in (
             StorageMode.COEXISTENCE_SHARED_ESP,
             StorageMode.COEXISTENCE_SEPARATE_ESP,
+            StorageMode.COEXISTENCE_EXT4_SHRINK,
         )
 
 
@@ -303,7 +305,8 @@ def _load_scenario(value: object) -> Scenario:
         architectures != (Architecture.AMD64,)
         or firmware is not Firmware.UEFI_NO_SECURE_BOOT
         or network is not Network.OFFLINE
-        or filesystem is not Filesystem.BTRFS
+        or filesystem is not (Filesystem.EXT4
+            if storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK else Filesystem.BTRFS)
         or live_mode is not LiveMode.TEMPORARY
         or disk_gib != 112
         or value["desktop_contracts"]
@@ -311,7 +314,7 @@ def _load_scenario(value: object) -> Scenario:
     ):
         raise ConfigurationError(
             f"{identifier}: coexistence requires amd64, uefi-nosb, offline, "
-            "temporary Live, Btrfs, 112 GiB, and normal desktop login"
+            "temporary Live, Btrfs (ext4 for the shrink case), 112 GiB, and normal desktop login"
         )
     live_region = None
     if "live_region" in value:

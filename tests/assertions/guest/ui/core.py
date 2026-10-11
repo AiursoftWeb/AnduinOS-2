@@ -53,6 +53,9 @@ ALIASES = {
     "initialize_gpt": ("Initialize New GPT", "初始化新 GPT"),
     "confirm_initialize_gpt": ("Initialize GPT", "初始化 GPT"),
     "partition_size": ("Size (MiB)", "大小 (MiB)"),
+    "change_partition_size": ("Change Size", "改变大小"),
+    "plan_resize": ("Plan Resize", "规划调整大小"),
+    "resize_backup": ("I have backed up my data.", "我已备份数据。"),
     "add_partition": ("Add Partition", "添加分区"),
     "esp_replacement_warning": (
         "Replace existing AnduinOS boot files?", "替换现有的 AnduinOS 启动文件？",

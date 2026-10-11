@@ -40,15 +40,16 @@ def parse_snapshot(output: str) -> dict:
     return value
 
 
-def installation_parts(snapshot: dict, excluded=()) -> dict:
+def installation_parts(snapshot: dict, excluded=(), *, filesystem="btrfs", root_gib=50) -> dict:
     parts = [item for item in snapshot["partitions"] if item["path"] not in excluded]
-    if len(parts) != 3 or sorted(item["fstype"] for item in parts) != ["btrfs", "swap", "vfat"]:
-        raise TestFailure("Expected exactly one new Btrfs root, FAT ESP, and swap")
+    if filesystem not in {"btrfs", "ext4"} or len(parts) != 3 or sorted(
+            item["fstype"] for item in parts) != [filesystem, "swap", "vfat"]:
+        raise TestFailure("Expected exactly one new root, FAT ESP, and swap")
     result = {item["fstype"]: item for item in parts}
     if result["vfat"]["geometry"]["size"] * snapshot["table"]["sectorsize"] != 1024**3:
         raise TestFailure("New ESP is not the planned 1 GiB")
-    if result["btrfs"]["geometry"]["size"] * snapshot["table"]["sectorsize"] != 50 * 1024**3:
-        raise TestFailure("Root is not the planned 50 GiB; spare space may have been consumed")
+    if result[filesystem]["geometry"]["size"] * snapshot["table"]["sectorsize"] != root_gib * 1024**3:
+        raise TestFailure(f"Root is not the planned {root_gib} GiB; spare space may have been consumed")
     return result
 
 
@@ -84,10 +85,23 @@ def vendor_entry(nvram: str, esp: dict) -> str:
     return matches[0]
 
 
-def assert_preserved(before: dict, after: dict, *, rejected: bool) -> None:
+def assert_preserved(before: dict, after: dict, *, rejected: bool,
+                     resized_ext4_path: str = "", target_size_bytes: int = 0) -> None:
+    if resized_ext4_path and (rejected or target_size_bytes != 40 * 1024**3
+            or sum(p["path"] == resized_ext4_path for p in before["partitions"]) != 1
+            or {k: v for k, v in before["table"].items() if k != "partitions"}
+                != {k: v for k, v in after["table"].items() if k != "partitions"}):
+        raise TestFailure("Invalid explicit ext4 shrink evidence")
     lookup = {item["path"]: item for item in after["partitions"]}
     for old in before["partitions"]:
         new = lookup.get(old["path"])
+        if old["path"] == resized_ext4_path:
+            if (old["fstype"] != "ext4" or old["sha256"] is not None or new is None
+                    or new != dict(old, geometry=dict(old["geometry"],
+                        size=target_size_bytes // before["table"]["sectorsize"]))
+                    or target_size_bytes >= old["geometry"]["size"] * before["table"]["sectorsize"]):
+                raise TestFailure("Resized ext4 identity or geometry changed unexpectedly")
+            continue
         if not re.fullmatch(r"[0-9a-f]{64}", old.get("sha256") or "") or new != old:
             raise TestFailure(f"Original partition identity, geometry, or bytes changed: {old['path']}")
     old_entries, new_entries = boot_entries(before["nvram"]), boot_entries(after["nvram"])

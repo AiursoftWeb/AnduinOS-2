@@ -129,11 +129,70 @@ def select_new_esp(expected_path: str) -> None:
     raise UiFailure("ESP dropdown did not select a new independent ESP")
 
 
+def select_ext4_root():
+    def dropdown():
+        options = {"Btrfs (recommended)", "Btrfs（推荐）", "ext4 (classic)", "ext4（经典版）"}
+        candidates = [node for node in visible_nodes() if role(node) == "combo box"
+            and in_storage_editor(node) and options.intersection(dropdown_display_text(node))]
+        if len(candidates) != 1:
+            raise UiFailure("Cannot uniquely identify the manual root filesystem selector")
+        return candidates[0]
+    for attempt in range(80):
+        selected = dropdown()
+        if focus_within(selected):
+            break
+        event("qmp-key", request=f"focus-root-filesystem-{attempt}", key="tab")
+        time.sleep(0.3)
+    else:
+        raise UiFailure("Cannot focus the root filesystem selector")
+    for request, key in (("open-root-filesystem", "spc"), ("first-root-filesystem", "home"),
+                         ("choose-ext4-root", "down"), ("accept-ext4-root", "ret")):
+        event("qmp-key", request=request, key=key)
+        time.sleep(0.3)
+    if not any(text.startswith("ext4") for text in dropdown_display_text(dropdown())):
+        raise UiFailure("Root filesystem did not change to ext4")
+
+
+def plan_ext4_shrink(expected_path):
+    if not re.fullmatch(r"/dev/vda[1-9][0-9]*", expected_path):
+        raise UiFailure("Unsafe ext4 acceptance target")
+    if not any(expected_path in name(node) for node in visible_nodes()):
+        raise UiFailure("Original ext4 partition is not visible in the editor")
+    click_button("change_partition_size")
+    # Only the modal spin button, never the partition-creation spin behind it.
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        for node in visible_nodes():
+            if not matches(node, aliases("partition_size")):
+                continue
+            found = False
+            ancestor = node
+            for _ in range(30):
+                if role(ancestor) in {"dialog", "alert"}:
+                    found = True
+                    break
+                ancestor = ancestor.get_parent()
+                if ancestor is None:
+                    break
+            if not found:
+                continue
+            if node.is_value() and node.set_current_value(40 * 1024):
+                if int(node.get_current_value()) != 40 * 1024:
+                    raise UiFailure("Resize target did not become 40 GiB")
+                set_toggle("resize_backup", True)
+                click_button("plan_resize")
+                event("ext4-shrink-planned", path=expected_path, target_mib=40 * 1024)
+                return
+        time.sleep(0.25)
+    raise UiFailure("ext4 shrink dialog did not expose its size control")
+
+
 def configure_coexistence(config: dict[str, object], evidence: Path) -> bool:
     """Return False only after observing the occupied-ESP rejection."""
     from .installer import wait_page
 
     stage = config.get("coexistence_stage")
+    shrinking = config.get("storage_mode") == "coexistence-ext4-shrink"
     if stage not in ("a", "b-shared", "b-separate"):
         raise UiFailure(f"Invalid coexistence stage: {stage!r}")
     set_toggle("manual_strategy", True)
@@ -146,20 +205,25 @@ def configure_coexistence(config: dict[str, object], evidence: Path) -> bool:
     else:
         expected_esp = str(config["existing_esp_path"])
         selected_esp_dropdown(expected_esp)
+        if shrinking:
+            plan_ext4_shrink(str(config["resize_ext4_path"]))
         if stage == "b-separate":
             select_new_esp(expected_esp)
-    # The editor advances ESP -> Root -> Swap. Each root is at the 50 GiB
-    # recommendation; A leaves sufficient contiguous space for B (no shrink).
-    sizes = (50 * 1024, 3072) if stage == "b-shared" else (1024, 50 * 1024, 3072)
+    # Ordinary coexistence leaves room for B. The shrink case deliberately
+    # makes A 96 GiB so B cannot fit until the declared 40 GiB shrink executes.
+    root_mib = 96 * 1024 if shrinking and stage == "a" else 50 * 1024
+    sizes = (root_mib, 3072) if stage == "b-shared" else (1024, root_mib, 3072)
     for size in sizes:
         set_numeric_value("partition_size", size)
         click_button("add_partition")
+    if shrinking:
+        select_ext4_root()
     dump_accessibility(evidence / "manual-coexistence-layout.txt")
     find("next", timeout=30, require_enabled=True)
     click("next")
     if stage != "b-shared":
         wait_page("user")
-        event("coexistence-layout", stage=stage, root_mib=50 * 1024,
+        event("coexistence-layout", stage=stage, root_mib=root_mib,
               new_esp_mib=1024, swap_mib=3072)
         return True
     find("esp_replacement_warning", timeout=90)

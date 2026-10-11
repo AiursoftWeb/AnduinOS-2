@@ -20,10 +20,15 @@ def coexistence_check_ids(scenario: Scenario) -> tuple[str, ...]:
     )
 
 
+def installation_root(parts):
+    return parts.get("ext4") or parts["btrfs"]
+
+
 def mounted_root_script(root: dict, body: str) -> str:
     root_uuid = root["uuid"]
     if not re.fullmatch(r"[0-9a-fA-F-]{36}", root_uuid):
         raise TestFailure("Unsafe root UUID in coexistence evidence")
+    options = "ro,noload" if root.get("fstype") == "ext4" else "subvol=@root"
     return f"""
 set -euo pipefail
 device=/dev/disk/by-uuid/{root_uuid}
@@ -33,10 +38,42 @@ test -z "$(findmnt -rn -S "$device" -o TARGET)"
 mountpoint=$(mktemp -d /run/anduinos-target.XXXXXX)
 cleanup() {{ umount "$mountpoint"; rmdir "$mountpoint"; }}
 trap cleanup EXIT
-mount -o subvol=@root "$device" "$mountpoint"
+mount -o {options} "$device" "$mountpoint"
 {body}
 sync
 """
+
+
+def ext4_file_manifest_script(root: dict) -> str:
+    """Read every original regular file, symlink and metadata after offline fsck."""
+    if root.get("fstype") != "ext4":
+        raise TestFailure("File manifest requires an ext4 root")
+    script = mounted_root_script(root, r'''
+python3 - "$mountpoint" <<'PY'
+import hashlib, json, os, stat, sys
+base = sys.argv[1]
+digest = hashlib.sha256()
+for directory, dirs, files in os.walk(base, followlinks=False):
+    dirs.sort()
+    for name in sorted(dirs + files):
+        path = os.path.join(directory, name)
+        info = os.lstat(path)
+        record = [os.path.relpath(path, base), info.st_mode, info.st_uid, info.st_gid]
+        if stat.S_ISREG(info.st_mode):
+            content = hashlib.sha256()
+            with open(path, 'rb') as stream:
+                for block in iter(lambda: stream.read(1024**2), b''):
+                    content.update(block)
+            record.extend((info.st_size, content.hexdigest()))
+        elif stat.S_ISLNK(info.st_mode):
+            record.append(os.readlink(path))
+        digest.update(json.dumps(record, ensure_ascii=True).encode() + b'\n')
+print('EXT4_FILES_SHA256=' + digest.hexdigest())
+PY
+''')
+    # This script mounts read-only and does not replay a journal or repair.
+    return script.replace('mount -o ro,noload',
+        'e2fsck -f -n "$device"\nmount -o ro,noload')
 
 
 def chainload_selection_script(a: dict) -> str:
@@ -61,7 +98,7 @@ cat "$cfg"
 
 
 class CoexistenceChecks:
-    def _assert_coexistence_versions(self, vm, artifacts):
+    def _assert_coexistence_versions(self, vm, artifacts, *, ext4_shrink=False):
         result = vm.serial.run(r"""
 set -euo pipefail
 installer=$(dpkg-query -W -f='${Version}' anduinos-installer-beta)
@@ -69,13 +106,23 @@ toolkit=$(dpkg-query -W -f='${Version}' anduinos-secureboot-toolkit)
 printf 'installer=%s\ntoolkit=%s\n' "$installer" "$toolkit"
 dpkg --compare-versions "$installer" ge 2.0.4-3
 dpkg --compare-versions "$toolkit" ge 2.0.4-2
-""", check=False)
+""".replace("ge 2.0.4-3", "ge 2.0.4-15" if ext4_shrink else "ge 2.0.4-3"), check=False)
         (artifacts / "package-versions.txt").write_text(result.stdout + "\n", encoding="utf-8")
         if result.returncode != 0:
             raise TestFailure(
-                "Coexistence requires installer >= 2.0.4-3 and secureboot toolkit >= 2.0.4-2; "
+                f"Coexistence requires installer >= {'2.0.4-15' if ext4_shrink else '2.0.4-3'} "
+                "and secureboot toolkit >= 2.0.4-2; "
                 "publish the packages and rebuild the ISO. Observed:\n" + result.stdout
             )
+
+    def _ext4_manifest(self, vm, root, artifacts, label):
+        result = vm.serial.run(ext4_file_manifest_script(root), timeout=1800)
+        (artifacts / f"{label}-file-manifest.txt").write_text(result.stdout + "\n", encoding="utf-8")
+        matches = re.findall(r"^EXT4_FILES_SHA256=([0-9a-f]{64})$", result.stdout, re.MULTILINE)
+        if len(matches) != 1:
+            raise TestFailure("Missing/ambiguous ext4 file manifest")
+        self._assert_live_cleanup(vm, artifacts)
+        return matches[0]
 
     def _coexistence_live(self, vm, scenario, artifacts, phase):
         entry = self._assert_grub_regional_contract(scenario, artifacts)
@@ -110,7 +157,11 @@ test -s "$mountpoint/boot/initrd.img" || ls "$mountpoint"/boot/initrd.img-* >/de
 cat "$mountpoint/etc/fstab"
 {render_installed_grub_instrumentation(self.architecture, mounted_target=True)}
 """
-        result = vm.serial.run(mounted_root_script(parts["btrfs"], body), timeout=180)
+        script = mounted_root_script(installation_root(parts), body)
+        # Boot instrumentation intentionally writes GRUB in the disposable VM;
+        # file-preservation manifests above always use the read-only variant.
+        script = script.replace("mount -o ro,noload", "mount -o rw")
+        result = vm.serial.run(script, timeout=180)
         (artifacts / f"{label}-instrumentation.txt").write_text(result.stdout + "\n", encoding="utf-8")
         self._assert_live_cleanup(vm, artifacts)
 
@@ -129,25 +180,30 @@ for attempt in $(seq 1 180); do
 done
 mountpoint -q /boot/efi
 systemctl is-active --quiet display-manager
-test "$(findmnt -nro FSTYPE /)" = btrfs
+test "$(findmnt -nro FSTYPE /)" = ROOT_FSTYPE
 dpkg-query -W anduinos-secureboot-toolkit
 printf 'ROOT_UUID=%s\n' "$(findmnt -nro UUID /)"
 printf 'ESP_UUID=%s\n' "$(findmnt -nro UUID /boot/efi)"
 printf 'HOSTNAME=%s\n' "$(hostname)"
 efibootmgr -v
-""", timeout=240)
+""".replace("ROOT_FSTYPE", installation_root(parts)["fstype"]), timeout=240)
         (artifacts / f"{phase}-identity.txt").write_text(result.stdout + "\n", encoding="utf-8")
-        validate_boot_identity(result.stdout, parts["btrfs"], parts["vfat"], hostname, firmware_esp)
+        validate_boot_identity(result.stdout, installation_root(parts), parts["vfat"], hostname, firmware_esp)
         restored = vm.serial.run(render_installed_grub_restoration(), timeout=180)
         (artifacts / f"{phase}-restoration.txt").write_text(restored.stdout + "\n", encoding="utf-8")
         _login_gdm(vm, self.defaults.username, self.defaults.password, timeout=180)
         if _graphical_user(vm.serial) != self.defaults.username:
             raise TestFailure("Installed desktop login reached the wrong user")
         vm.screenshot(phase + "-desktop")
-        _power_off(vm, unmount_esp=True)
+        if installation_root(parts)["fstype"] == "ext4":
+            _power_off_clean_ext4(vm)
+        else:
+            _power_off(vm, unmount_esp=True)
 
     def _run_coexistence(self, vm, scenario, artifacts):
         shared = scenario.storage_mode is StorageMode.COEXISTENCE_SHARED_ESP
+        shrinking = scenario.storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK
+        filesystem = "ext4" if shrinking else "btrfs"
         a_dir, b_dir, chain_dir = (artifacts / name for name in ("a", "b", "chainload"))
         for directory in (a_dir, b_dir, chain_dir):
             directory.mkdir()
@@ -163,7 +219,7 @@ efibootmgr -v
         with self._check(scenario, "coexistence.live-b-baseline"):
             self._coexistence_live(vm, scenario, b_dir, "live-b")
             initial = self._coexistence_snapshot(vm, b_dir, "initial-layout")
-            a = installation_parts(initial)
+            a = installation_parts(initial, filesystem=filesystem, root_gib=96 if shrinking else 50)
             vendor_entry(initial["nvram"], a["vfat"])
             health = vm.serial.run(
                 "fsck.fat -n " + shlex.quote(a["vfat"]["path"]),
@@ -173,19 +229,30 @@ efibootmgr -v
             if health.returncode != 0:
                 raise TestFailure("A's ESP is not clean before planning B:\n" + health.stdout)
             paths = tuple(item["path"] for item in initial["partitions"])
-            before = self._coexistence_snapshot(vm, b_dir, "before-b", paths)
+            hash_paths = tuple(path for path in paths
+                              if not shrinking or path != a["ext4"]["path"])
+            if shrinking:
+                manifest = self._ext4_manifest(vm, a["ext4"], b_dir, "before-b")
+            before = self._coexistence_snapshot(vm, b_dir, "before-b", hash_paths)
         check = "coexistence.reject-shared-esp" if shared else "coexistence.install-b-independent"
         with self._check(scenario, check):
             self._run_installer_driver(vm, scenario, b_dir, config_overrides={
                 "coexistence_stage": "b-shared" if shared else "b-separate",
                 "hostname": "coexist-b", "existing_esp_path": a["vfat"]["path"],
+                **({"resize_ext4_path": a["ext4"]["path"]} if shrinking else {}),
             })
             vm.screenshot("b-rejected" if shared else "b-installed")
         with self._check(scenario, "coexistence.a-preserved"):
-            after = self._coexistence_snapshot(vm, b_dir, "after-b", paths)
-            assert_preserved(before, after, rejected=shared)
+            after = self._coexistence_snapshot(vm, b_dir, "after-b", hash_paths)
+            assert_preserved(before, after, rejected=shared,
+                **({"resized_ext4_path": a["ext4"]["path"], "target_size_bytes": 40 * 1024**3}
+                   if shrinking else {}))
+            if shrinking:
+                a["ext4"] = next(p for p in after["partitions"] if p["path"] == a["ext4"]["path"])
+                if self._ext4_manifest(vm, a["ext4"], b_dir, "after-b") != manifest:
+                    raise TestFailure("Original ext4 files, links or metadata changed during shrinking")
             if not shared:
-                b = installation_parts(after, excluded=paths)
+                b = installation_parts(after, excluded=paths, filesystem=filesystem)
                 b_entry = vendor_entry(after["nvram"], b["vfat"])
                 order = re.findall(r"^BootOrder: (.+)$", after["nvram"], re.MULTILINE)
                 if len(order) != 1 or order[0].split(",")[0] != b_entry:
@@ -204,7 +271,8 @@ efibootmgr -v
             self._coexistence_live(vm, scenario, chain_dir, "live-chainload")
             self._coexistence_arm(vm, a, chain_dir, "a-chainload")
             result = vm.serial.run(
-                mounted_root_script(b["btrfs"], chainload_selection_script(a)), timeout=180,
+                mounted_root_script(installation_root(b), chainload_selection_script(a)).replace(
+                    "mount -o ro,noload", "mount -o rw"), timeout=180,
             )
             (chain_dir / "b-chainload-entry.txt").write_text(result.stdout + "\n", encoding="utf-8")
             self._assert_live_cleanup(vm, chain_dir)
