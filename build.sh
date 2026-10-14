@@ -45,48 +45,57 @@ function clean() {
     sudo umount new_building_os/proc || sudo umount -lf new_building_os/proc || true
     sudo umount new_building_os/dev || sudo umount -lf new_building_os/dev || true
     sudo umount new_building_os/run || sudo umount -lf new_building_os/run || true
-    sudo rm -rf new_building_os image || true
+    sudo rm -rf new_building_os official_ubuntu_os image || true
     judge "Clean up build artifacts"
 }
 
+function prepare_iso_directory() {
+    print_ok "Creating image directory..."
+    sudo rm -rf image
+    mkdir -p image/{LiveOS,isolinux,.disk}
+    judge "Create image directory"
+}
+
+# Contract: prepare_iso_directory has created the shared image/ output tree.
+# On success, this workshop has unmounted new_building_os and exported:
+#   image/LiveOS/{rootfs.squashfs,vmlinuz,initrd,filesystem.manifest,filesystem.size}
+#   image/boot/grub/fonts/anduinos-unicode-16.pf2
+#   image/boot/grub/themes/anduinos-hyperfluent/
+# We require the completed system to provide its kernel symlink, the dedicated
+# /boot/anduinos-live-initrd.img and the packaged GRUB theme. Only this workshop
+# knows those rootfs paths; build_iso consumes the exported files.
+function run_chroot_anduinos() {
+    download_base_system
+    mount_folders
+    setup_apt
+    apply_anduinos_mods
+    umount_folders
+    prepare_live_grub_font
+    prepare_live_grub_theme
+    export_anduinos_payload
+}
+
 function download_base_system() {
-    print_ok "Creating new_building_os directory..."
-    sudo mkdir -p new_building_os
-    judge "Create build directory"
+    bootstrap_ubuntu_root "$SCRIPT_DIR/new_building_os" ca-certificates,wget,dbus
+}
 
-    print_ok "Calling debootstrap to download base system (arch: $TARGET_ARCH)..."
+# Shared bootstrap only; package sources and workshop actions remain explicit.
+function bootstrap_ubuntu_root() {
+    local target_root=$1
+    local packages=$2
+    print_ok "Bootstrapping Ubuntu $TARGET_UBUNTU_VERSION ($TARGET_ARCH) in $target_root..."
+    sudo mkdir -p "$target_root"
     sudo debootstrap --arch="$TARGET_ARCH" --variant=minbase \
-        --include=ca-certificates,wget,dbus \
-        "$TARGET_UBUNTU_VERSION" new_building_os "$APT_SOURCE"
-    judge "Download base system"
+        --include="$packages" \
+        "$TARGET_UBUNTU_VERSION" "$target_root" "$APT_SOURCE"
+    judge "Bootstrap Ubuntu build environment"
 }
 
-function mount_folders() {
-    print_ok "Reloading systemd daemon..."
-    sudo systemctl daemon-reload
-    judge "Reload systemd daemon"
-
-    print_ok "Mounting /dev /run from host to build dir..."
-    sudo mount --bind /dev new_building_os/dev
-    sudo mount --bind /run new_building_os/run
-    judge "Mount /dev /run"
-
-    print_ok "Mounting /proc /sys /dev/pts within chroot..."
-    sudo chroot new_building_os mount none -t proc /proc
-    sudo chroot new_building_os mount none -t sysfs /sys
-    sudo chroot new_building_os mount none -t devpts /dev/pts
-    judge "Mount /proc /sys /dev/pts"
-
-    print_ok "Copying mods to chroot /root/mods..."
-    sudo cp -r "$SCRIPT_DIR/mods" new_building_os/root/mods
-    sudo cp "$SCRIPT_DIR/args.sh" new_building_os/root/mods/args.sh
-    sudo cp "$SCRIPT_DIR/shared.sh" new_building_os/root/mods/shared.sh
-}
-
-function setup_apt() {
+function configure_ubuntu_sources() {
+    local target_root=$1
     print_ok "Setting up Ubuntu apt sources in chroot..."
-    sudo mkdir -p new_building_os/etc/apt/sources.list.d
-    sudo tee new_building_os/etc/apt/sources.list.d/ubuntu.sources > /dev/null <<EOF
+    sudo mkdir -p "$target_root/etc/apt/sources.list.d"
+    sudo tee "$target_root/etc/apt/sources.list.d/ubuntu.sources" > /dev/null <<EOF
 Types: deb
 URIs: $APT_SOURCE
 Suites: $TARGET_UBUNTU_VERSION
@@ -115,7 +124,33 @@ EOF
 
     # Remove stale legacy-format sources.list (debootstrap artifact).
     # Ubuntu 24.04+ uses deb822 .sources files in sources.list.d/ instead.
-    sudo rm -f new_building_os/etc/apt/sources.list
+    sudo rm -f "$target_root/etc/apt/sources.list"
+}
+
+function mount_folders() {
+    print_ok "Reloading systemd daemon..."
+    sudo systemctl daemon-reload
+    judge "Reload systemd daemon"
+
+    print_ok "Mounting /dev /run from host to build dir..."
+    sudo mount --bind /dev new_building_os/dev
+    sudo mount --bind /run new_building_os/run
+    judge "Mount /dev /run"
+
+    print_ok "Mounting /proc /sys /dev/pts within chroot..."
+    sudo chroot new_building_os mount none -t proc /proc
+    sudo chroot new_building_os mount none -t sysfs /sys
+    sudo chroot new_building_os mount none -t devpts /dev/pts
+    judge "Mount /proc /sys /dev/pts"
+
+    print_ok "Copying mods to chroot /root/mods..."
+    sudo cp -r "$SCRIPT_DIR/mods" new_building_os/root/mods
+    sudo cp "$SCRIPT_DIR/args.sh" new_building_os/root/mods/args.sh
+    sudo cp "$SCRIPT_DIR/shared.sh" new_building_os/root/mods/shared.sh
+}
+
+function setup_apt() {
+    configure_ubuntu_sources "$SCRIPT_DIR/new_building_os"
 
     print_ok "Setting up AnduinOS APKG apt source in chroot..."
 
@@ -158,61 +193,7 @@ EOF
     judge "Upgrade base system"
 }
 
-function prepare_iso_directory() {
-    print_ok "Creating image directory..."
-    sudo rm -rf image
-    mkdir -p image/{LiveOS,isolinux,.disk}
-    judge "Create image directory"
-}
-
-# Fetch official Live loaders before mods clean APT lists. Download/extract only:
-# Ubuntu boot packages must never replace the installed-system stack in rootfs.
-function download_official_live_bootloaders() {
-    print_ok "Downloading official Ubuntu bootloaders for the Live ISO..."
-    download_live_efi \
-        "$SCRIPT_DIR/new_building_os" "$SCRIPT_DIR/image/isolinux/live-efi" \
-        "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
-    judge "Download official Live bootloaders"
-}
-
-function download_live_efi() (
-    set -euo pipefail
-    target_root=$(realpath "$1")
-    output=$(realpath -m "$2")
-    target_arch=$3
-    business_name=$4
-    case "$target_arch" in
-        amd64) efi_suffix=x64; grub_platform=x86_64 ;;
-        arm64) efi_suffix=aa64; grub_platform=arm64 ;;
-        *) echo "Unsupported Live EFI architecture: $target_arch" >&2; exit 1 ;;
-    esac
-    scratch=$(mktemp -d "$target_root/tmp/anduinos-live-efi.XXXXXX")
-    trap 'rm -rf -- "$scratch"' EXIT
-
-    # Use only target Ubuntu sources, as the build user rather than root.
-    sudo --preserve-env=HOME chroot --userspec="$(id -u):$(id -g)" "$target_root" /bin/sh -ec '
-        cd "$1"
-        apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
-            -o Dir::Etc::sourceparts=- download \
-            "grub-efi-$2-signed:$2" "shim-signed:$2"
-    ' sh "/${scratch#"${target_root%/}/"}" "$target_arch"
-
-    for deb in "$scratch"/*.deb; do
-        dpkg-deb --extract "$deb" "$scratch/payload"
-    done
-    mkdir -p "$output"
-    install -m 0644 "$scratch/payload/usr/lib/grub/$grub_platform-efi-signed/gcd$efi_suffix.efi.signed" "$output/grub$efi_suffix.efi"
-    install -m 0644 "$scratch/payload/usr/lib/shim/shim$efi_suffix.efi.signed.latest" "$output/BOOT${efi_suffix^^}.EFI"
-    install -m 0644 "$scratch/payload/usr/lib/shim/mm$efi_suffix.efi" "$output/mm$efi_suffix.efi"
-    # Preserve the existing ARM64 media registration descriptor.
-    if [ "$target_arch" = arm64 ]; then
-        printf 'shim%s.efi,%s,,This is the boot entry for %s\n' \
-            "$efi_suffix" "$business_name" "$business_name" \
-            | iconv -f UTF-8 -t UTF-16LE > "$output/BOOT${efi_suffix^^}.CSV"
-    fi
-)
-
-function run_chroot() {
+function apply_anduinos_mods() {
     print_ok "Running install_all_mods.sh in new_building_os..."
     print_warn "============================================"
     print_warn "   The following will run in chroot ENV!"
@@ -268,6 +249,99 @@ function prepare_live_grub_theme() {
     cp -r "$source_dir" image/boot/grub/themes/
     judge "Copy packaged GRUB theme to Live ISO"
 }
+
+function export_anduinos_payload() {
+    local REAL_VMLINUZ REAL_INITRD filesystem_size
+    # Copy the kernel and the separately-built non-host-only Live initrd.
+    print_ok "Copying the Dracut Live boot artifacts to /LiveOS..."
+    # Resolve the distro-maintained symlinks — they always point to the
+    # current kernel, so we never pick a stale one left behind by apt.
+    REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz 2>/dev/null)
+    [ -f "$REAL_VMLINUZ" ] || REAL_VMLINUZ=$(readlink -f new_building_os/boot/vmlinuz 2>/dev/null)
+    REAL_INITRD="new_building_os/boot/anduinos-live-initrd.img"
+    sudo cp "$REAL_VMLINUZ" image/LiveOS/vmlinuz
+    sudo cp "$REAL_INITRD" image/LiveOS/initrd
+    judge "Copy kernel files"
+
+    # generate manifest
+    print_ok "Generating manifest for filesystem..."
+    sudo chroot new_building_os dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee image/LiveOS/filesystem.manifest >/dev/null 2>&1
+    judge "Generate manifest for filesystem"
+    judge "Generate manifest for filesystem-desktop"
+
+    print_ok "Compressing the single root filesystem as /LiveOS/rootfs.squashfs..."
+    sudo mksquashfs new_building_os image/LiveOS/rootfs.squashfs \
+        -noappend -no-duplicates -no-recovery \
+        -wildcards -b 1M \
+        -comp zstd -Xcompression-level 19 \
+        -e "var/cache/apt/archives/*" \
+        -e "tmp/*" \
+        -e "tmp/.*" \
+        -e "boot/anduinos-live-initrd.img" \
+        -e "swapfile"
+    judge "Compress rootfs"
+
+    print_ok "Generating filesystem.size on /LiveOS/filesystem.size..."
+    filesystem_size=$(sudo du -sx --block-size=1 new_building_os | cut -f1)
+    printf '%s\n' "$filesystem_size" > image/LiveOS/filesystem.size
+    judge "Generate filesystem.size"
+}
+
+# Contract: the configured Ubuntu suite/architecture must provide signed shim,
+# CD GRUB and MokManager. On success, image/isolinux/live-efi/ contains:
+#   amd64: BOOTX64.EFI, grubx64.efi, mmx64.efi
+#   arm64: BOOTAA64.EFI, grubaa64.efi, mmaa64.efi, BOOTAA64.CSV
+# build_iso copies these files into efiboot.img and removes the staging folder.
+# official_ubuntu_os uses only Ubuntu sources; boot packages are downloaded and
+# extracted, not installed. Neither this root nor its APT cache enters the ISO
+# or the AnduinOS squashfs. No AnduinOS rootfs contents are required here.
+function run_chroot_ubuntu() {
+    local target_root="$SCRIPT_DIR/official_ubuntu_os"
+    bootstrap_ubuntu_root "$target_root" ca-certificates
+    configure_ubuntu_sources "$target_root"
+    sudo chroot "$target_root" apt-get update
+    download_live_efi \
+        "$target_root" "$SCRIPT_DIR/image/isolinux/live-efi" \
+        "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
+    judge "Export official Ubuntu Live bootloaders"
+}
+
+function download_live_efi() (
+    set -euo pipefail
+    target_root=$(realpath "$1")
+    output=$(realpath -m "$2")
+    target_arch=$3
+    business_name=$4
+    case "$target_arch" in
+        amd64) efi_suffix=x64; grub_platform=x86_64 ;;
+        arm64) efi_suffix=aa64; grub_platform=arm64 ;;
+        *) echo "Unsupported Live EFI architecture: $target_arch" >&2; exit 1 ;;
+    esac
+    scratch=$(mktemp -d "$target_root/tmp/anduinos-live-efi.XXXXXX")
+    trap 'rm -rf -- "$scratch"' EXIT
+
+    # Use only target Ubuntu sources, as the build user rather than root.
+    sudo --preserve-env=HOME chroot --userspec="$(id -u):$(id -g)" "$target_root" /bin/sh -ec '
+        cd "$1"
+        apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- download \
+            "grub-efi-$2-signed:$2" "shim-signed:$2"
+    ' sh "/${scratch#"${target_root%/}/"}" "$target_arch"
+
+    for deb in "$scratch"/*.deb; do
+        dpkg-deb --extract "$deb" "$scratch/payload"
+    done
+    mkdir -p "$output"
+    install -m 0644 "$scratch/payload/usr/lib/grub/$grub_platform-efi-signed/gcd$efi_suffix.efi.signed" "$output/grub$efi_suffix.efi"
+    install -m 0644 "$scratch/payload/usr/lib/shim/shim$efi_suffix.efi.signed.latest" "$output/BOOT${efi_suffix^^}.EFI"
+    install -m 0644 "$scratch/payload/usr/lib/shim/mm$efi_suffix.efi" "$output/mm$efi_suffix.efi"
+    # Preserve the existing ARM64 media registration descriptor.
+    if [ "$target_arch" = arm64 ]; then
+        printf 'shim%s.efi,%s,,This is the boot entry for %s\n' \
+            "$efi_suffix" "$business_name" "$business_name" \
+            | iconv -f UTF-8 -t UTF-16LE > "$output/BOOT${efi_suffix^^}.CSV"
+    fi
+)
 
 function generate_live_grub_config() {
     local try_text="Try or Install $TARGET_BUSINESS_NAME"
@@ -409,17 +483,6 @@ function prepare_live_efi() (
 function build_iso() {
     print_ok "Building ISO image..."
 
-    # Copy the kernel and the separately-built non-host-only Live initrd.
-    print_ok "Copying the Dracut Live boot artifacts to /LiveOS..."
-    # Resolve the distro-maintained symlinks — they always point to the
-    # current kernel, so we never pick a stale one left behind by apt.
-    REAL_VMLINUZ=$(readlink -f new_building_os/vmlinuz 2>/dev/null)
-    [ -f "$REAL_VMLINUZ" ] || REAL_VMLINUZ=$(readlink -f new_building_os/boot/vmlinuz 2>/dev/null)
-    REAL_INITRD="new_building_os/boot/anduinos-live-initrd.img"
-    sudo cp "$REAL_VMLINUZ" image/LiveOS/vmlinuz
-    sudo cp "$REAL_INITRD" image/LiveOS/initrd
-    judge "Copy kernel files"
-
     print_ok "Generating grub.cfg..."
     touch "image/$TARGET_NAME"
     cp "$SCRIPT_DIR/args.sh" "image/$TARGET_NAME"
@@ -428,29 +491,6 @@ function build_iso() {
     generate_live_grub_config > image/isolinux/grub.cfg
     judge "Generate grub.cfg"
 
-
-    # generate manifest
-    print_ok "Generating manifest for filesystem..."
-    sudo chroot new_building_os dpkg-query -W --showformat='${Package} ${Version}\n' | sudo tee image/LiveOS/filesystem.manifest >/dev/null 2>&1
-    judge "Generate manifest for filesystem"
-    judge "Generate manifest for filesystem-desktop"
-
-    print_ok "Compressing the single root filesystem as /LiveOS/rootfs.squashfs..."
-    sudo mksquashfs new_building_os image/LiveOS/rootfs.squashfs \
-        -noappend -no-duplicates -no-recovery \
-        -wildcards -b 1M \
-        -comp zstd -Xcompression-level 19 \
-        -e "var/cache/apt/archives/*" \
-        -e "tmp/*" \
-        -e "tmp/.*" \
-        -e "boot/anduinos-live-initrd.img" \
-        -e "swapfile"
-    judge "Compress rootfs"
-    
-    print_ok "Generating filesystem.size on /LiveOS/filesystem.size..."
-    filesystem_size=$(sudo du -sx --block-size=1 new_building_os | cut -f1)
-    printf '%s\n' "$filesystem_size" > image/LiveOS/filesystem.size
-    judge "Generate filesystem.size"
 
     print_ok "Generating README.diskdefines..."
     cat << EOF > image/README.diskdefines
@@ -631,15 +671,9 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cd "$SCRIPT_DIR"
     bind_signal
     clean
-    download_base_system
-    mount_folders
-    setup_apt
     prepare_iso_directory
-    download_official_live_bootloaders
-    run_chroot
-    umount_folders
-    prepare_live_grub_font
-    prepare_live_grub_theme
+    run_chroot_anduinos
+    run_chroot_ubuntu
     build_iso
     echo "$0 - Build completed."
 fi
