@@ -19,13 +19,10 @@ DEPS_COMMON := \
 
 # Pick arch-specific GRUB packages at run time so the same Makefile works on
 # both amd64 and arm64 build hosts. amd64 uses grub-pc-bin for its El Torito
-# image; both architectures declare the signed GRUB and shim payloads directly
-# because build.sh creates a Secure Boot capable removable EFI image.
+# image. Signed EFI payloads are ISO build inputs, independent of the host's
+# installed boot stack.
 DEPS_amd64 := \
-  grub-pc-bin \
-  grub-efi-amd64 \
-  grub-efi-amd64-signed \
-  shim-signed
+  grub-pc-bin
 
 # The ARM64 EFI payload is built with the target root's GRUB modules, signed
 # GRUB image and shim inside a private mount namespace.  Installing foreign
@@ -72,6 +69,10 @@ bootstrap:
 
 	@missing="" ; \
 	for pkg in $(DEPS); do \
+	  if [[ "$$pkg" == grub2-common || "$$pkg" == grub-pc-bin ]] && \
+	     [[ "$$(dpkg-query -W -f='$${db:Status-Status}' anduinos-grub 2>/dev/null)" == installed ]]; then \
+	    continue; \
+	  fi; \
 	  if ! dpkg -s $$pkg >/dev/null 2>&1; then \
 	    missing="$$missing $$pkg"; \
 	  fi; \

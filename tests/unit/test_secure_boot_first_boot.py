@@ -60,6 +60,27 @@ class SecureBootFirstBootTests(unittest.TestCase):
         with self.assertRaises((ValueError, KeyError)):
             validate_status({})
 
+    def test_own_bootloader_requires_all_four_independent_boundaries(self):
+        with self.assertRaises(ValueError):
+            validate_status(self.status, require_bootloader=True)
+        self.status['secure_boot']['grub'] = dict(installed=True, signature='valid',
+                                                  enrollment='enrolled', deployment='ready')
+        validate_status(self.status, require_bootloader=True)
+        for field, value in [('installed', False), ('signature', 'missing'),
+                             ('enrollment', 'pending'), ('deployment', 'pending')]:
+            payload = copy.deepcopy(self.status)
+            payload['secure_boot']['grub'][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_status(payload, require_bootloader=True)
+
+    def test_own_bootloader_requires_the_visible_sixth_healthy_row(self):
+        with self.assertRaises(ValueError):
+            validate_ui(self.names, require_bootloader=True)
+        names = self.names | {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed'}
+        validate_ui(names, require_bootloader=True)
+        with self.assertRaises(ValueError):
+            validate_ui(names | {'Repair AnduinOS Bootloader'}, require_bootloader=True)
+
     def test_every_ui_state_is_required(self):
         for text in self.names:
             with self.subTest(text=text), self.assertRaises(ValueError):

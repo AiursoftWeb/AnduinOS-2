@@ -62,7 +62,9 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=6
     artifacts.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
     records = []
-    firmware = resolve_firmware(Architecture.AMD64, Firmware.UEFI_NO_SECURE_BOOT, overrides)
+    # Removable media must boot through the official signed entry point,
+    # before any machine-specific AnduinOS MOK has been enrolled.
+    firmware = resolve_firmware(Architecture.AMD64, Firmware.UEFI_SECURE_BOOT, overrides)
     binary, accel = resolve_qemu(Architecture.AMD64)
     dashboard.begin(USB_CASE_ID)
     dashboard.phase(USB_CASE_ID, 'Testing ISO media boot paths')
@@ -83,7 +85,7 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=6
                 variables = work / 'vars.fd'
                 shutil.copyfile(firmware.variables_template, variables)
                 vm = QemuVm(QemuConfig(
-                    architecture=Architecture.AMD64, firmware=Firmware.UEFI_NO_SECURE_BOOT,
+                    architecture=Architecture.AMD64, firmware=Firmware.UEFI_SECURE_BOOT,
                     network=Network.OFFLINE, memory_mib=memory, cpus=cpus, disk_gib=1,
                     ssh_forward_port=0, iso=inspection.path, disk=work/'target.qcow2',
                     variables=variables, firmware_selection=firmware, artifacts=case,
@@ -100,6 +102,7 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=6
                     dashboard.suite_phase(USB_CASE_ID, record['id'], 'Checking Live desktop and media integrity')
                     result = vm.serial.run(r'''
 set -eu
+test "$(mokutil --sb-state)" = 'SecureBoot enabled'
 for attempt in $(seq 1 120); do
     if getent passwd live >/dev/null && pgrep -u "$(id -u live)" -x gnome-shell >/dev/null; then break; fi
     sleep 1
@@ -158,7 +161,7 @@ echo ISO_USB_DESKTOP_PASSED
             variables = work / 'vars.fd'
             shutil.copyfile(firmware.variables_template, variables)
             vm = QemuVm(QemuConfig(
-                architecture=Architecture.AMD64, firmware=Firmware.UEFI_NO_SECURE_BOOT,
+                architecture=Architecture.AMD64, firmware=Firmware.UEFI_SECURE_BOOT,
                 network=Network.OFFLINE, memory_mib=memory, cpus=cpus, disk_gib=1,
                 ssh_forward_port=0, iso=inspection.path, disk=work/'target.qcow2',
                 variables=variables, firmware_selection=firmware, artifacts=case,

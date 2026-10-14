@@ -24,10 +24,17 @@ runuser -u live -- env XDG_RUNTIME_DIR="/run/user/$uid" \\
 """, timeout=timeout + 15, check=False)
     with (evidence / 'live-notifications-ui.jsonl').open('a', encoding='utf-8') as stream:
         stream.write(result.stdout.strip() + '\n')
-    try:
-        report = json.loads(result.stdout)
-    except (ValueError, TypeError):
-        report = {}
+    # The serial channel also carries GTK/AT-SPI stderr. Preserve warnings in
+    # evidence, but parse the probe's JSON line rather than the whole stream.
+    reports = []
+    for line in result.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(item, dict) and 'ready' in item:
+            reports.append(item)
+    report = reports[0] if len(reports) == 1 else {}
     ready = (result.returncode == 0 and isinstance(report, dict) and report.get('ready') is True and
              report.get('expected_prompt') == prompt and report.get('expected_text') == text)
     if not ready and check:
@@ -68,9 +75,15 @@ test -n "$pid"
 test -S "/run/user/$uid/bus"
 # QMP typing is physical US input. Fail rather than silently changing the
 # Live keyboard whose regional propagation is verified independently.
-sources=$(runuser -u live -- env XDG_RUNTIME_DIR="/run/user/$uid" \
-    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
-    gsettings get org.gnome.desktop.input-sources sources)
+# Shell can exist before its first-login regional initialization has populated
+# input sources. Wait only for that empty startup state; never rewrite it or
+# tolerate a populated, incorrect layout.
+for attempt in $(seq 1 30); do
+    sources=$(runuser -u live -- env XDG_RUNTIME_DIR="/run/user/$uid" \
+        DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
+        gsettings get org.gnome.desktop.input-sources sources)
+    case "$sources" in '@a(ss) []'|'[]') sleep 1 ;; *) break ;; esac
+done
 printf 'shell-pid=%s\ninput-sources=%s\n' "$pid" "$sources"
 # Chinese Live also carries libpinyin; require the initial US source rather
 # than incorrectly rejecting additional, legitimate input methods.

@@ -117,16 +117,27 @@ class SerialConsole:
         while time.monotonic() < deadline:
             try:
                 result = self.run("true", timeout=min(10.0, deadline - time.monotonic()))
+                if result.returncode == 0:
+                    # Early interactive Bash/TTY setup can lose the command
+                    # immediately following the first successful probe. Both
+                    # handshake commands are idempotent; retry initialization
+                    # within the same deadline, never arbitrary guest actions.
+                    remaining = deadline - time.monotonic()
+                    if remaining <= 0:
+                        break
+                    self.run(
+                        "stty -echo -onlcr < /dev/tty; export LANG=C LC_ALL=C",
+                        timeout=min(10.0, remaining),
+                    )
+                    return
             except ProtocolError:
+                # A truncated probe can leave Bash at a continuation prompt.
+                # Linux and the debug shell were proven above, so Ctrl-C is
+                # now safe; never send this while firmware/GRUB owns the UART.
+                self._send(b"\x03")
                 self._buffer.clear()
                 time.sleep(0.5)
                 continue
-            if result.returncode == 0:
-                self.run(
-                    "stty -echo -onlcr < /dev/tty; export LANG=C LC_ALL=C",
-                    timeout=10,
-                )
-                return
         raise ProtocolError("Timed out waiting for the systemd debug shell")
 
     def _wait_for_kernel_console(self, deadline: float) -> None:
@@ -270,6 +281,11 @@ class SerialConsole:
         end = f"__ANDUINOS_END_{token}__"
         payload = base64.b64encode(script.encode("utf-8")).decode("ascii")
         command = (
+            # This is a machine protocol, not an interactive line editor.
+            # Bash readline can restore/flush terminal input after printing
+            # our end marker, losing the next command. Disable it in the
+            # outer shell (doing so in the decoded child has no effect).
+            "set +o emacs; set +o vi; "
             f"printf '{start}\\n'; "
             f"printf '%s' '{payload}' | base64 -d | /bin/bash; "
             f"rc=$?; printf '\\n{end}:%s\\n' \"$rc\"\r\n"
@@ -544,7 +560,12 @@ class SerialConsole:
                 )
                 if not writable:
                     continue
-                sent = self._socket.send(remaining)
+                # A writable host socket does not mean the guest's emulated
+                # UART/TTY has consumed a whole multi-kilobyte command. Pace
+                # input below 115200 baud to avoid truncating quoted payloads
+                # under boot load. This is transport flow control, not a
+                # retry of a possibly destructive guest command.
+                sent = self._socket.send(remaining[:64])
             except BlockingIOError:
                 continue
             except OSError as error:
@@ -554,6 +575,8 @@ class SerialConsole:
             if sent <= 0:
                 raise ProtocolError("Serial socket closed while writing")
             remaining = remaining[sent:]
+            if remaining:
+                time.sleep(0.006)
 
     def _read_until(self, pattern: re.Pattern[bytes], timeout: float) -> bytes:
         if self._socket is None:

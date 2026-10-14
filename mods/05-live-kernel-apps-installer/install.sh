@@ -9,8 +9,15 @@ wait_network
 # Complete kernel configuration, depmod, and triggers before initrd consumers.
 # The core metapackage selects the kernel for the target suite and architecture.
 print_ok "Installing the AnduinOS core system and kernel..."
+boot_packages=()
+if [ "$TARGET_ARCH" = amd64 ]; then
+    # Select the installed-system boot stack during rootfs assembly. The ISO
+    # builder obtains its separate official signed CD GRUB outside this root.
+    boot_packages+=(anduinos-grub anduinos-shim-signed)
+fi
 apt install -y \
     anduinos-core-system \
+    "${boot_packages[@]}" \
     dracut \
     dracut-core \
     dracut-install \

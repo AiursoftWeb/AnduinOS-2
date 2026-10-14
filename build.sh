@@ -473,21 +473,8 @@ EOF
             mcopy -i efiboot.img arm64-grub.cfg ::/EFI/BOOT/grub.cfg
             rm -f BOOTAA64.CSV arm64-grub.cfg
         else
-            mkdir efi boot
-            sudo mount efiboot.img efi
-            if ! sudo grub-install \
-                --target="$GRUB_EFI_TARGET" \
-                --efi-directory=efi \
-                --boot-directory=boot \
-                --uefi-secure-boot \
-                --removable \
-                --no-nvram; then
-                sudo umount efi
-                print_error "grub-install failed!"
-                exit 1
-            fi
-            sudo umount efi
-            rm -rf efi
+            bash "$SCRIPT_DIR/build-tools/prepare-amd64-live-efi.sh" \
+                efiboot.img "$SCRIPT_DIR/new_building_os" "$LIVE_MEDIA_LABEL"
         fi
     )
     judge "Create EFI boot image"

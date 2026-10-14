@@ -14,7 +14,7 @@ from PIL import Image
 from framework.dashboard import AcceptanceDashboard
 from framework.errors import TestFailure
 from framework.feature_model import FeatureSuiteRegistry
-from framework.model import Architecture, TestMatrix
+from framework.model import Architecture, Firmware, TestMatrix
 from framework.usb_iso import rewrite_config, assert_preserved_arguments
 from business.acceptance import _parser, main
 from business.install import scenario_check_ids
@@ -118,8 +118,10 @@ class RufusIsoModeTests(unittest.TestCase):
         self.assertTrue(all(case.state == 'passed' for case in dashboards[0].cases.values()))
 
     def test_usb_workflows_report_case_suite_and_real_check_levels(self):
+        configurations = []
         class FakeVm:
             def __init__(self, config):
+                configurations.append(config)
                 self.config = config
                 self.qmp = object()
                 self.serial = SimpleNamespace(
@@ -172,6 +174,9 @@ class RufusIsoModeTests(unittest.TestCase):
             summary = json.loads((root / 'run-live-usb' / 'summary.json').read_text())
             junit = ET.parse(root / 'run-live-usb' / 'junit.xml').getroot()
         self.assertTrue(passed)
+        self.assertEqual(len(configurations), 3)
+        self.assertTrue(all(config.firmware is Firmware.UEFI_SECURE_BOOT
+                            for config in configurations))
         self.assertEqual(2, summary['schema_version'])
         self.assertEqual([USB_CASE_ID], [item['id'] for item in summary['results']])
         self.assertEqual(list(suites), [item['id'] for item in summary['results'][0]['suites']])

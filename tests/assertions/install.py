@@ -819,10 +819,23 @@ def _assert_boot_packages(
         if architecture is Architecture.AMD64
         else "grub-efi-arm64-bin grub-efi-arm64-signed shim-signed"
     )
+    own_stack_check = ""
+    if architecture is Architecture.AMD64:
+        own_stack_check = (
+            "boot_packages='anduinos-grub anduinos-shim-signed'\n"
+            "for old in grub-common grub2-common grub-pc grub-pc-bin grub-efi-amd64 grub-efi-amd64-bin grub-efi-amd64-unsigned grub-efi-amd64-signed shim-signed; do\n"
+            "  state=$(dpkg-query -W -f='${db:Status-Status}' \"$old\" 2>/dev/null || true)\n"
+            "  test \"$state\" != installed\n"
+            "done\n"
+            "test ! -e /usr/lib/anduinos-grub/live\n"
+            "test ! -e /usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed\n"
+        )
     _record(
         console,
         "set -e\n"
-        f"for package in anduinos-core-system dracut dracut-core dracut-install grub2-common {architecture_packages}; do\n"
+        f"boot_packages='grub2-common {architecture_packages}'\n"
+        + own_stack_check +
+        "for package in anduinos-core-system dracut dracut-core dracut-install $boot_packages; do\n"
         "  dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\\n' \"$package\" | grep '^ii '\n"
         "done\n"
         "if ! dpkg-query -W -f='${db:Status-Abbrev}' grub-common 2>/dev/null | grep -q '^ii '; then\n"

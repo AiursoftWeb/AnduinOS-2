@@ -111,12 +111,17 @@ class LiveNotificationTests(unittest.TestCase):
     def test_us_keyboard_allows_chinese_input_method_without_changing_sources(self):
         console, _qmp = self.exercise(quiet_report())
         script = console.run.call_args_list[0].args[0]
+        self.assertIn('for attempt in $(seq 1 30)', script)
+        self.assertIn("'@a(ss) []'|'[]') sleep 1", script)
+        self.assertNotIn('gsettings set', script)
         guard = next(line for line in script.splitlines() if line.startswith('[[ "$sources"'))
         for sources, expected in (
             ("[('xkb', 'us')]", 0),
             ("[('xkb', 'us'), ('ibus', 'libpinyin')]", 0),
             ("[('xkb', 'de')]", 1),
             ("[('ibus', 'libpinyin'), ('xkb', 'us')]", 1),
+            ("@a(ss) []", 1),
+            ("[]", 1),
         ):
             with self.subTest(sources=sources):
                 result = subprocess.run(
@@ -193,6 +198,21 @@ class LiveNotificationTests(unittest.TestCase):
                 console = Mock()
                 console.run.return_value = CommandResult(output, 0)
                 self.assertFalse(_wait_shell_prompt(console, Path(directory), 'looking-glass', check=False))
+
+    def test_prompt_report_allows_stderr_warnings_but_not_ambiguous_reports(self):
+        report = json.dumps(dict(ready=True, expected_prompt='run-dialog', expected_text='lg'))
+        for output, rc, expected in (
+            ('dbind-WARNING: cache not ready\n' + report + '\n', 0, True),
+            (report + '\nwarning after report\n', 0, True),
+            (report + '\n' + report, 0, False),
+            ('warning only', 0, False),
+            (report, 1, False),
+        ):
+            with self.subTest(output=output, rc=rc), tempfile.TemporaryDirectory() as directory:
+                console = Mock()
+                console.run.return_value = CommandResult(output, rc)
+                self.assertEqual(expected, _wait_shell_prompt(
+                    console, Path(directory), 'run-dialog', 'lg', check=False))
 
     def test_observer_timeout_is_not_a_quiet_pass(self):
         with self.assertRaisesRegex(TestFailure, 'never completed'):

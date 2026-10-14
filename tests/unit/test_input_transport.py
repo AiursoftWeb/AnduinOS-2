@@ -933,6 +933,8 @@ class SerialTransportTests(unittest.TestCase):
                     command = bytearray()
                     while not command.endswith(b"\n"):
                         command.extend(writer.recv(65536))
+                    if not command.startswith(b"set +o emacs; set +o vi; "):
+                        raise AssertionError("outer-shell line editing must be disabled")
                     token = re.search(
                         rb"__ANDUINOS_BEGIN_([0-9a-f]+)__",
                         bytes(command),
@@ -980,6 +982,19 @@ class SerialTransportTests(unittest.TestCase):
             finally:
                 console.close()
                 writer.close()
+
+    def test_wait_for_shell_retries_lost_terminal_initialization(self):
+        console = SerialConsole(Path("unused"), Path("unused"), timeout=2)
+        console._kernel_console_ready = console._debug_shell_ready = True
+        with patch.object(console, "run", side_effect=[
+            CommandResult("", 0), ProtocolError("lost terminal setup"),
+            CommandResult("", 0), CommandResult("", 0),
+        ]) as run, patch.object(console, "_send") as send, patch("framework.serial.time.sleep"):
+            console.wait_for_shell(timeout=2)
+        send.assert_called_once_with(b"\x03")
+        scripts = [call.args[0] for call in run.call_args_list]
+        self.assertEqual(["true", scripts[1], "true", scripts[1]], scripts)
+        self.assertIn("stty -echo -onlcr", scripts[1])
 
     def test_wait_for_shell_probes_only_after_kernel_console_marker(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -1188,7 +1203,12 @@ class SerialTransportTests(unittest.TestCase):
         console = SerialConsole(Path("unused"), Path("unused"), timeout=10)
         console._socket = left
         try:
-            console._send(payload)
+            # Exercise socket backpressure without spending minutes at the
+            # real guest UART rate in this in-memory transport unit test.
+            with patch("framework.serial.time.sleep") as pause:
+                console._send(payload)
+            self.assertGreater(pause.call_count, 0)
+            self.assertTrue(all(call.args == (0.006,) for call in pause.call_args_list))
             left.shutdown(socket.SHUT_WR)
             thread.join(timeout=10)
         finally:
