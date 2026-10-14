@@ -27,6 +27,25 @@ summary explicitly mark it as a partial regression, **not a release verdict**.
 Unknown or architecture-incompatible IDs fail; `--case` cannot be combined with
 `--live-usb-only`. Plain `make test` continues to run the full release matrix.
 
+For the offline Secure Boot first-install regression:
+
+```bash
+make test TEST_ARGS="--case uefi-sb-offline-btrfs --no-tui"
+```
+
+The existing installer/MokManager workflow enters `123456`, enrolls the fresh
+certificate and boots the installed system with Secure Boot enabled and the
+NIC disconnected. `secure-boot.first-boot-green` checks the unified certificate
+purpose, matching protected private key, default DKMS signing configuration,
+enrollment and driver trust. It then opens the real Driver Center as the logged-in
+user and requires all five healthy row states, the `Trusted` summary and no
+repair/enrollment/Use action. No repair is performed by this check. No installed
+third-party modules is a valid healthy state; DKMS itself need not be installed.
+The check also runs in both online Secure Boot cases. Public status evidence,
+the accessibility tree, application log and a screenshot are retained; private
+keys are never copied into these artifacts. This is a semantic UI assertion,
+not a pixel-color test.
+
 ## Layout
 
 ```text

@@ -4,6 +4,43 @@ from .context import *  # noqa: F403
 
 
 class BootChecks:
+    def _assert_secure_boot_first_boot(
+        self, vm: QemuVm, scenario: Scenario, artifacts: Path,
+    ) -> None:
+        """Inspect trust and the real frontend without invoking any repair."""
+        assert vm.serial is not None
+        remote = "/run/anduinos-acceptance-secure-boot"
+        vm.serial.run(f"install -d -m 0777 {remote}/evidence")
+        self.driver.upload(vm.serial, remote)
+        try:
+            result = vm.serial.run(
+                f"python3 {remote}/ui/secure_boot.py",
+                timeout=120, check=False,
+            )
+            (artifacts / "secure-boot-first-boot.txt").write_text(
+                result.stdout + "\n", encoding="utf-8"
+            )
+            if result.returncode:
+                raise TestFailure("First-boot signing readiness failed:\n" + result.stdout[-8000:])
+            result = vm.serial.run(
+                _desktop_command(self.defaults.username, (
+                    "python3", f"{remote}/atspi_driver.py", "secure-boot-green",
+                    "--evidence", f"{remote}/evidence",
+                )), timeout=180, check=False,
+            )
+            with (artifacts / "atspi-events.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(result.stdout + "\n")
+            if result.returncode or not any(
+                line.startswith('{"event": "secure-boot-green"')
+                for line in result.stdout.splitlines()
+            ):
+                raise TestFailure("Driver Center is not healthy on first boot:\n" + result.stdout[-8000:])
+            self._check_note(scenario, "secure-boot.first-boot-green",
+                             "Unified MOK enrolled; signing defaults ready; five healthy UI rows, no repair needed")
+        finally:
+            vm.screenshot("secure-boot-first-boot")
+            _retrieve_tree(vm.serial, remote, artifacts / "guest-secure-boot-evidence")
+
     def _assert_uefi_boot_registration(
         self,
         vm: QemuVm,

@@ -8,6 +8,7 @@ from .installer import *  # noqa: F403
 from .rescue import *  # noqa: F403
 from .session import *  # noqa: F403
 from .shell import *  # noqa: F403
+from .secure_boot import verify_secure_boot_green
 
 
 def main() -> int:
@@ -70,6 +71,7 @@ def main() -> int:
             "public-ghex-install",
             "public-wechat-tray",
             "swapcontrol-green",
+            "secure-boot-green",
         ),
     )
     parser.add_argument("--config", type=Path)
@@ -85,7 +87,9 @@ def main() -> int:
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
-        if args.mode == "install":
+        if args.mode == "secure-boot-green":
+            verify_secure_boot_green(args.evidence)
+        elif args.mode == "install":
             if args.config is None:
                 raise UiFailure("Installer mode requires --config")
             install(json.loads(args.config.read_text(encoding="utf-8")), args.evidence)

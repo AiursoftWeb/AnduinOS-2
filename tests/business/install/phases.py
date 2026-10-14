@@ -508,6 +508,9 @@ fi
         with self._check(scenario, "theme.cursor-user-session"):
             vm.screenshot("installed-desktop")
             self._assert_desktop_session(vm, scenario, artifacts)
+        if scenario.mok_enrollment:
+            with self._check(scenario, "secure-boot.first-boot-green"):
+                self._assert_secure_boot_first_boot(vm, scenario, artifacts)
         desktop_action_cursors = (
             self._capture_journal_cursors(vm)
             if scenario.desktop_contracts
