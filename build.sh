@@ -445,37 +445,11 @@ EOF
         dd if=/dev/zero of=efiboot.img bs=1M count=10
         mkfs.vfat efiboot.img
 
-        if [ "$TARGET_ARCH" = arm64 ]; then
-            target_root="$SCRIPT_DIR/new_building_os"
-            arm64_shim="$target_root/usr/lib/shim/shimaa64.efi.signed.latest"
-            arm64_grub="$target_root/usr/lib/grub/arm64-efi-signed/gcdaa64.efi.signed"
-            arm64_mok="$target_root/usr/lib/shim/mmaa64.efi"
-
-            # The signed Canonical config-delivery GRUB image already embeds
-            # FAT, ISO9660, GPT, search and configfile support. Build the
-            # removable-media ESP directly from the completed ARM64 target;
-            # this avoids installing a foreign shim package that conflicts
-            # with an amd64 build host's own bootloader.
-            cat > arm64-grub.cfg <<EOF
-search --no-floppy --label --set=anduinos_iso $LIVE_MEDIA_LABEL
-set prefix=(\$anduinos_iso)/boot/grub
-configfile \$prefix/grub.cfg
-EOF
-            printf 'shimaa64.efi,%s,,This is the boot entry for %s\n' \
-                "$TARGET_BUSINESS_NAME" "$TARGET_BUSINESS_NAME" \
-                | iconv -f UTF-8 -t UTF-16LE > BOOTAA64.CSV
-
-            mmd -i efiboot.img ::/EFI ::/EFI/BOOT
-            mcopy -i efiboot.img "$arm64_shim" ::/EFI/BOOT/BOOTAA64.EFI
-            mcopy -i efiboot.img "$arm64_grub" ::/EFI/BOOT/grubaa64.efi
-            mcopy -i efiboot.img "$arm64_mok" ::/EFI/BOOT/mmaa64.efi
-            mcopy -i efiboot.img BOOTAA64.CSV ::/EFI/BOOT/BOOTAA64.CSV
-            mcopy -i efiboot.img arm64-grub.cfg ::/EFI/BOOT/grub.cfg
-            rm -f BOOTAA64.CSV arm64-grub.cfg
-        else
-            bash "$SCRIPT_DIR/build-tools/prepare-amd64-live-efi.sh" \
-                efiboot.img "$SCRIPT_DIR/new_building_os" "$LIVE_MEDIA_LABEL"
-        fi
+        bash "$SCRIPT_DIR/build-tools/prepare-live-efi.sh" \
+            efiboot.img live-efi "$LIVE_MEDIA_LABEL"
+        # These are build inputs, not extra files in the finished ISO.
+        find live-efi -maxdepth 1 -type f -delete
+        rmdir live-efi
     )
     judge "Create EFI boot image"
 
@@ -599,9 +573,12 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     download_base_system
     mount_folders
     setup_apt
+    prepare_iso_directory
+    bash "$SCRIPT_DIR/build-tools/download-live-efi.sh" \
+        "$SCRIPT_DIR/new_building_os" "$SCRIPT_DIR/image/isolinux/live-efi" \
+        "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
     run_chroot
     umount_folders
-    prepare_iso_directory
     prepare_live_grub_font
     prepare_live_grub_theme
     build_iso

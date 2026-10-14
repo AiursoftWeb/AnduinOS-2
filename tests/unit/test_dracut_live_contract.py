@@ -119,6 +119,7 @@ class DracutLiveContractTests(unittest.TestCase):
     def test_arm64_cross_build_uses_target_root_secure_boot_payload(self) -> None:
         makefile = (ROOT / "makefile").read_text()
         build = (ROOT / "build.sh").read_text()
+        download = (ROOT / "build-tools/download-live-efi.sh").read_text()
         arm64_dependencies = makefile.split("DEPS_arm64 :=", 1)[1].split(
             "HOST_ARCH", 1
         )[0]
@@ -127,18 +128,14 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertNotIn("grub-efi-arm64", arm64_dependencies)
         self.assertIn("qemu-user-binfmt", makefile)
         self.assertIn("ifneq ($(HOST_ARCH),$(TARGET_ARCH))", makefile)
-        for payload in (
-            "gcdaa64.efi.signed",
-            "shimaa64.efi.signed.latest",
-            "mmaa64.efi",
-        ):
-            self.assertIn(payload, build)
-        self.assertIn("mmd -i efiboot.img ::/EFI ::/EFI/BOOT", build)
-        self.assertIn("::/EFI/BOOT/BOOTAA64.EFI", build)
-        self.assertIn("::/EFI/BOOT/grubaa64.efi", build)
-        self.assertIn("::/EFI/BOOT/mmaa64.efi", build)
-        self.assertIn("search --no-floppy --label --set=anduinos_iso", build)
-        self.assertIn("configfile \\$prefix/grub.cfg", build)
+        # Both architectures obtain signed loaders from the target's Ubuntu
+        # repositories. Exact exported filenames and FAT contents are exercised
+        # for both architectures in test_live_efi_inputs.
+        self.assertIn('build-tools/download-live-efi.sh', build)
+        self.assertIn('"$TARGET_ARCH" "$TARGET_BUSINESS_NAME"', build)
+        self.assertIn('chroot --userspec="$(id -u):$(id -g)" "$target_root"', download)
+        self.assertIn('Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources', download)
+        self.assertIn('"grub-efi-$2-signed:$2" "shim-signed:$2"', download)
 
     def test_grub_acceptance_contract_covers_temporary_and_persistent_modes(self) -> None:
         common = (
