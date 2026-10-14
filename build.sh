@@ -197,6 +197,60 @@ function prepare_iso_directory() {
     judge "Create image directory"
 }
 
+# Fetch official Live loaders before mods clean APT lists. Download/extract only:
+# Ubuntu boot packages must never replace the installed-system stack in rootfs.
+function download_live_efi() (
+    set -euo pipefail
+    target_root=$(realpath "$1")
+    output=$(realpath -m "$2")
+    target_arch=$3
+    business_name=$4
+    case "$target_arch" in
+        amd64) efi_suffix=x64; grub_platform=x86_64 ;;
+        arm64) efi_suffix=aa64; grub_platform=arm64 ;;
+        *) echo "Unsupported Live EFI architecture: $target_arch" >&2; exit 1 ;;
+    esac
+    scratch=$(mktemp -d "$target_root/tmp/anduinos-live-efi.XXXXXX")
+    trap 'rm -rf -- "$scratch"' EXIT
+
+    # Use only target Ubuntu sources, as the build user rather than root.
+    sudo --preserve-env=HOME chroot --userspec="$(id -u):$(id -g)" "$target_root" /bin/sh -ec '
+        cd "$1"
+        apt-get -o Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources \
+            -o Dir::Etc::sourceparts=- download \
+            "grub-efi-$2-signed:$2" "shim-signed:$2"
+    ' sh "/${scratch#"${target_root%/}/"}" "$target_arch"
+
+    for deb in "$scratch"/*.deb; do
+        dpkg-deb --extract "$deb" "$scratch/payload"
+    done
+    mkdir -p "$output"
+    install -m 0644 "$scratch/payload/usr/lib/grub/$grub_platform-efi-signed/gcd$efi_suffix.efi.signed" "$output/grub$efi_suffix.efi"
+    install -m 0644 "$scratch/payload/usr/lib/shim/shim$efi_suffix.efi.signed.latest" "$output/BOOT${efi_suffix^^}.EFI"
+    install -m 0644 "$scratch/payload/usr/lib/shim/mm$efi_suffix.efi" "$output/mm$efi_suffix.efi"
+    # Preserve the existing ARM64 media registration descriptor.
+    if [ "$target_arch" = arm64 ]; then
+        printf 'shim%s.efi,%s,,This is the boot entry for %s\n' \
+            "$efi_suffix" "$business_name" "$business_name" \
+            | iconv -f UTF-8 -t UTF-16LE > "$output/BOOT${efi_suffix^^}.CSV"
+    fi
+)
+
+# Assemble the removable-media entry without requiring a local MOK or network.
+function prepare_live_efi() (
+    set -euo pipefail
+    image=$(realpath "$1")
+    loaders=$(realpath "$2")
+    media_label=$3
+    scratch=$(mktemp -d)
+    trap 'rm -rf -- "$scratch"' EXIT
+    printf 'search --no-floppy --label --set=anduinos_iso %s\nset prefix=($anduinos_iso)/boot/grub\nconfigfile $prefix/grub.cfg\n' \
+        "$media_label" > "$scratch/grub.cfg"
+    mmd -i "$image" ::/EFI ::/EFI/BOOT
+    mcopy -i "$image" "$loaders"/* ::/EFI/BOOT/
+    mcopy -i "$image" "$scratch/grub.cfg" ::/EFI/BOOT/grub.cfg
+)
+
 function prepare_live_grub_font() {
     print_ok "Generating BIOS Unicode font for the Live ISO..."
     mkdir -p \
@@ -445,8 +499,7 @@ EOF
         dd if=/dev/zero of=efiboot.img bs=1M count=10
         mkfs.vfat efiboot.img
 
-        bash "$SCRIPT_DIR/build-tools/prepare-live-efi.sh" \
-            efiboot.img live-efi "$LIVE_MEDIA_LABEL"
+        prepare_live_efi efiboot.img live-efi "$LIVE_MEDIA_LABEL"
         # These are build inputs, not extra files in the finished ISO.
         find live-efi -maxdepth 1 -type f -delete
         rmdir live-efi
@@ -574,7 +627,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     mount_folders
     setup_apt
     prepare_iso_directory
-    bash "$SCRIPT_DIR/build-tools/download-live-efi.sh" \
+    download_live_efi \
         "$SCRIPT_DIR/new_building_os" "$SCRIPT_DIR/image/isolinux/live-efi" \
         "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
     run_chroot

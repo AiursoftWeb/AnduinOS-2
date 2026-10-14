@@ -119,7 +119,6 @@ class DracutLiveContractTests(unittest.TestCase):
     def test_arm64_cross_build_uses_target_root_secure_boot_payload(self) -> None:
         makefile = (ROOT / "makefile").read_text()
         build = (ROOT / "build.sh").read_text()
-        download = (ROOT / "build-tools/download-live-efi.sh").read_text()
         arm64_dependencies = makefile.split("DEPS_arm64 :=", 1)[1].split(
             "HOST_ARCH", 1
         )[0]
@@ -131,11 +130,11 @@ class DracutLiveContractTests(unittest.TestCase):
         # Both architectures obtain signed loaders from the target's Ubuntu
         # repositories. Exact exported filenames and FAT contents are exercised
         # for both architectures in test_live_efi_inputs.
-        self.assertIn('build-tools/download-live-efi.sh', build)
+        self.assertIn('function download_live_efi()', build)
         self.assertIn('"$TARGET_ARCH" "$TARGET_BUSINESS_NAME"', build)
-        self.assertIn('chroot --userspec="$(id -u):$(id -g)" "$target_root"', download)
-        self.assertIn('Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources', download)
-        self.assertIn('"grub-efi-$2-signed:$2" "shim-signed:$2"', download)
+        self.assertIn('chroot --userspec="$(id -u):$(id -g)" "$target_root"', build)
+        self.assertIn('Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources', build)
+        self.assertIn('"grub-efi-$2-signed:$2" "shim-signed:$2"', build)
 
     def test_grub_acceptance_contract_covers_temporary_and_persistent_modes(self) -> None:
         common = (

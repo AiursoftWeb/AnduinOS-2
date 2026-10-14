@@ -47,8 +47,7 @@ class RufusIsoModeTests(unittest.TestCase):
         self.assertIn('LIVE_MEDIA_LABEL="AOS_LIVE"', build)
         self.assertNotIn('CDLABEL=$TARGET_NAME', build)
         self.assertEqual(build.count('-volid "$LIVE_MEDIA_LABEL"'), 2)
-        efi = (Path(__file__).resolve().parents[2] / 'build-tools/prepare-live-efi.sh').read_text()
-        self.assertIn('search --no-floppy --label --set=anduinos_iso %s', efi)
+        self.assertIn('search --no-floppy --label --set=anduinos_iso %s', build)
         self.assertIn('efiboot.img live-efi "$LIVE_MEDIA_LABEL"', build)
         for label in ('AOS_LIVE', 'CUSTOM_USB'):
             before = self.config('AOS_LIVE')

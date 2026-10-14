@@ -9,7 +9,6 @@ import unittest
 
 
 ROOT = Path(__file__).resolve().parents[2]
-TOOLS = ROOT / "build-tools"
 LOADERS = {
     "amd64": ("BOOTX64.EFI", "grubx64.efi", "mmx64.efi"),
     "arm64": ("BOOTAA64.EFI", "grubaa64.efi", "mmaa64.efi", "BOOTAA64.CSV"),
@@ -69,10 +68,19 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
         subprocess.run(["dpkg-deb", "--build", "--root-owner-group", str(self.payload),
                         str(self.work / "fixture.deb")], check=True, capture_output=True)
 
-    def download(self, arch="amd64"):
-        return subprocess.run(["bash", str(TOOLS / "download-live-efi.sh"),
-                               str(self.target), str(self.output / arch), arch, "AnduinOS 测试"], env=self.env,
+    def run_function(self, name, *args):
+        # Load only the function under test, not build.sh's host configuration
+        # or destructive main build pipeline.
+        source = (ROOT / "build.sh").read_text()
+        marker = f"function {name}()"
+        function = marker + source.split(marker, 1)[1].split("\nfunction ", 1)[0]
+        return subprocess.run(["bash", "-c", function + f'\n{name} "$@"',
+                               "test-live-efi", *map(str, args)], env=self.env,
                               capture_output=True, text=True)
+
+    def download(self, arch="amd64"):
+        return self.run_function("download_live_efi", self.target,
+                                 self.output / arch, arch, "AnduinOS 测试")
 
     def test_only_target_ubuntu_candidates_are_downloaded_and_exported(self):
         for arch, loaders in LOADERS.items():
@@ -120,9 +128,9 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
                 with image.open("wb") as stream:
                     stream.truncate(10 * 1024 * 1024)
                 subprocess.run(["mkfs.vfat", str(image)], check=True, capture_output=True)
-                subprocess.run(["bash", str(TOOLS / "prepare-live-efi.sh"),
-                                str(image), str(self.output / arch), "AOS_LIVE"],
-                               env=self.env, check=True, capture_output=True)
+                result = self.run_function("prepare_live_efi", image,
+                                           self.output / arch, "AOS_LIVE")
+                self.assertEqual(result.returncode, 0, result.stderr)
                 for name in loaders:
                     result = subprocess.check_output(["mtype", "-i", str(image), f"::/EFI/BOOT/{name}"])
                     self.assertEqual(result, (self.output / arch / name).read_bytes())
@@ -136,9 +144,9 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
     def test_build_downloads_before_apt_cleanup_and_removes_staging(self):
         source = (ROOT / "build.sh").read_text()
         main = source.split('# =============   main  ================', 1)[1]
-        self.assertLess(main.index("setup_apt"), main.index("download-live-efi.sh"))
-        self.assertLess(main.index("prepare_iso_directory"), main.index("download-live-efi.sh"))
-        self.assertLess(main.index("download-live-efi.sh"), main.index("run_chroot"))
+        self.assertLess(main.index("setup_apt"), main.index("download_live_efi"))
+        self.assertLess(main.index("prepare_iso_directory"), main.index("download_live_efi"))
+        self.assertLess(main.index("download_live_efi"), main.index("run_chroot"))
         self.assertEqual(main.count("prepare_iso_directory"), 1)
         self.assertNotIn('if [ "$TARGET_ARCH"', main)
         self.assertIn('"$TARGET_ARCH" "$TARGET_BUSINESS_NAME"', main)
