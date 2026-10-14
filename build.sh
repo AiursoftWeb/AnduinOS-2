@@ -666,6 +666,31 @@ function umount_on_exit() {
     judge "Unmount filesystems before exit"
 }
 
+# Business call tree (in execution order; shell commands and logging omitted):
+# main
+# ├── bind_signal
+# │   └── umount_on_exit [registered EXIT callback, runs on exit]
+# ├── clean
+# ├── prepare_iso_directory
+# ├── run_chroot_anduinos -> image/LiveOS payload + GRUB font/theme
+# │   ├── download_base_system
+# │   │   └── bootstrap_ubuntu_root -> new_building_os/
+# │   ├── mount_folders
+# │   ├── setup_apt
+# │   │   └── configure_ubuntu_sources
+# │   ├── apply_anduinos_mods
+# │   │   └── /root/mods/install_all_mods.sh [inside AnduinOS chroot]
+# │   ├── umount_folders
+# │   ├── prepare_live_grub_font
+# │   ├── prepare_live_grub_theme
+# │   └── export_anduinos_payload -> squashfs, kernel, initrd, manifest, size
+# ├── run_chroot_ubuntu -> image/isolinux/live-efi/ official signed bootloaders
+# │   ├── bootstrap_ubuntu_root -> official_ubuntu_os/
+# │   ├── configure_ubuntu_sources
+# │   └── download_live_efi
+# └── build_iso -> dist/*.iso + *.sha256
+#     ├── generate_live_grub_config
+#     └── prepare_live_efi -> efiboot.img
 # =============   main  ================
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cd "$SCRIPT_DIR"
