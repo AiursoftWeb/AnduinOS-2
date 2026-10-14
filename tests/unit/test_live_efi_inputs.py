@@ -74,13 +74,36 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
         source = (ROOT / "build.sh").read_text()
         marker = f"function {name}()"
         function = marker + source.split(marker, 1)[1].split("\nfunction ", 1)[0]
-        return subprocess.run(["bash", "-c", function + f'\n{name} "$@"',
+        return subprocess.run(["bash", "-euo", "pipefail", "-c", function + f'\n{name} "$@"',
                                "test-live-efi", *map(str, args)], env=self.env,
                               capture_output=True, text=True)
 
     def download(self, arch="amd64"):
         return self.run_function("download_live_efi", self.target,
                                  self.output / arch, arch, "AnduinOS 测试")
+
+    def test_business_step_supplies_paths_and_propagates_failure(self):
+        self.env.update(SCRIPT_DIR=str(self.work / "build root"),
+                        TARGET_BUSINESS_NAME="AnduinOS 测试")
+        self.executable("print_ok", "#!/bin/sh\nexit 0\n")
+        self.executable("judge", "#!/bin/sh\nexit 0\n")
+        self.executable("download_live_efi", '''#!/usr/bin/python3
+import os, pathlib, sys
+pathlib.Path(os.environ["TEST_WORK"], "step-arguments").write_text("\\n".join(sys.argv[1:]))
+raise SystemExit(23 if os.environ.get("FAIL_DOWNLOAD") else 0)
+''')
+        for arch in LOADERS:
+            with self.subTest(architecture=arch):
+                self.env["TARGET_ARCH"] = arch
+                result = self.run_function("download_official_live_bootloaders")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual((self.work / "step-arguments").read_text().splitlines(), [
+                    str(self.work / "build root/new_building_os"),
+                    str(self.work / "build root/image/isolinux/live-efi"),
+                    arch, "AnduinOS 测试",
+                ])
+        self.env["FAIL_DOWNLOAD"] = "1"
+        self.assertEqual(self.run_function("download_official_live_bootloaders").returncode, 23)
 
     def test_only_target_ubuntu_candidates_are_downloaded_and_exported(self):
         for arch, loaders in LOADERS.items():
@@ -144,12 +167,15 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
     def test_build_downloads_before_apt_cleanup_and_removes_staging(self):
         source = (ROOT / "build.sh").read_text()
         main = source.split('# =============   main  ================', 1)[1]
-        self.assertLess(main.index("setup_apt"), main.index("download_live_efi"))
-        self.assertLess(main.index("prepare_iso_directory"), main.index("download_live_efi"))
-        self.assertLess(main.index("download_live_efi"), main.index("run_chroot"))
+        step = "download_official_live_bootloaders"
+        self.assertLess(main.index("setup_apt"), main.index(step))
+        self.assertLess(main.index("prepare_iso_directory"), main.index(step))
+        self.assertLess(main.index(step), main.index("run_chroot"))
         self.assertEqual(main.count("prepare_iso_directory"), 1)
         self.assertNotIn('if [ "$TARGET_ARCH"', main)
-        self.assertIn('"$TARGET_ARCH" "$TARGET_BUSINESS_NAME"', main)
+        self.assertIn(f"\n    {step}\n", main)
+        self.assertNotIn("download_live_efi", main)
+        self.assertNotIn("image/isolinux/live-efi", main)
         self.assertNotIn("arm64_grub=", source)
         self.assertIn("find live-efi -maxdepth 1 -type f -delete", source)
         self.assertIn("rmdir live-efi", source)

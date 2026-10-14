@@ -158,38 +158,6 @@ EOF
     judge "Upgrade base system"
 }
 
-function run_chroot() {
-    print_ok "Running install_all_mods.sh in new_building_os..."
-    print_warn "============================================"
-    print_warn "   The following will run in chroot ENV!"
-    print_warn "============================================"
-    sudo chroot new_building_os /usr/bin/env DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-readline} /root/mods/install_all_mods.sh -
-    print_warn "============================================"
-    print_warn "   chroot ENV execution completed!"
-    print_warn "============================================"
-    judge "Run install_all_mods.sh in new_building_os"
-
-    print_ok "Sleeping for 5 seconds to allow chroot to exit cleanly..."
-    sleep 5
-}
-
-function umount_folders() {
-    print_ok "Cleaning mods from chroot /root/mods..."
-    sudo rm -rf new_building_os/root/mods
-    judge "Clean up chroot /root/mods"
-
-    print_ok "Unmounting /proc /sys /dev/pts within chroot..."
-    sudo chroot new_building_os umount /dev/pts || sudo chroot new_building_os umount -lf /dev/pts
-    sudo chroot new_building_os umount /sys || sudo chroot new_building_os umount -lf /sys
-    sudo chroot new_building_os umount /proc || sudo chroot new_building_os umount -lf /proc
-    judge "Unmount /proc /sys /dev/pts"
-
-    print_ok "Unmounting /dev /run outside of chroot..."
-    sudo umount new_building_os/dev || sudo umount -lf new_building_os/dev
-    sudo umount new_building_os/run || sudo umount -lf new_building_os/run
-    judge "Unmount /dev /run"
-}
-
 function prepare_iso_directory() {
     print_ok "Creating image directory..."
     sudo rm -rf image
@@ -199,6 +167,14 @@ function prepare_iso_directory() {
 
 # Fetch official Live loaders before mods clean APT lists. Download/extract only:
 # Ubuntu boot packages must never replace the installed-system stack in rootfs.
+function download_official_live_bootloaders() {
+    print_ok "Downloading official Ubuntu bootloaders for the Live ISO..."
+    download_live_efi \
+        "$SCRIPT_DIR/new_building_os" "$SCRIPT_DIR/image/isolinux/live-efi" \
+        "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
+    judge "Download official Live bootloaders"
+}
+
 function download_live_efi() (
     set -euo pipefail
     target_root=$(realpath "$1")
@@ -236,20 +212,37 @@ function download_live_efi() (
     fi
 )
 
-# Assemble the removable-media entry without requiring a local MOK or network.
-function prepare_live_efi() (
-    set -euo pipefail
-    image=$(realpath "$1")
-    loaders=$(realpath "$2")
-    media_label=$3
-    scratch=$(mktemp -d)
-    trap 'rm -rf -- "$scratch"' EXIT
-    printf 'search --no-floppy --label --set=anduinos_iso %s\nset prefix=($anduinos_iso)/boot/grub\nconfigfile $prefix/grub.cfg\n' \
-        "$media_label" > "$scratch/grub.cfg"
-    mmd -i "$image" ::/EFI ::/EFI/BOOT
-    mcopy -i "$image" "$loaders"/* ::/EFI/BOOT/
-    mcopy -i "$image" "$scratch/grub.cfg" ::/EFI/BOOT/grub.cfg
-)
+function run_chroot() {
+    print_ok "Running install_all_mods.sh in new_building_os..."
+    print_warn "============================================"
+    print_warn "   The following will run in chroot ENV!"
+    print_warn "============================================"
+    sudo chroot new_building_os /usr/bin/env DEBIAN_FRONTEND=${DEBIAN_FRONTEND:-readline} /root/mods/install_all_mods.sh -
+    print_warn "============================================"
+    print_warn "   chroot ENV execution completed!"
+    print_warn "============================================"
+    judge "Run install_all_mods.sh in new_building_os"
+
+    print_ok "Sleeping for 5 seconds to allow chroot to exit cleanly..."
+    sleep 5
+}
+
+function umount_folders() {
+    print_ok "Cleaning mods from chroot /root/mods..."
+    sudo rm -rf new_building_os/root/mods
+    judge "Clean up chroot /root/mods"
+
+    print_ok "Unmounting /proc /sys /dev/pts within chroot..."
+    sudo chroot new_building_os umount /dev/pts || sudo chroot new_building_os umount -lf /dev/pts
+    sudo chroot new_building_os umount /sys || sudo chroot new_building_os umount -lf /sys
+    sudo chroot new_building_os umount /proc || sudo chroot new_building_os umount -lf /proc
+    judge "Unmount /proc /sys /dev/pts"
+
+    print_ok "Unmounting /dev /run outside of chroot..."
+    sudo umount new_building_os/dev || sudo umount -lf new_building_os/dev
+    sudo umount new_building_os/run || sudo umount -lf new_building_os/run
+    judge "Unmount /dev /run"
+}
 
 function prepare_live_grub_font() {
     print_ok "Generating BIOS Unicode font for the Live ISO..."
@@ -397,6 +390,21 @@ if [ "\$grub_platform" == "efi" ]; then
 fi
 EOF
 }
+
+# Assemble the removable-media entry without requiring a local MOK or network.
+function prepare_live_efi() (
+    set -euo pipefail
+    image=$(realpath "$1")
+    loaders=$(realpath "$2")
+    media_label=$3
+    scratch=$(mktemp -d)
+    trap 'rm -rf -- "$scratch"' EXIT
+    printf 'search --no-floppy --label --set=anduinos_iso %s\nset prefix=($anduinos_iso)/boot/grub\nconfigfile $prefix/grub.cfg\n' \
+        "$media_label" > "$scratch/grub.cfg"
+    mmd -i "$image" ::/EFI ::/EFI/BOOT
+    mcopy -i "$image" "$loaders"/* ::/EFI/BOOT/
+    mcopy -i "$image" "$scratch/grub.cfg" ::/EFI/BOOT/grub.cfg
+)
 
 function build_iso() {
     print_ok "Building ISO image..."
@@ -627,9 +635,7 @@ if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     mount_folders
     setup_apt
     prepare_iso_directory
-    download_live_efi \
-        "$SCRIPT_DIR/new_building_os" "$SCRIPT_DIR/image/isolinux/live-efi" \
-        "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
+    download_official_live_bootloaders
     run_chroot
     umount_folders
     prepare_live_grub_font
