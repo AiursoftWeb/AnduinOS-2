@@ -63,7 +63,7 @@ def validate_ui(names, translate=lambda value: value, *, require_bootloader=Fals
 
 def requires_own_bootloader():
     import platform
-    return platform.machine() == "x86_64"
+    return platform.machine() in {"x86_64", "aarch64"}
 
 
 def probe_signing_readiness():

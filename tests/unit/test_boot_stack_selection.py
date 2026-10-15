@@ -11,7 +11,7 @@ from framework.model import Architecture
 
 
 class BootStackSelectionTests(unittest.TestCase):
-    def test_rootfs_selects_own_stack_for_every_amd64_release(self):
+    def test_rootfs_selects_own_stack_for_both_architectures_and_every_release(self):
         source = (Path(__file__).resolve().parents[2]
                   / "mods/05-live-kernel-apps-installer/install.sh").read_text()
         # Execute the actual first APT transaction with harmless shell stubs.
@@ -24,7 +24,7 @@ class BootStackSelectionTests(unittest.TestCase):
                     result = subprocess.run(["bash", "-c", script], check=True,
                                             capture_output=True, text=True)
                     for package in ("anduinos-grub", "anduinos-shim-signed"):
-                        self.assertEqual(package in result.stdout.splitlines(), arch == "amd64")
+                        self.assertIn(package, result.stdout.splitlines())
 
     def test_installed_package_assertion_has_no_release_fallback(self):
         for arch in (Architecture.AMD64, Architecture.ARM64):
@@ -32,11 +32,11 @@ class BootStackSelectionTests(unittest.TestCase):
                 install._assert_boot_packages(None, arch, Path("unused"))
                 script = record.call_args.args[1]
                 self.assertNotIn("VERSION_CODENAME", script)
-                self.assertEqual("boot_packages='anduinos-grub anduinos-shim-signed'" in script,
-                                 arch is Architecture.AMD64)
+                self.assertIn("boot_packages='anduinos-grub anduinos-shim-signed'", script)
+                self.assertIn(f"grub-efi-{arch.value}-signed", script)
 
     def test_first_boot_ui_requires_own_stack_without_reading_release(self):
         for arch in ("x86_64", "aarch64"):
             with (self.subTest(architecture=arch), patch("platform.machine", return_value=arch),
                   patch.object(Path, "read_text", side_effect=AssertionError("No release gate"))):
-                self.assertEqual(requires_own_bootloader(), arch == "x86_64")
+                self.assertTrue(requires_own_bootloader())
