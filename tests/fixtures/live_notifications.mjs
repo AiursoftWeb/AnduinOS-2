@@ -6,7 +6,13 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const output = '/tmp/anduinos-live-notifications.json';
 const started = GLib.get_monotonic_time();
-const report = {complete: false, seconds: 0, notifications: [], error: null};
+const report = {
+    complete: false, seconds: 0, notifications: [], error: null,
+    software_update_check_notice: {
+        title: GLib.dgettext('gnome-software', 'Updates Are Out of Date'),
+        body: GLib.dgettext('gnome-software', 'Please check for available updates'),
+    },
+};
 const connections = [];
 const sources = new Set();
 const notifications = new Set();
@@ -23,6 +29,7 @@ function record(source, notification, phase) {
     report.notifications.push({
         phase,
         source: source.title ?? '',
+        app_id: source._appId ?? source.app?.get_id()?.replace(/\.desktop$/, '') ?? '',
         title: notification.title ?? '',
         body: notification.body ?? '',
         seconds: (GLib.get_monotonic_time() - started) / 1000000,

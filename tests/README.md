@@ -71,8 +71,14 @@ case must exercise that entry's user-visible behavior.
 desktop before opening the installer. QEMU disconnects its NIC before boot.
 The check inventories retained startup notifications and observes new Shell
 MessageTray notifications for at least 10 seconds, recording title/body in
-`live-notifications.json`. It catches Shell extensions' native notifications as
-well as D-Bus app notifications, in any language. A test-only module is loaded
+`live-notifications.json`. The only permitted notice is GNOME Software's
+**Updates Are Out of Date / Please check for available updates** reminder.
+The observer records application identity and resolves the exact title/body
+through the guest's Software translation catalog; other Software notices and
+notifications from other applications or extensions still fail. Permitted
+notices remain in the evidence, and Software's normal update behavior is retained.
+The check covers Shell-native and D-Bus notifications in any language.
+A test-only module is loaded
 through Looking Glass, which immediately closes; it neither clears notifications
 nor disables extensions, changes notification settings, or enables unsafe D-Bus
 Eval. Before each keyboard submission, a read-only AT-SPI probe verifies the
