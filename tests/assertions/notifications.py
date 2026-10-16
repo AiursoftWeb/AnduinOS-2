@@ -54,9 +54,20 @@ def validate_quiet_start(report: object) -> None:
     notifications = report.get('notifications')
     if not isinstance(notifications, list):
         raise TestFailure('Notification inventory is missing')
-    if notifications:
+    # The observer resolves this one message through the guest's Software
+    # catalog, so the exception does not depend on the Live desktop language.
+    allowed = report.get('software_update_check_notice')
+    allowed = allowed if isinstance(allowed, dict) else {}
+    expected = (allowed.get('title'), allowed.get('body'))
+    translated = all(isinstance(value, str) and value for value in expected)
+    unexpected = [notice for notice in notifications if not (
+        translated and isinstance(notice, dict)
+        and notice.get('app_id') == 'org.gnome.Software'
+        and (notice.get('title'), notice.get('body')) == expected
+    )]
+    if unexpected:
         raise TestFailure('Offline Live startup produced notifications: ' + json.dumps(
-            notifications, ensure_ascii=False))
+            unexpected, ensure_ascii=False))
 
 
 def assert_live_notifications_quiet(console, qmp, evidence: Path) -> None:

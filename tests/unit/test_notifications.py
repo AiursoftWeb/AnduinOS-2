@@ -48,11 +48,51 @@ class LiveNotificationTests(unittest.TestCase):
             with self.subTest(phase=phase), self.assertRaisesRegex(TestFailure, 'Dash to Panel'):
                 validate_quiet_start(report)
 
-    def test_notifications_are_not_filtered_by_title_or_language(self):
+    def test_unrecognized_notifications_still_fail_in_other_languages(self):
         report = quiet_report()
         report['notifications'] = [{'title': '更新提醒'}]
         with self.assertRaisesRegex(TestFailure, '更新提醒'):
             validate_quiet_start(report)
+
+    def test_only_software_update_check_reminder_is_allowed_in_each_language(self):
+        for title, body in (
+            ('Updates Are Out of Date', 'Please check for available updates'),
+            ('更新已过期', '请检查可用更新'),
+        ):
+            for phase in ('existing', 'new'):
+                with self.subTest(title=title, phase=phase):
+                    report = quiet_report()
+                    report['software_update_check_notice'] = dict(title=title, body=body)
+                    report['notifications'] = [dict(
+                        app_id='org.gnome.Software', phase=phase, title=title, body=body)]
+                    validate_quiet_start(report)
+
+    def test_software_exception_does_not_hide_other_apps_or_other_messages(self):
+        expected = dict(title='Updates Are Out of Date',
+                        body='Please check for available updates')
+        allowed = dict(app_id='org.gnome.Software', **expected)
+        for change in (
+            dict(app_id='other.application'), dict(app_id=''),
+            dict(title='Critical Updates Ready to Install'),
+            dict(body='An unexpected error occurred'),
+            dict(title=''), dict(body=''),
+        ):
+            with self.subTest(change=change), self.assertRaises(TestFailure):
+                report = quiet_report()
+                report['software_update_check_notice'] = expected
+                report['notifications'] = [allowed, dict(allowed, **change)]
+                validate_quiet_start(report)
+
+    def test_missing_or_invalid_translation_metadata_does_not_allow_notifications(self):
+        for metadata in (None, {}, [], dict(title='', body=''),
+                         dict(title='Updates Are Out of Date', body=None)):
+            with self.subTest(metadata=metadata), self.assertRaises(TestFailure):
+                report = quiet_report()
+                report['software_update_check_notice'] = metadata
+                report['notifications'] = [dict(
+                    app_id='org.gnome.Software', title='Updates Are Out of Date',
+                    body='Please check for available updates')]
+                validate_quiet_start(report)
 
     def test_missing_incomplete_failed_or_short_observer_never_passes(self):
         for report in (None, [], {}, {'complete': False}, {'complete': True},
