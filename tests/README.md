@@ -93,6 +93,12 @@ windows or changing the desktop language; it does not verify English GUI text.
 The `public-ghex` suite verifies a fresh installation of GHex from the configured public Flathub remote, checking commit, origin, desktop entry,
 application version and ArcMenu launch into a real GTK window; it does not test editing.
 External catalog/download failures are reported as failures, not skipped passes.
+
+The AppImage compatibility fixture downloads the current official Type-2 runtime
+for the guest architecture when it is built. It does not pin an upstream digest
+or reuse a runtime from an earlier run. The check verifies the generated
+AppImage format and actual desktop launch; upstream runtime updates do not
+require maintaining a hash in this repository.
 GHex uses an isolated local search; Spotify suites retain the Software provider.
 Plymouth is checked before debug injection and retains failed frames; **BLOCKED** prerequisites prevent release.
 
