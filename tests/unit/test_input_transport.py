@@ -913,11 +913,49 @@ class SerialTransportTests(unittest.TestCase):
         self.assertEqual(0o700, uploaded["mode"])
         self.assertRegex(
             uploaded["destination"],
-            r"^/tmp/anduinos-serial-run-[0-9a-f]+\.sh$",
+            r"^/run/anduinos-serial-run-[0-9a-f]+\.sh$",
         )
         execution = run_inline.call_args_list[0].args[0]
         self.assertIn(f"/bin/bash {uploaded['destination']}", execution)
         self.assertEqual(CommandResult(stdout="complete", returncode=0), result)
+
+    def test_long_script_survives_tmp_mount_during_upload(self):
+        console = SerialConsole(Path("unused"), Path("unused"), timeout=1)
+        script = "printf 'still available\\n'\n" * 100
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "tmp").mkdir()
+            (root / "run").mkdir()
+            mounted = False
+
+            def execute_inline(script, *, timeout=None, check=True):
+                nonlocal mounted
+                # Execute the real upload frames in a disposable guest tree.
+                script = re.sub(
+                    r"/(tmp|run)/anduinos-serial-run-",
+                    lambda match: str(root / match[1] / "anduinos-serial-run-"),
+                    script,
+                )
+                result = subprocess.run(
+                    ["bash", "-c", script], capture_output=True, text=True,
+                    timeout=5,
+                )
+                if not mounted and script.startswith("set -e\nrm -f "):
+                    # Cover the old /tmp after upload creation, before its
+                    # first frame, just as a late tmp.mount does in the VM.
+                    (root / "tmp").rename(root / "covered-tmp")
+                    (root / "tmp").mkdir()
+                    mounted = True
+                if check and result.returncode:
+                    raise TestFailure(result.stderr)
+                return CommandResult(result.stdout, result.returncode)
+
+            with patch.object(console, "_run_inline", side_effect=execute_inline):
+                result = console.run(script)
+            self.assertTrue(mounted)
+            self.assertEqual("still available\n" * 100, result.stdout)
+            self.assertEqual(0, result.returncode)
+            self.assertEqual([], list((root / "run").iterdir()))
 
     def test_run_waits_for_the_complete_return_code_line(self):
         with tempfile.TemporaryDirectory() as directory:
