@@ -346,15 +346,6 @@ expected_home=/home/live
 expected_shell=/bin/bash
 expected_hostname=anduinos
 
-passwd_entry=$(getent passwd "$expected_user" || true)
-account_name=$(printf '%s\n' "$passwd_entry" | cut -d: -f1)
-account_uid=$(printf '%s\n' "$passwd_entry" | cut -d: -f3)
-account_full_name=$(printf '%s\n' "$passwd_entry" | cut -d: -f5)
-account_home=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
-account_shell=$(printf '%s\n' "$passwd_entry" | cut -d: -f7)
-static_hostname=$(cat /etc/hostname 2>/dev/null || true)
-runtime_hostname=$(hostname 2>/dev/null || true)
-
 session_ready=false
 session_pid=
 session_deadline=$((SECONDS + {session_timeout_seconds}))
@@ -368,6 +359,17 @@ while (( SECONDS < session_deadline )); do
     fi
     sleep 1
 done
+
+# Live creates its account during boot. Sample identity after session readiness
+# rather than retaining empty values captured by the early debug shell.
+passwd_entry=$(getent passwd "$expected_user" || true)
+account_name=$(printf '%s\n' "$passwd_entry" | cut -d: -f1)
+account_uid=$(printf '%s\n' "$passwd_entry" | cut -d: -f3)
+account_full_name=$(printf '%s\n' "$passwd_entry" | cut -d: -f5)
+account_home=$(printf '%s\n' "$passwd_entry" | cut -d: -f6)
+account_shell=$(printf '%s\n' "$passwd_entry" | cut -d: -f7)
+static_hostname=$(cat /etc/hostname 2>/dev/null || true)
+runtime_hostname=$(hostname 2>/dev/null || true)
 
 sudo_output=$(runuser -u "$expected_user" -- sudo -n -p '' id -u 2>&1)
 sudo_status=$?

@@ -232,7 +232,9 @@ class SerialConsole:
             return self._run_inline(script, timeout=timeout, check=check)
 
         token = uuid.uuid4().hex
-        guest_script = f"/tmp/anduinos-serial-run-{token}.sh"
+        # The early debug shell can precede tmp.mount, which would hide an
+        # upload already started in /tmp. /run is mounted before that shell.
+        guest_script = f"/run/anduinos-serial-run-{token}.sh"
         quoted_guest_script = shlex.quote(guest_script)
         local_script: Path | None = None
         try:

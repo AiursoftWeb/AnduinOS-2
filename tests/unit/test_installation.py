@@ -700,6 +700,53 @@ class BootContractTests(unittest.TestCase):
         self.assertIn("journalctl -b --no-pager -n 200", script)
         self.assertEqual(330, console.run.call_args.kwargs["timeout"])
 
+    def test_live_identity_reads_account_created_during_session_start(self):
+        console = Mock()
+        console.run.return_value = CommandResult("", 0)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            assert_live_identity(console, root, session_timeout_seconds=2)
+            script = console.run.call_args.args[0]
+            fixtures = {
+                "/etc/hostname": "anduinos\n",
+                "/run/anduinos-live/environment": (
+                    "ANDUINOS_LIVE_USER=live\nANDUINOS_LIVE_HOSTNAME=anduinos\n"
+                ),
+                "/etc/gdm3/custom.conf": (
+                    "AutomaticLoginEnable=true\nAutomaticLogin=live\n"
+                    "TimedLoginEnable=false\n"
+                ),
+            }
+            for index, (path, content) in enumerate(fixtures.items()):
+                fixture = root / str(index)
+                fixture.write_text(content)
+                script = script.replace(path, str(fixture))
+            bus = socket.socket(socket.AF_UNIX)
+            self.addCleanup(bus.close)
+            bus.bind(str(root / "bus"))
+            script = script.replace('/run/user/$expected_uid/bus', str(root / "bus"))
+            for account_uid in (1000, 0):
+                with self.subTest(account_uid=account_uid):
+                    (root / "ready").unlink(missing_ok=True)
+                    # The session probe models Live finishing account setup.
+                    # Reading passwd before it returns no account at all.
+                    prelude = f"""
+getent() {{
+    test -e '{root}/ready' || return 2
+    printf '%s\\n' 'live:x:{account_uid}:1000:AnduinOS Live session user:/home/live:/bin/bash'
+}}
+pgrep() {{ touch '{root}/ready'; printf '%s\\n' "$$"; }}
+hostname() {{ printf 'anduinos\\n'; }}
+runuser() {{ printf '0\\n'; }}
+"""
+                    result = subprocess.run(
+                        ["bash", "-c", prelude + script],
+                        capture_output=True, text=True, timeout=5,
+                    )
+                    self.assertIn("account-name=live\n", result.stdout)
+                    self.assertEqual(0 if account_uid == 1000 else 1,
+                                     result.returncode, result.stdout + result.stderr)
+
     def test_live_environment_rejects_legacy_initrd_hook_paths(self):
         console = Mock()
         console.run.return_value = CommandResult("", 0)
