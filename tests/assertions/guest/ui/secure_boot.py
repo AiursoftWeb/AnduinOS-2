@@ -25,7 +25,7 @@ REPAIR_ACTIONS = (
 )
 
 
-def validate_status(payload, *, require_bootloader=False):
+def validate_status(payload):
     state = payload["secure_boot"]
     for field in ("enabled", "key_present", "certificate_present", "enrolled", "configuration_present"):
         if state.get(field) is not True:
@@ -38,32 +38,25 @@ def validate_status(payload, *, require_bootloader=False):
         raise ValueError("Unified signing identity is not usable")
     if payload["dkms"]["untrusted_modules"]:
         raise ValueError("Third-party modules are not trusted")
-    if require_bootloader:
-        boot = state.get("grub", {})
-        if (boot.get("installed") is not True or boot.get("signature") != "valid"
-                or boot.get("enrollment") != "enrolled" or boot.get("deployment") != "ready"):
-            raise ValueError("AnduinOS GRUB is not signed, enrolled and deployed")
+    boot = state.get("grub", {})
+    if (boot.get("installed") is not True or boot.get("signature") != "valid"
+            or boot.get("enrollment") != "enrolled" or boot.get("deployment") != "ready"):
+        raise ValueError("AnduinOS GRUB is not signed, enrolled and deployed")
 
 
-def validate_ui(names, translate=lambda value: value, *, require_bootloader=False):
+def validate_ui(names, translate=lambda value: value):
     """Semantic health contract; screenshot accompanies it, not pixel matching."""
     required = {translate(text) for pair in ROW_STATES for text in pair}
     # The same check also runs in online installations which may have modules.
     if translate("Drivers are signed and ready to load") in names:
         required.discard(translate(ROW_STATES[-1][1]))
     required.add(translate("Trusted"))
-    if require_bootloader:
-        required.update(translate(text) for text in
-                        ("AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed"))
+    required.update(translate(text) for text in
+                    ("AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed"))
     missing = required - names
     actions = {translate(text) for text in REPAIR_ACTIONS} & names
     if missing or actions:
         raise ValueError(f"Missing healthy states: {sorted(missing)}; unexpected actions: {sorted(actions)}")
-
-
-def requires_own_bootloader():
-    import platform
-    return platform.machine() in {"x86_64", "aarch64"}
 
 
 def probe_signing_readiness():
@@ -72,7 +65,7 @@ def probe_signing_readiness():
 
     payload = json.loads(run("anduinos-securebootctl", "status", "--json"))
     print(json.dumps(payload), flush=True)
-    validate_status(payload, require_bootloader=requires_own_bootloader())
+    validate_status(payload)
     key = Path("/var/lib/shim-signed/mok/MOK.priv")
     cert = Path("/var/lib/shim-signed/mok/MOK.der")
     info = key.stat()
@@ -120,14 +113,14 @@ def verify_secure_boot_green(evidence):
         (evidence / "secure-boot-accessibility.txt").write_text(
             "\n".join(f"{role(item)}\t{name(item)}" for item in nodes), encoding="utf-8")
         try:
-            validate_ui(names, translate, require_bootloader=requires_own_bootloader())
+            validate_ui(names, translate)
         except ValueError as error:
             stable_since = None
             reason = str(error)
         else:
             stable_since = stable_since or time.monotonic()
             if time.monotonic() - stable_since >= 3:
-                event("secure-boot-green", rows=6 if requires_own_bootloader() else 5, repair_required=False)
+                event("secure-boot-green", rows=6, repair_required=False)
                 return
         if process.poll() not in (None, 0):
             raise UiFailure("Driver Center exited; see driver-center.log")

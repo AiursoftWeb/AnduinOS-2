@@ -154,23 +154,22 @@ def _validate_efi_payload(path: Path, architecture: Architecture) -> None:
             if result.returncode != 0 or "signature" not in result.stdout.lower():
                 raise ConfigurationError(f"EFI payload is not signed: {name}")
 
-        if architecture is Architecture.ARM64:
-            bridge = root / "grub.cfg"
-            _extract_fat_member(image, "::/EFI/BOOT/grub.cfg", bridge)
-            content = bridge.read_text(encoding="utf-8", errors="strict")
-            required = (
-                f"search --no-floppy --label --set=anduinos_iso {volume_label(path)}",
-                "set prefix=($anduinos_iso)/boot/grub",
-                "configfile $prefix/grub.cfg",
+        bridge = root / "grub.cfg"
+        _extract_fat_member(image, "::/EFI/BOOT/grub.cfg", bridge)
+        content = bridge.read_text(encoding="utf-8", errors="strict")
+        required = (
+            f"search --no-floppy --label --set=anduinos_iso {volume_label(path)}",
+            "set prefix=($anduinos_iso)/boot/grub",
+            "configfile $prefix/grub.cfg",
+        )
+        if any(line not in content for line in required):
+            raise ConfigurationError(
+                "Live EFI bridge does not load the ISO GRUB configuration"
             )
-            if any(line not in content for line in required):
-                raise ConfigurationError(
-                    "ARM64 EFI bridge does not load the ISO GRUB configuration"
-                )
-            if re.search(r"(?:/home/|/root/|new_building_os|image/isolinux)", content):
-                raise ConfigurationError(
-                    "ARM64 EFI bridge contains a build-host path"
-                )
+        if re.search(r"(?:/home/|/root/|new_building_os|image/isolinux)", content):
+            raise ConfigurationError(
+                "Live EFI bridge contains a build-host path"
+            )
 
 
 def _validate_rootfs_boot_stack(path: Path, architecture: Architecture) -> None:

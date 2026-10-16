@@ -3,9 +3,8 @@
 import copy
 from pathlib import Path
 import unittest
-from unittest.mock import patch
 
-from assertions.guest.ui.secure_boot import ROW_STATES, REPAIR_ACTIONS, requires_own_bootloader, validate_status, validate_ui
+from assertions.guest.ui.secure_boot import ROW_STATES, REPAIR_ACTIONS, validate_status, validate_ui
 from business.install.context import scenario_check_ids
 from framework.model import TestMatrix
 
@@ -17,6 +16,7 @@ class SecureBootFirstBootTests(unittest.TestCase):
                 "enabled": True, "status": "enabled", "key_present": True,
                 "certificate_present": True, "enrolled": True,
                 "configuration_present": True, "enrollment_pending": False,
+                "grub": dict(installed=True, signature="valid", enrollment="enrolled", deployment="ready"),
                 "signing_identity": {
                     "purpose": "unified", "enrollment": "enrolled",
                     "key_present": True, "defaults_ready": None,
@@ -24,7 +24,8 @@ class SecureBootFirstBootTests(unittest.TestCase):
             },
             "dkms": {"untrusted_modules": []},
         }
-        self.names = {text for pair in ROW_STATES for text in pair} | {"Trusted"}
+        self.names = {text for pair in ROW_STATES for text in pair} | {
+            "Trusted", "AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed"}
 
     def test_fresh_certificate_without_any_dkms_modules_is_healthy(self):
         validate_status(self.status)
@@ -62,31 +63,22 @@ class SecureBootFirstBootTests(unittest.TestCase):
             validate_status({})
 
     def test_own_bootloader_requires_all_four_independent_boundaries(self):
-        for architecture in ("x86_64", "aarch64"):
-            with self.subTest(architecture=architecture), patch("platform.machine", return_value=architecture):
-                self.setUp()
-                with self.assertRaises(ValueError):
-                    validate_status(self.status, require_bootloader=requires_own_bootloader())
-                self.status['secure_boot']['grub'] = dict(installed=True, signature='valid',
-                                                          enrollment='enrolled', deployment='ready')
-                validate_status(self.status, require_bootloader=requires_own_bootloader())
-                for field, value in [('installed', False), ('signature', 'missing'),
-                                     ('enrollment', 'pending'), ('deployment', 'pending')]:
-                    payload = copy.deepcopy(self.status)
-                    payload['secure_boot']['grub'][field] = value
-                    with self.subTest(field=field), self.assertRaises(ValueError):
-                        validate_status(payload, require_bootloader=requires_own_bootloader())
+        payload = copy.deepcopy(self.status)
+        del payload['secure_boot']['grub']
+        with self.assertRaises(ValueError):
+            validate_status(payload)
+        for field, value in [('installed', False), ('signature', 'missing'),
+                             ('enrollment', 'pending'), ('deployment', 'pending')]:
+            payload = copy.deepcopy(self.status)
+            payload['secure_boot']['grub'][field] = value
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                validate_status(payload)
 
     def test_own_bootloader_requires_the_visible_sixth_healthy_row(self):
-        for architecture in ("x86_64", "aarch64"):
-            with self.subTest(architecture=architecture), patch("platform.machine", return_value=architecture):
-                self.setUp()
-                with self.assertRaises(ValueError):
-                    validate_ui(self.names, require_bootloader=requires_own_bootloader())
-                names = self.names | {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed'}
-                validate_ui(names, require_bootloader=requires_own_bootloader())
-                with self.assertRaises(ValueError):
-                    validate_ui(names | {'Repair AnduinOS Bootloader'}, require_bootloader=requires_own_bootloader())
+        with self.assertRaises(ValueError):
+            validate_ui(self.names - {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed'})
+        with self.assertRaises(ValueError):
+            validate_ui(self.names | {'Repair AnduinOS Bootloader'})
 
     def test_every_ui_state_is_required(self):
         for text in self.names:

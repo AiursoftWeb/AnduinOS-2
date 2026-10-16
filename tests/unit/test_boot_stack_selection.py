@@ -9,10 +9,10 @@ import unittest
 from unittest.mock import patch
 
 from assertions import install
-from assertions.guest.ui.secure_boot import requires_own_bootloader
 from framework.model import Architecture
 from framework.errors import ConfigurationError
 from framework.iso import _validate_rootfs_boot_stack
+from framework import iso as iso_inspector
 
 
 class BootStackSelectionTests(unittest.TestCase):
@@ -39,11 +39,38 @@ class BootStackSelectionTests(unittest.TestCase):
                 self.assertNotIn("VERSION_CODENAME", script)
                 self.assertIn("boot_packages='anduinos-grub anduinos-shim-signed'", script)
 
-    def test_first_boot_ui_requires_own_stack_without_reading_release(self):
-        for arch in ("x86_64", "aarch64"):
-            with (self.subTest(architecture=arch), patch("platform.machine", return_value=arch),
-                  patch.object(Path, "read_text", side_effect=AssertionError("No release gate"))):
-                self.assertTrue(requires_own_bootloader())
+    def test_vmware_integration_is_carried_on_both_architectures(self):
+        source = (Path(__file__).resolve().parents[2]
+                  / "mods/05-live-kernel-apps-installer/install.sh").read_text()
+        source = source.split('print_ok "Installing AnduinOS Live components', 1)[1]
+        source = 'print_ok "Installing AnduinOS Live components' + source
+        source = source.split('judge ', 1)[0]
+        stubs = 'print_ok() { :; }; apt() { printf "%s\\n" "$@"; };\n'
+        for arch in ("amd64", "arm64"):
+            with self.subTest(architecture=arch):
+                result = subprocess.run(["bash", "-c", f'TARGET_ARCH={arch}\n' + stubs + source],
+                                        check=True, capture_output=True, text=True)
+                self.assertIn("open-vm-tools-desktop", result.stdout.splitlines())
+
+    def test_live_bridge_is_validated_for_both_architectures(self):
+        good = ('search --no-floppy --label --set=anduinos_iso AOS_LIVE\n'
+                'set prefix=($anduinos_iso)/boot/grub\nconfigfile $prefix/grub.cfg\n')
+        for arch, machine in ((Architecture.AMD64, 0x8664), (Architecture.ARM64, 0xAA64)):
+            for content in (good, '', good.replace('AOS_LIVE', 'WRONG_LABEL'), good + '/home/builder/grub\n'):
+                def extract_member(image, source, destination):
+                    destination.write_text(content if source.endswith('/grub.cfg') else 'EFI fixture')
+                with (self.subTest(architecture=arch, content=content),
+                      patch.object(iso_inspector, '_extract'),
+                      patch.object(iso_inspector, '_extract_fat_member', side_effect=extract_member),
+                      patch.object(iso_inspector, '_pe_machine', return_value=machine),
+                      patch.object(iso_inspector, 'volume_label', return_value='AOS_LIVE'),
+                      patch.object(iso_inspector.subprocess, 'run',
+                                   return_value=subprocess.CompletedProcess([], 0, 'signature 1'))):
+                    if content == good:
+                        iso_inspector._validate_efi_payload(Path('fixture.iso'), arch)
+                    else:
+                        with self.assertRaises(ConfigurationError):
+                            iso_inspector._validate_efi_payload(Path('fixture.iso'), arch)
 
 
 @unittest.skipUnless(all(shutil.which(tool) for tool in
