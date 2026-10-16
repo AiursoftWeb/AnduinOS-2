@@ -24,10 +24,9 @@ DEPS_COMMON := \
 DEPS_amd64 := \
   grub-pc-bin
 
-# The ARM64 EFI payload is built with the target root's GRUB modules, signed
-# GRUB image and shim inside a private mount namespace.  Installing foreign
-# shim-signed on an amd64 build host would conflict with the host's own signed
-# bootloader, so ARM64 deliberately has no target-EFI host packages here.
+# Both architectures obtain official signed Live EFI inputs in the separate
+# Ubuntu workshop. ARM64 needs no target-EFI packages on the build host;
+# the installed rootfs independently carries the native AnduinOS boot stack.
 DEPS_arm64 :=
 
 HOST_ARCH ?= $(shell dpkg --print-architecture)

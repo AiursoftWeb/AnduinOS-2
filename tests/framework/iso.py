@@ -57,7 +57,7 @@ def inspect_iso(path: Path, expected_architecture: Architecture) -> IsoInspectio
         raise ConfigurationError(f"ISO is not a regular file: {resolved}")
     if shutil.which("xorriso") is None:
         raise ConfigurationError("Required executable is missing: xorriso")
-    for executable in ("mcopy", "sbverify"):
+    for executable in ("mcopy", "sbverify", "unsquashfs", "dpkg-query"):
         if shutil.which(executable) is None:
             raise ConfigurationError(
                 f"Required executable is missing: {executable}"
@@ -71,6 +71,7 @@ def inspect_iso(path: Path, expected_architecture: Architecture) -> IsoInspectio
         )
     report = _boot_report(resolved)
     _validate_efi_payload(resolved, architecture)
+    _validate_rootfs_boot_stack(resolved, architecture)
     _validate_live_theme(resolved)
     live_entries, persistent_entry = _read_live_entries(resolved)
     has_bios = re.search(r"El Torito boot img\s*:\s*\S+\s+BIOS\b", report) is not None
@@ -170,6 +171,54 @@ def _validate_efi_payload(path: Path, architecture: Architecture) -> None:
                 raise ConfigurationError(
                     "ARM64 EFI bridge contains a build-host path"
                 )
+
+
+def _validate_rootfs_boot_stack(path: Path, architecture: Architecture) -> None:
+    """Inspect the delivered squashfs, independently of the official Live EFI."""
+    suffix, machine = (("x64", 0x8664) if architecture is Architecture.AMD64
+                       else ("aa64", 0xAA64))
+    with tempfile.TemporaryDirectory(prefix="anduinos-rootfs-inspect-") as directory:
+        root = Path(directory)
+        squash = root / "rootfs.squashfs"
+        _extract(path, "/LiveOS/rootfs.squashfs", squash, timeout=300)
+        target = root / "root"
+        result = subprocess.run(
+            ["unsquashfs", "-no-progress", "-processors", "2", "-d", str(target), str(squash),
+             "var/lib/dpkg/status", "usr/lib/anduinos-grub", "var/lib/anduinos-grub",
+             "var/lib/shim-signed/mok", "var/lib/anduinos-secureboot"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode or not (target / "var/lib/dpkg/status").is_file():
+            raise ConfigurationError("Cannot inspect the ISO rootfs boot-stack files")
+        result = subprocess.run(
+            ["dpkg-query", f"--admindir={target / 'var/lib/dpkg'}", "-W",
+             "-f=${Package}\t${Architecture}\t${db:Status-Status}\n"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode:
+            raise ConfigurationError("Cannot read the ISO rootfs package database")
+        installed = {}
+        for line in result.stdout.splitlines():
+            name, arch, status = line.split("\t")
+            if status == "installed":
+                installed[name] = arch
+        for name in ("anduinos-grub", "anduinos-shim-signed"):
+            if installed.get(name) != architecture.value:
+                raise ConfigurationError(f"ISO rootfs lacks native {name}")
+        if any(name in {"grub-common", "grub2-common", "grub-pc", "grub-pc-bin", "shim-signed"}
+               or name.startswith("grub-efi-") for name in installed):
+            raise ConfigurationError("ISO rootfs still installs Ubuntu boot-stack packages")
+        template = target / f"usr/lib/anduinos-grub/grub{suffix}.efi"
+        if not template.is_file() or _pe_machine(template) != machine:
+            raise ConfigurationError("ISO rootfs lacks its native GRUB signing template")
+        signature = subprocess.run(["sbverify", "--list", str(template)],
+                                   capture_output=True, text=True, timeout=30)
+        if "No signature table present" not in signature.stdout + signature.stderr:
+            raise ConfigurationError("ISO GRUB template must be unsigned and readable")
+        for store in ("var/lib/shim-signed/mok", "var/lib/anduinos-secureboot", "var/lib/anduinos-grub"):
+            directory = target / store
+            if directory.is_symlink() or (directory.exists() and any(directory.iterdir())):
+                raise ConfigurationError(f"ISO contains a machine signing identity or cache: {store}")
 
 
 def _pe_machine(path: Path) -> int:
@@ -385,7 +434,7 @@ def _parse_persistent_entry(content: str) -> PersistentLiveGrubEntry:
     return entries[0]
 
 
-def _extract(iso: Path, source: str, destination: Path) -> None:
+def _extract(iso: Path, source: str, destination: Path, *, timeout: int = 60) -> None:
     result = subprocess.run(
         (
             "xorriso",
@@ -401,7 +450,7 @@ def _extract(iso: Path, source: str, destination: Path) -> None:
         text=True,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
-        timeout=60,
+        timeout=timeout,
     )
     if result.returncode != 0 or not destination.is_file():
         raise ConfigurationError(
