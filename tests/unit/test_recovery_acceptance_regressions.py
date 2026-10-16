@@ -1,6 +1,7 @@
 """Regression checks for real acceptance failures, without booting a VM."""
 
 import ast
+from contextlib import nullcontext
 import inspect
 import io
 import json
@@ -354,6 +355,7 @@ class AcceptanceRegressionTests(unittest.TestCase):
         runner.architecture = Architecture.AMD64
         runner.options = SimpleNamespace(boot_timeout_seconds=10)
         vm = Mock(running=True)
+        vm.serial.capture_output.return_value = nullcontext()
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             (root / "plymouth-watermark.png").write_bytes(b"fixture")

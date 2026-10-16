@@ -105,31 +105,34 @@ printf '%s\n' "$nvram_output"
         self.status(scenario.id, "Completing MOK enrollment with fresh UEFI VARS")
         vm.start(attach_iso=False)
         assert vm.qmp is not None
-        delay = self.options.firmware_delay_seconds + (
-            18 if self.architecture is Architecture.ARM64 else 8
-        )
-        time.sleep(delay)
-        vm.screenshot("mok-manager")
-        sequence = (
-            ("down", 0.5),
-            ("ret", 1.0),
-            ("down", 0.5),
-            ("ret", 1.0),
-            ("down", 0.5),
-            ("ret", 1.0),
-        )
-        for key, pause in sequence:
-            vm.qmp.send_key(key)
-            time.sleep(pause)
-        vm.qmp.type_text(self.defaults.mok_password, interval=0.08)
-        vm.qmp.send_key("ret")
-        time.sleep(1)
-        vm.qmp.send_key("ret")
+        assert vm.serial is not None
         try:
-            vm.wait(180)
-        except ProtocolError:
-            vm.screenshot("mok-manager-timeout")
-            raise TestFailure("MokManager did not reboot after enrollment")
+            with vm.serial.capture_output():
+                delay = self.options.firmware_delay_seconds + (
+                    18 if self.architecture is Architecture.ARM64 else 8
+                )
+                time.sleep(delay)
+                vm.screenshot("mok-manager")
+                sequence = (
+                    ("down", 0.5),
+                    ("ret", 1.0),
+                    ("down", 0.5),
+                    ("ret", 1.0),
+                    ("down", 0.5),
+                    ("ret", 1.0),
+                )
+                for key, pause in sequence:
+                    vm.qmp.send_key(key)
+                    time.sleep(pause)
+                vm.qmp.type_text(self.defaults.mok_password, interval=0.08)
+                vm.qmp.send_key("ret")
+                time.sleep(1)
+                vm.qmp.send_key("ret")
+                try:
+                    vm.wait(180)
+                except ProtocolError:
+                    vm.screenshot("mok-manager-timeout")
+                    raise TestFailure("MokManager did not reboot after enrollment")
         finally:
             vm.stop()
         (artifacts / "mok-enrollment.txt").write_text(

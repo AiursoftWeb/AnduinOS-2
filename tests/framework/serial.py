@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import os
 import re
@@ -10,6 +11,7 @@ import select
 import shlex
 import socket
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -100,6 +102,46 @@ class SerialConsole:
         if self._log is not None:
             self._log.close()
             self._log = None
+
+    @contextlib.contextmanager
+    def capture_output(self):
+        """Keep the UART draining during an exclusively graphical boot phase.
+
+        QEMU can block the guest and QMP when firmware fills an unread serial
+        socket. No other serial operations may run inside this context. Keep
+        the complete transcript, a bounded tail, and the fatal-kernel verdict.
+        """
+
+        connection = self._socket
+        if connection is None:
+            raise ProtocolError("Serial socket is not connected")
+        stopped = threading.Event()
+        errors: list[Exception] = []
+
+        def capture() -> None:
+            try:
+                while not stopped.is_set():
+                    ready, _, _ = select.select([connection], [], [], 0.1)
+                    if not ready:
+                        continue
+                    chunk = connection.recv(65536)
+                    if not chunk:
+                        return
+                    self._record_chunk(chunk)
+                    if len(self._buffer) > 1024 * 1024:
+                        del self._buffer[:-1024 * 1024]
+            except Exception as error:
+                errors.append(error)
+
+        reader = threading.Thread(target=capture, name="serial-capture", daemon=True)
+        reader.start()
+        try:
+            yield
+        finally:
+            stopped.set()
+            reader.join()
+            if errors:
+                raise errors[0]
 
     def wait_for_shell(self, timeout: float | None = None) -> None:
         """Synchronize only after Linux has taken ownership of the serial port.

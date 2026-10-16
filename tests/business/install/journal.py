@@ -307,23 +307,25 @@ printf 'input-sources=%s\n' "$sources"
         observations: list[dict[str, object]] = []
         matched: dict[str, object] | None = None
         try:
-            while time.monotonic() < deadline and vm.running:
-                try:
-                    probe = vm.screenshot("plymouth-probe")
-                    result = plymouth_match(probe, watermark)
-                    result["seconds"] = round(
-                        self.options.boot_timeout_seconds
-                        - (deadline - time.monotonic()),
-                        2,
-                    )
-                    observations.append(result)
-                    if result.get("matched") is True:
-                        matched = result
-                        shutil.copy2(probe, artifacts / "plymouth-branding.png")
-                        break
-                except (OSError, ProtocolError):
-                    pass
-                time.sleep(0.2 if self.architecture is Architecture.AMD64 else 0.5)
+            assert vm.serial is not None
+            with vm.serial.capture_output():
+                while time.monotonic() < deadline and vm.running:
+                    try:
+                        probe = vm.screenshot("plymouth-probe")
+                        result = plymouth_match(probe, watermark)
+                        result["seconds"] = round(
+                            self.options.boot_timeout_seconds
+                            - (deadline - time.monotonic()),
+                            2,
+                        )
+                        observations.append(result)
+                        if result.get("matched") is True:
+                            matched = result
+                            shutil.copy2(probe, artifacts / "plymouth-branding.png")
+                            break
+                    except (OSError, ProtocolError):
+                        pass
+                    time.sleep(0.2 if self.architecture is Architecture.AMD64 else 0.5)
         finally:
             vm.stop()
         report = {

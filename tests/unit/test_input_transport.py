@@ -892,6 +892,57 @@ class QmpSemanticKeyboardTests(unittest.TestCase):
 
 
 class SerialTransportTests(unittest.TestCase):
+    def test_passive_capture_unblocks_firmware_output_without_sending_input(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "serial.log"
+            reader, writer = socket.socketpair()
+            writer.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
+            writer.settimeout(2)
+            console = SerialConsole(Path("unused"), transcript)
+            console._socket = reader
+            console._log = transcript.open("ab", buffering=0)
+            payload = b"firmware output\n" * 100000
+            try:
+                with console.capture_output():
+                    # A graphical operation cannot proceed until firmware's
+                    # UART write completes. This exceeds the socket capacity.
+                    writer.sendall(payload)
+                    deadline = time.monotonic() + 2
+                    while transcript.stat().st_size < len(payload):
+                        self.assertLess(time.monotonic(), deadline)
+                        time.sleep(0.01)
+                self.assertEqual(payload, transcript.read_bytes())
+                self.assertLessEqual(len(console._buffer), 1024 * 1024)
+                self.assertEqual([], select.select([writer], [], [], 0)[0])
+                # The foreground reader owns the same socket again afterward.
+                writer.sendall(b"next phase ready")
+                console.wait_for_text("next phase ready", timeout=1)
+            finally:
+                console.close()
+                writer.close()
+
+    def test_passive_capture_keeps_fatal_kernel_failure_and_trace(self):
+        with tempfile.TemporaryDirectory() as directory:
+            transcript = Path(directory) / "serial.log"
+            reader, writer = socket.socketpair()
+            console = SerialConsole(Path("unused"), transcript)
+            console._socket = reader
+            console._log = transcript.open("ab", buffering=0)
+            payload = b"Kernel panic - not syncing: test\ncall trace\n---[ end trace\n"
+            try:
+                with self.assertRaisesRegex(TestFailure, "fatal serial marker"):
+                    with console.capture_output():
+                        writer.sendall(payload)
+                        writer.shutdown(socket.SHUT_WR)
+                        deadline = time.monotonic() + 2
+                        while transcript.stat().st_size < len(payload):
+                            self.assertLess(time.monotonic(), deadline)
+                            time.sleep(0.01)
+                self.assertEqual(payload, transcript.read_bytes())
+            finally:
+                console.close()
+                writer.close()
+
     def test_run_uploads_long_scripts_before_executing_them(self):
         console = SerialConsole(Path("unused"), Path("unused"), timeout=1)
         script = "printf 'one sufficiently long assertion line\\n'\n" * 100
