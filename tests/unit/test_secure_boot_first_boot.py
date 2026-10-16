@@ -3,8 +3,9 @@
 import copy
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
-from assertions.guest.ui.secure_boot import ROW_STATES, REPAIR_ACTIONS, validate_status, validate_ui
+from assertions.guest.ui.secure_boot import ROW_STATES, REPAIR_ACTIONS, requires_own_bootloader, validate_status, validate_ui
 from business.install.context import scenario_check_ids
 from framework.model import TestMatrix
 
@@ -61,25 +62,31 @@ class SecureBootFirstBootTests(unittest.TestCase):
             validate_status({})
 
     def test_own_bootloader_requires_all_four_independent_boundaries(self):
-        with self.assertRaises(ValueError):
-            validate_status(self.status, require_bootloader=True)
-        self.status['secure_boot']['grub'] = dict(installed=True, signature='valid',
-                                                  enrollment='enrolled', deployment='ready')
-        validate_status(self.status, require_bootloader=True)
-        for field, value in [('installed', False), ('signature', 'missing'),
-                             ('enrollment', 'pending'), ('deployment', 'pending')]:
-            payload = copy.deepcopy(self.status)
-            payload['secure_boot']['grub'][field] = value
-            with self.subTest(field=field), self.assertRaises(ValueError):
-                validate_status(payload, require_bootloader=True)
+        for architecture in ("x86_64", "aarch64"):
+            with self.subTest(architecture=architecture), patch("platform.machine", return_value=architecture):
+                self.setUp()
+                with self.assertRaises(ValueError):
+                    validate_status(self.status, require_bootloader=requires_own_bootloader())
+                self.status['secure_boot']['grub'] = dict(installed=True, signature='valid',
+                                                          enrollment='enrolled', deployment='ready')
+                validate_status(self.status, require_bootloader=requires_own_bootloader())
+                for field, value in [('installed', False), ('signature', 'missing'),
+                                     ('enrollment', 'pending'), ('deployment', 'pending')]:
+                    payload = copy.deepcopy(self.status)
+                    payload['secure_boot']['grub'][field] = value
+                    with self.subTest(field=field), self.assertRaises(ValueError):
+                        validate_status(payload, require_bootloader=requires_own_bootloader())
 
     def test_own_bootloader_requires_the_visible_sixth_healthy_row(self):
-        with self.assertRaises(ValueError):
-            validate_ui(self.names, require_bootloader=True)
-        names = self.names | {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed'}
-        validate_ui(names, require_bootloader=True)
-        with self.assertRaises(ValueError):
-            validate_ui(names | {'Repair AnduinOS Bootloader'}, require_bootloader=True)
+        for architecture in ("x86_64", "aarch64"):
+            with self.subTest(architecture=architecture), patch("platform.machine", return_value=architecture):
+                self.setUp()
+                with self.assertRaises(ValueError):
+                    validate_ui(self.names, require_bootloader=requires_own_bootloader())
+                names = self.names | {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed'}
+                validate_ui(names, require_bootloader=requires_own_bootloader())
+                with self.assertRaises(ValueError):
+                    validate_ui(names | {'Repair AnduinOS Bootloader'}, require_bootloader=requires_own_bootloader())
 
     def test_every_ui_state_is_required(self):
         for text in self.names:

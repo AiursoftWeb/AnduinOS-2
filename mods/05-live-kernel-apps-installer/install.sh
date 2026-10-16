@@ -10,7 +10,7 @@ wait_network
 # The core metapackage selects the kernel for the target suite and architecture.
 print_ok "Installing the AnduinOS core system and kernel..."
 boot_packages=()
-if [ "$TARGET_ARCH" = amd64 ]; then
+if [[ "$TARGET_ARCH" = amd64 || "$TARGET_ARCH" = arm64 ]]; then
     # Select the installed-system boot stack during rootfs assembly. The ISO
     # builder obtains its separate official signed CD GRUB outside this root.
     boot_packages+=(anduinos-grub anduinos-shim-signed)
