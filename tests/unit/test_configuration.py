@@ -63,7 +63,7 @@ class MatrixTests(unittest.TestCase):
             {item.id for item in matrix.scenarios},
         )
         self.assertEqual(18, len(matrix.select(Architecture.AMD64)))
-        self.assertEqual(7, len(matrix.select(Architecture.ARM64)))
+        self.assertEqual(15, len(matrix.select(Architecture.ARM64)))
 
         scenarios = matrix.scenarios
         self.assertEqual(3, sum(item.firmware is Firmware.BIOS for item in scenarios))
@@ -132,11 +132,10 @@ class MatrixTests(unittest.TestCase):
             scenario_live_region(matrix.defaults, ordinary),
         )
 
-    def test_wifi_acceptance_is_amd64_local_only(self):
+    def test_wifi_acceptance_is_local_only_on_both_architectures(self):
         raw = json.loads((ROOT / "cases/install.json").read_text(encoding="utf-8"))
         wifi = next(item for item in raw["cases"] if item["network"] == "wifi")
         for mutation in (
-            {"architectures": ["arm64"]},
             {"online_features": True},
             {"rime": True},
         ):
@@ -150,6 +149,21 @@ class MatrixTests(unittest.TestCase):
                 path.write_text(json.dumps(candidate), encoding="utf-8")
                 with self.assertRaises(ConfigurationError):
                     TestMatrix.load(path)
+
+    def test_platform_independent_cases_and_desktop_checks_are_symmetric(self):
+        matrix = TestMatrix.load(ROOT / "cases/install.json")
+        registry = FeatureSuiteRegistry.load(ROOT / "cases/desktop.json", matrix)
+        amd = {case.id for case in matrix.select(Architecture.AMD64)}
+        arm = {case.id for case in matrix.select(Architecture.ARM64)}
+        self.assertEqual({case.id for case in matrix.scenarios if case.firmware is Firmware.BIOS}, amd - arm)
+        self.assertFalse(arm - amd)
+        for suite in registry.suites:
+            if suite.id == "public-spotify":
+                self.assertEqual(("store.spotify-public",), suite.checks)
+                self.assertEqual({Architecture.AMD64}, set(suite.source_cases))
+            else:
+                self.assertEqual(set(Architecture), set(suite.source_cases), suite.id)
+                self.assertEqual(suite.source_for(Architecture.AMD64), suite.source_for(Architecture.ARM64), suite.id)
 
     def test_unknown_case_is_rejected(self):
         matrix = TestMatrix.load(ROOT / "cases/install.json")
@@ -237,6 +251,7 @@ class MatrixTests(unittest.TestCase):
                 "shell-spotify-store",
                 "public-ecosystem",
                 "public-ghex",
+                "public-spotify",
             ),
             tuple(item.id for item in suites),
         )
@@ -245,7 +260,6 @@ class MatrixTests(unittest.TestCase):
             (
                 "files.cpuz-thumbnail-and-open",
                 "apt.nextcloud-client-ppa",
-                "store.spotify-public",
             ),
             public.checks,
         )
@@ -259,7 +273,7 @@ class MatrixTests(unittest.TestCase):
             matrix,
             Architecture.AMD64,
             {
-                "bios-online-btrfs",
+                "uefi-sb-online-btrfs",
                 "uefi-nosb-online-btrfs-ssh-enabled",
                 "uefi-nosb-online-btrfs-ssh-toggle",
             },

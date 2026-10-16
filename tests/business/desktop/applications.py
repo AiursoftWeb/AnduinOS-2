@@ -7,10 +7,11 @@ class PublicApplicationChecks:
     def _exercise_ghex_install(self, vm: QemuVm, base: PromotedBase, artifacts: Path) -> None:
         """Verify a fresh public Flatpak installation and its start-menu launch."""
         assert vm.serial is not None
-        installed = vm.serial.run(_ghex_install_command(), timeout=1800, check=False)
+        architecture = "x86_64" if vm.config.architecture.value == "amd64" else "aarch64"
+        installed = vm.serial.run(_ghex_install_command(architecture), timeout=1800, check=False)
         (artifacts / "ghex-install.txt").write_text(installed.stdout + "\n", encoding="utf-8")
         try:
-            _validate_ghex_install_evidence(installed.stdout, installed.returncode)
+            _validate_ghex_install_evidence(installed.stdout, installed.returncode, architecture)
         except TestFailure as error:
             classification = _safe_failure_class(
                 installed.stdout, "ghex-failure-class",
@@ -23,7 +24,7 @@ class PublicApplicationChecks:
 
         def validate_launch(output):
             nonlocal launch_verified
-            evidence = _validate_ghex_install_events(output)
+            evidence = _validate_ghex_install_events(output, architecture)
             launch_verified = True
             return evidence
 

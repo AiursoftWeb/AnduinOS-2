@@ -4,7 +4,7 @@
     {
       "id": "input-and-appearance",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -31,7 +31,7 @@
     {
       "id": "file-integration",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -69,7 +69,8 @@
     {
       "id": "rescue-center-offline-restore",
       "source_cases": {
-        "amd64": "bios-online-btrfs"
+        "amd64": "uefi-nosb-online-btrfs-ssh-toggle",
+        "arm64": "uefi-nosb-online-btrfs-ssh-toggle"
       },
       "checks": ["storage.rescue-center-offline-restore"],
       "isolation": "overlay",
@@ -124,7 +125,7 @@
     {
       "id": "accounts-gdm",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-nosb-online-btrfs-ssh-toggle",
         "arm64": "uefi-nosb-online-btrfs-ssh-toggle"
       },
       "checks": [
@@ -141,7 +142,7 @@
     {
       "id": "desktop-theme",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -156,7 +157,7 @@
     {
       "id": "shell-shortcuts",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -177,7 +178,7 @@
     {
       "id": "shell-start-menu",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -189,7 +190,7 @@
     {
       "id": "shell-panel-taskbar",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -205,7 +206,7 @@
     {
       "id": "shell-desktop-shortcut",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -222,7 +223,7 @@
     {
       "id": "shell-spotify-store",
       "source_cases": {
-        "amd64": "bios-online-btrfs",
+        "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
@@ -234,12 +235,12 @@
     {
       "id": "public-ecosystem",
       "source_cases": {
-        "amd64": "bios-online-btrfs"
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
         "files.cpuz-thumbnail-and-open",
-        "apt.nextcloud-client-ppa",
-        "store.spotify-public"
+        "apt.nextcloud-client-ppa"
       ],
       "isolation": "overlay",
       "observation_modes": ["controlled"]
@@ -247,13 +248,27 @@
     {
       "id": "public-ghex",
       "source_cases": {
-        "amd64": "bios-online-btrfs"
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
         "app.ghex-install"
       ],
       "isolation": "overlay",
       "observation_modes": ["controlled"]
+    },
+    {
+      "id": "public-spotify",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs"
+      },
+      "checks": [
+        "store.spotify-public"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
     }
   ]
 }

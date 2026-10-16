@@ -280,10 +280,6 @@ def _load_scenario(value: object) -> Scenario:
         raise ConfigurationError(
             f"{identifier}: non-Internet case enables Rime download"
         )
-    if network is Network.WIFI and architectures != (Architecture.AMD64,):
-        raise ConfigurationError(
-            f"{identifier}: the hwsim test environment is currently amd64-only"
-        )
     if live_mode is LiveMode.PERSISTENT and network is Network.WIFI:
         raise ConfigurationError(
             f"{identifier}: persistent-media reboot cannot retain the in-guest Wi-Fi lab"
@@ -302,8 +298,7 @@ def _load_scenario(value: object) -> Scenario:
             f"{identifier}: manual-small-disk requires a 23 GiB target"
         )
     if storage_mode.coexistence and (
-        architectures != (Architecture.AMD64,)
-        or firmware is not Firmware.UEFI_NO_SECURE_BOOT
+        firmware is not Firmware.UEFI_NO_SECURE_BOOT
         or network is not Network.OFFLINE
         or filesystem is not (Filesystem.EXT4
             if storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK else Filesystem.BTRFS)
@@ -313,7 +308,7 @@ def _load_scenario(value: object) -> Scenario:
         or value["automatic_login"]
     ):
         raise ConfigurationError(
-            f"{identifier}: coexistence requires amd64, uefi-nosb, offline, "
+            f"{identifier}: coexistence requires uefi-nosb, offline, "
             "temporary Live, Btrfs (ext4 for the shrink case), 112 GiB, and normal desktop login"
         )
     live_region = None

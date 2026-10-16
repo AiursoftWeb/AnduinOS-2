@@ -26,6 +26,7 @@ class FirmwareSelection:
 
 _DEFAULTS = {
     Architecture.AMD64: {
+        "code-unsupported": (Path("/usr/share/OVMF/OVMF_CODE_4M.fd"),),
         "code": (
             Path("/usr/share/OVMF/OVMF_CODE_4M.secboot.fd"),
             Path("/usr/share/OVMF/OVMF_CODE.secboot.fd"),
@@ -40,6 +41,7 @@ _DEFAULTS = {
         ),
     },
     Architecture.ARM64: {
+        "code-unsupported": (Path("/usr/share/AAVMF/AAVMF_CODE.no-secboot.fd"),),
         "code": (
             Path("/usr/share/AAVMF/AAVMF_CODE.ms.fd"),
             Path("/usr/share/AAVMF/AAVMF_CODE.fd"),
@@ -60,10 +62,8 @@ def resolve_firmware(
     if firmware is Firmware.BIOS:
         return None
     if firmware is Firmware.UEFI_UNSUPPORTED:
-        if architecture is not Architecture.AMD64:
-            raise ConfigurationError("Unsupported Secure Boot firmware fixture is only defined for amd64")
         code = _resolve(overrides.uefi_unsupported_code,
-                        (Path("/usr/share/OVMF/OVMF_CODE_4M.fd"),),
+                        _DEFAULTS[architecture]["code-unsupported"],
                         "UEFI firmware without Secure Boot")
         variables = _resolve(overrides.uefi_vars_no_secure_boot,
                              _DEFAULTS[architecture]["vars-nosb"],

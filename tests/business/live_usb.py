@@ -10,11 +10,11 @@ from pathlib import Path
 
 from PIL import Image
 
-from framework.errors import ConfigurationError, TestFailure
+from framework.errors import TestFailure
 from framework.firmware import resolve_firmware
 from framework.grub import boot_iso_with_debug_shell
 from framework.iso import volume_label
-from framework.model import Architecture, Firmware, Network
+from framework.model import Firmware, Network
 from framework.qemu import QemuConfig, QemuVm, resolve_qemu
 from framework.reporting import write_junit_report
 from framework.usb_iso import prepare_iso_usb
@@ -55,17 +55,16 @@ def _write_summary(inspection, artifacts: Path, records: list[dict], started: fl
 
 
 def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=600,
-                 memory=4096, cpus=2, delay=2) -> bool:
-    """AMD64 USB regressions and rejection of To Go on optical media."""
-    if inspection.architecture is not Architecture.AMD64:
-        raise ConfigurationError('Rufus ISO-mode boot regression currently requires AMD64')
+                 memory=4096, cpus=2, delay=8) -> bool:
+    """Native USB regressions and rejection of To Go on optical media."""
+    architecture = inspection.architecture
     artifacts.mkdir(parents=True, exist_ok=False)
     started = time.monotonic()
     records = []
     # Removable media must boot through the official signed entry point,
     # before any machine-specific AnduinOS MOK has been enrolled.
-    firmware = resolve_firmware(Architecture.AMD64, Firmware.UEFI_SECURE_BOOT, overrides)
-    binary, accel = resolve_qemu(Architecture.AMD64)
+    firmware = resolve_firmware(architecture, Firmware.UEFI_SECURE_BOOT, overrides)
+    binary, accel = resolve_qemu(architecture)
     dashboard.begin(USB_CASE_ID)
     dashboard.phase(USB_CASE_ID, 'Testing ISO media boot paths')
     # Default FAT label and a user-selected label must both preserve the ABI.
@@ -85,7 +84,7 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=6
                 variables = work / 'vars.fd'
                 shutil.copyfile(firmware.variables_template, variables)
                 vm = QemuVm(QemuConfig(
-                    architecture=Architecture.AMD64, firmware=Firmware.UEFI_SECURE_BOOT,
+                    architecture=architecture, firmware=Firmware.UEFI_SECURE_BOOT,
                     network=Network.OFFLINE, memory_mib=memory, cpus=cpus, disk_gib=1,
                     ssh_forward_port=0, iso=inspection.path, disk=work/'target.qcow2',
                     variables=variables, firmware_selection=firmware, artifacts=case,
@@ -94,8 +93,14 @@ def run_live_usb(inspection, artifacts: Path, overrides, *, dashboard, timeout=6
                 try:
                     vm.create_disk()
                     vm.start(attach_iso=True)
-                    boot_iso_with_debug_shell(vm.qmp, vm.serial, Architecture.AMD64,
-                                              firmware_delay=delay, scratch_dir=case)
+                    boot_iso_with_debug_shell(vm.qmp, vm.serial, architecture,
+                                              firmware_delay=delay, scratch_dir=case,
+                                              spice_socket=vm.spice_socket,
+                                              kernel_arguments=tuple(
+                                                  f"root=live:CDLABEL={label}"
+                                                  if arg.startswith("root=live:CDLABEL=") else arg
+                                                  for arg in inspection.live_entries[0].kernel_arguments
+                                              ))
                     vm.serial.wait_for_shell(timeout)
                     dashboard.suite_check(USB_CASE_ID, record['id'], 'uefi-boot', 'passed')
                     dashboard.suite_check(USB_CASE_ID, record['id'], 'live-desktop-and-integrity', 'running')
@@ -161,7 +166,7 @@ echo ISO_USB_DESKTOP_PASSED
             variables = work / 'vars.fd'
             shutil.copyfile(firmware.variables_template, variables)
             vm = QemuVm(QemuConfig(
-                architecture=Architecture.AMD64, firmware=Firmware.UEFI_SECURE_BOOT,
+                architecture=architecture, firmware=Firmware.UEFI_SECURE_BOOT,
                 network=Network.OFFLINE, memory_mib=memory, cpus=cpus, disk_gib=1,
                 ssh_forward_port=0, iso=inspection.path, disk=work/'target.qcow2',
                 variables=variables, firmware_selection=firmware, artifacts=case,
@@ -170,31 +175,32 @@ echo ISO_USB_DESKTOP_PASSED
             try:
                 vm.create_disk()
                 vm.start(attach_iso=True)
-                boot_iso_with_debug_shell(vm.qmp, vm.serial, Architecture.AMD64,
-                                          firmware_delay=delay, menu_path=(1, 3),
-                                          serial_debug=False, scratch_dir=case)
-                # Boot unmodified, with the real screen console. A forced
-                # serial console would invalidate this user-visible check.
-                display_deadline = time.monotonic() + min(timeout, 180)
-                while True:
-                    if vm.process is not None and vm.process.poll() is not None:
-                        raise TestFailure('QEMU stopped before the To Go rejection was recognized on the display')
-                    warning_frame = vm.screenshot('unsupported-media')
-                    with Image.open(warning_frame) as image:
-                        screen = image.convert('RGB')
-                        width, height = screen.size
-                        # Exclude both the EFI/AnduinOS splash logos in the
-                        # middle and the tiny HyperFluent icon at top left.
-                        # A real text-VT warning starts in this upper band.
-                        text_area = screen.crop((width * 12 // 100, 0,
-                                                 width * 90 // 100, height * 30 // 100))
-                        # The GRUB console renders this warning in gray (RGB
-                        # 160 on the release ISO), not bright white.
-                        if sum(min(pixel) >= 150 for pixel in text_area.get_flattened_data()) >= 100:
-                            break
-                    if time.monotonic() >= display_deadline:
-                        raise TestFailure('To Go rejection is not visible on the display')
-                    time.sleep(0.4)
+                with vm.serial.capture_output():
+                    boot_iso_with_debug_shell(vm.qmp, vm.serial, architecture,
+                                              firmware_delay=delay, menu_path=(1, 3),
+                                              serial_debug=False, scratch_dir=case)
+                    # Boot unmodified, with the real screen console. A forced
+                    # serial console would invalidate this user-visible check.
+                    display_deadline = time.monotonic() + min(timeout, 180)
+                    while True:
+                        if vm.process is not None and vm.process.poll() is not None:
+                            raise TestFailure('QEMU stopped before the To Go rejection was recognized on the display')
+                        warning_frame = vm.screenshot('unsupported-media')
+                        with Image.open(warning_frame) as image:
+                            screen = image.convert('RGB')
+                            width, height = screen.size
+                            # Exclude both the EFI/AnduinOS splash logos in the
+                            # middle and the tiny HyperFluent icon at top left.
+                            # A real text-VT warning starts in this upper band.
+                            text_area = screen.crop((width * 12 // 100, 0,
+                                                     width * 90 // 100, height * 30 // 100))
+                            # The GRUB console renders this warning in gray (RGB
+                            # 160 on the release ISO), not bright white.
+                            if sum(min(pixel) >= 150 for pixel in text_area.get_flattened_data()) >= 100:
+                                break
+                        if time.monotonic() >= display_deadline:
+                            raise TestFailure('To Go rejection is not visible on the display')
+                        time.sleep(0.4)
                 dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'passed')
                 dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'running')
                 dashboard.suite_phase(USB_CASE_ID, record['id'], 'Waiting for expected power-off')

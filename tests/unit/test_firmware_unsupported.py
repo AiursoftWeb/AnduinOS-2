@@ -22,15 +22,21 @@ class UnsupportedFirmwareTests(unittest.TestCase):
         self.assertEqual(result.code, code)
         self.assertEqual(result.variables_template, variables)
 
-    def test_unsupported_arm_fixture_is_not_silently_replaced_with_disabled(self):
-        with self.assertRaises(ConfigurationError):
-            resolve_firmware(Architecture.ARM64, Firmware.UEFI_UNSUPPORTED, FirmwareOverrides())
+    def test_arm_unsupported_firmware_uses_its_actual_non_secure_boot_image(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, variables = (Path(directory) / name for name in ('no-secboot.fd', 'vars.fd'))
+            code.touch()
+            variables.touch()
+            result = resolve_firmware(Architecture.ARM64, Firmware.UEFI_UNSUPPORTED,
+                FirmwareOverrides(uefi_unsupported_code=code, uefi_vars_no_secure_boot=variables))
+            self.assertEqual(code, result.code)
+            self.assertEqual(variables, result.variables_template)
 
     def test_matrix_requires_both_filesystems_without_mok_enrollment(self):
         matrix = TestMatrix.load(Path(__file__).parents[1] / 'cases/install.json')
         cases = [c for c in matrix.scenarios if c.firmware is Firmware.UEFI_UNSUPPORTED]
         self.assertEqual({c.filesystem.value for c in cases}, {'btrfs', 'ext4'})
-        self.assertTrue(all(c.architectures == (Architecture.AMD64,) for c in cases))
+        self.assertTrue(all(set(c.architectures) == set(Architecture) for c in cases))
         self.assertTrue(all(not c.mok_enrollment for c in cases))
 
     def test_guest_evidence_requires_variable_absence_and_real_customer_exit(self):

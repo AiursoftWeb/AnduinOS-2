@@ -967,6 +967,19 @@ runuser() {{ printf '0\\n'; }}
                 with self.assertRaises(TestFailure):
                     _validate_installed_region_ui_events(broken)
 
+    def test_arm_optical_guard_executes_the_real_menu_without_kernel_injection(self):
+        console, qmp = Mock(), Mock()
+        with (patch("framework.grub._GraphicalGrubMenuEditor") as editor_factory,
+              patch("framework.grub.hyperfluent_grub_visible", return_value=True)):
+            editor = editor_factory.return_value
+            boot_iso_with_debug_shell(qmp, console, Architecture.ARM64,
+                firmware_delay=8, menu_path=(1, 3), serial_debug=False)
+        editor.enter_advanced_submenu.assert_called_once()
+        editor.open_editor.assert_not_called()
+        editor.type_text_verified.assert_not_called()
+        qmp.send_key.assert_called_once_with("ret", hold_ms=150)
+        console.wait_for_kernel_console.assert_not_called()
+
     def test_arm_grub_gates_graphical_commands_then_proves_pl011_handoff(self):
         console = Mock()
         qmp = Mock()

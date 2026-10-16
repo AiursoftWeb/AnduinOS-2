@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
              datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')).resolve()
         )
         usb_suites = {}
-        if (architecture is Architecture.AMD64 and not args.case) or args.live_usb_only:
+        if not args.case or args.live_usb_only:
             from .live_usb import USB_CASE_ID, live_usb_suite_checks, run_live_usb
 
             usb_suites = live_usb_suite_checks(inspection)
@@ -99,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
                 inspection, usb_artifacts, overrides,
                 timeout=args.boot_timeout or matrix.defaults.boot_timeout_seconds,
                 memory=args.memory or 4096, cpus=args.cpus or 2,
-                delay=args.firmware_delay if args.firmware_delay is not None else 2,
+                delay=args.firmware_delay if args.firmware_delay is not None else 8,
                 dashboard=dashboard,
             )
             usb_records = json.loads((usb_artifacts / 'summary.json').read_text())['results']
@@ -323,7 +323,7 @@ def _parser() -> argparse.ArgumentParser:
                            help="run a named installation case and its suites; repeatable, not a release verdict")
     selection.add_argument(
         '--live-usb-only', action='store_true',
-        help='run only the AMD64 Rufus ISO-mode USB boot regression (default and custom FAT labels)',
+        help='run only the Rufus ISO-mode USB boot regression (default and custom FAT labels)',
     )
     parser.add_argument(
         "--no-tui",

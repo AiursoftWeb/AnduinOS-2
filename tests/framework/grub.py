@@ -42,7 +42,7 @@ def debug_kernel_arguments(architecture: Architecture) -> str:
 
 
 def uses_graphical_grub_synchronization(architecture: Architecture) -> bool:
-    """Only native/KVM amd64 has responsive pre-kernel QMP screenshots."""
+    """Use menu/editor synchronization for the AMD64 serial-debug path."""
 
     return architecture is Architecture.AMD64
 
@@ -83,7 +83,9 @@ def boot_iso_with_debug_shell(
         if extra_kernel_arguments
         else ""
     ) + (debug_kernel_arguments(architecture) if serial_debug else "")
-    if uses_graphical_grub_synchronization(architecture):
+    # Uninstrumented media checks must execute the real menu guard on either
+    # architecture, rather than bypassing it through the command prompt.
+    if uses_graphical_grub_synchronization(architecture) or not serial_debug:
         # The VM is released only after QMP is connected. Observe the menu as
         # soon as it appears; a fixed firmware sleep can miss its countdown.
         editor = _GraphicalGrubMenuEditor(qmp, scratch_dir=scratch_dir)
