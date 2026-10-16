@@ -23,10 +23,9 @@ source "$SCRIPT_DIR/args.sh"
 # Regression coverage: make test TEST_ARGS="--live-usb-only --no-tui".
 LIVE_MEDIA_LABEL="AOS_LIVE"
 
-# Map Debian arch name to GRUB target name (amd64 -> x86_64, arm64 -> arm64)
+# Reject unsupported targets before starting either build workshop.
 case "$TARGET_ARCH" in
-    amd64) GRUB_EFI_TARGET="x86_64-efi" ;;
-    arm64) GRUB_EFI_TARGET="arm64-efi" ;;
+    amd64|arm64) ;;
     *)
         print_error "Unsupported target architecture: $TARGET_ARCH"
         exit 1

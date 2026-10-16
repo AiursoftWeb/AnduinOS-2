@@ -26,12 +26,7 @@ apt install -y \
     --install-recommends
 judge "Install AnduinOS core system and kernel"
 
-guest_packages=()
-# Carry VMware integration on amd64; the installer retains it only on VMware.
-if [ "$TARGET_ARCH" = "amd64" ]; then
-    guest_packages+=(open-vm-tools-desktop)
-fi
-
+# Carry VMware integration on both architectures; the installer applies guest cleanup.
 print_ok "Installing AnduinOS Live components, desktop, and installer..."
 # The kernel is configured; resolve the remaining Live and desktop payloads together.
 # DKMS legitimately needs gcc/make/dpkg-dev, but dpkg-dev only recommends the
@@ -62,7 +57,7 @@ apt install -y \
     anduinos-hyperfluent-grub-theme \
     anduinos-installer-beta \
     anduinos-btrfs-snapshots-manager \
-    "${guest_packages[@]}" \
+    open-vm-tools-desktop \
     build-essential- \
     --install-recommends
 judge "Install AnduinOS Live components, desktop, and installer"
