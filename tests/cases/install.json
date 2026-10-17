@@ -132,7 +132,8 @@
     {
       "id": "uefi-nosb-online-btrfs-japanese-live-chinese-rime",
       "architectures": [
-        "amd64"
+        "amd64",
+        "arm64"
       ],
       "firmware": "uefi-nosb",
       "network": "online",
@@ -175,7 +176,8 @@
     {
       "id": "uefi-nosb-wifi-btrfs",
       "architectures": [
-        "amd64"
+        "amd64",
+        "arm64"
       ],
       "firmware": "uefi-nosb",
       "network": "wifi",
@@ -249,7 +251,10 @@
     },
     {
       "id": "uefi-nosb-coexistence-shared-esp-rejected",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "btrfs",
@@ -267,7 +272,10 @@
     },
     {
       "id": "uefi-nosb-coexistence-separate-esp",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "btrfs",
@@ -285,7 +293,10 @@
     },
     {
       "id": "uefi-nosb-coexistence-ext4-shrink",
-      "architectures": ["amd64"],
+      "architectures": [
+        "amd64",
+        "arm64"
+      ],
       "firmware": "uefi-nosb",
       "network": "offline",
       "filesystem": "ext4",
@@ -304,7 +315,8 @@
     {
       "id": "uefi-nosb-offline-manual-small-disk",
       "architectures": [
-        "amd64"
+        "amd64",
+        "arm64"
       ],
       "firmware": "uefi-nosb",
       "network": "offline",
@@ -324,7 +336,8 @@
     {
       "id": "uefi-unsupported-offline-btrfs",
       "architectures": [
-        "amd64"
+        "amd64",
+        "arm64"
       ],
       "firmware": "uefi-unsupported",
       "network": "offline",
@@ -342,7 +355,8 @@
     {
       "id": "uefi-unsupported-offline-ext4",
       "architectures": [
-        "amd64"
+        "amd64",
+        "arm64"
       ],
       "firmware": "uefi-unsupported",
       "network": "offline",

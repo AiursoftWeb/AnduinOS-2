@@ -7,7 +7,7 @@ from .catalog import _GHEX_APP_ID, _WECHAT_APP_ID
 from .events import _all_event_objects, _event_objects, _one_event
 
 
-def _validate_ghex_install_events(output: str) -> dict[str, object]:
+def _validate_ghex_install_events(output: str, architecture: str = "x86_64") -> dict[str, object]:
     events = _all_event_objects(output)
     sequence = []
     for fields in (
@@ -48,7 +48,7 @@ def _validate_ghex_install_events(output: str) -> dict[str, object]:
     if not isinstance(instances, list) or len(instances) != 1 or not isinstance(instances[0], dict):
         raise TestFailure("GHex launch requires exactly one running Flatpak instance")
     instance = instances[0]
-    if (instance.get("application") != _GHEX_APP_ID or instance.get("arch") != "x86_64"
+    if (instance.get("application") != _GHEX_APP_ID or instance.get("arch") != architecture
             or instance.get("branch") != "stable" or not instance.get("instance")
             or any(type(instance.get(key)) is not int or instance[key] <= 1 for key in ("pid", "child_pid"))):
         raise TestFailure("GHex Flatpak identity is invalid")

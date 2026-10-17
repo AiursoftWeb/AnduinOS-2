@@ -4,6 +4,7 @@ import json
 import re
 
 from framework.errors import TestFailure
+from framework.model import Architecture
 
 
 def validate_rejection_events(output: str) -> None:
@@ -75,11 +76,12 @@ def boot_order(nvram: str) -> tuple[str, ...]:
     return order
 
 
-def vendor_entry(nvram: str, esp: dict) -> str:
+def vendor_entry(nvram: str, esp: dict, architecture: Architecture = Architecture.AMD64) -> str:
+    suffix = "x64" if architecture is Architecture.AMD64 else "aa64"
     matches = [number for number, (active, line) in boot_entries(nvram).items()
                if active and re.search(r"^AnduinOS\s", line)
                and f",GPT,{esp['partuuid']},".lower() in line.lower()
-               and r"\efi\anduinos\shimx64.efi" in line.lower()]
+               and rf"\efi\anduinos\shim{suffix}.efi" in line.lower()]
     if len(matches) != 1:
         raise TestFailure("Expected a unique AnduinOS NVRAM entry for the exact ESP PARTUUID")
     return matches[0]
@@ -116,7 +118,8 @@ def assert_preserved(before: dict, after: dict, *, rejected: bool,
         raise TestFailure("Rejected plan created partitions")
 
 
-def validate_boot_identity(output: str, root: dict, esp: dict, hostname: str, firmware_esp: dict) -> None:
+def validate_boot_identity(output: str, root: dict, esp: dict, hostname: str, firmware_esp: dict,
+                           architecture: Architecture = Architecture.AMD64) -> None:
     def exact(key):
         matches = re.findall(rf"^{key}=(.+)$", output, re.MULTILINE)
         if len(matches) != 1:
@@ -126,5 +129,5 @@ def validate_boot_identity(output: str, root: dict, esp: dict, hostname: str, fi
             or exact("HOSTNAME") != hostname):
         raise TestFailure("Boot reached the wrong installed system/root/ESP")
     current = re.findall(r"^BootCurrent: ([0-9A-Fa-f]{4})$", output, re.MULTILINE)
-    if len(current) != 1 or current[0].upper() != vendor_entry(output, firmware_esp):
+    if len(current) != 1 or current[0].upper() != vendor_entry(output, firmware_esp, architecture):
         raise TestFailure("Boot did not enter through the expected ESP's firmware entry")

@@ -248,6 +248,18 @@ class CoexistenceOracleTests(unittest.TestCase):
             with self.subTest(output=bad), self.assertRaises(TestFailure):
                 validate_boot_identity(bad, a["btrfs"], a["vfat"], "test-a", b["vfat"])
 
+    def test_coexistence_loader_checks_reject_the_other_architecture(self):
+        a = installation_parts(snapshot())
+        for architecture, suffix, other in ((Architecture.AMD64, "x64", "aa64"),
+                                             (Architecture.ARM64, "aa64", "x64")):
+            nvram = snapshot()["nvram"].replace("shimx64.efi", f"shim{suffix}.efi")
+            self.assertEqual("0001", vendor_entry(nvram, a["vfat"], architecture))
+            with self.assertRaises(TestFailure):
+                vendor_entry(nvram.replace(f"shim{suffix}.efi", f"shim{other}.efi"), a["vfat"], architecture)
+            script = chainload_selection_script(a, architecture)
+            self.assertIn(f"chainloader /EFI/AnduinOS/shim{suffix}.efi", script)
+            self.assertNotIn(f"shim{other}.efi", script)
+
     def test_generated_shell_and_one_shot_selection_use_real_entry(self):
         a = installation_parts(snapshot())
         selection = chainload_selection_script(a)
@@ -273,7 +285,8 @@ class CoexistenceWiringTests(unittest.TestCase):
     def test_default_matrix_includes_all_three_modes_and_all_checks_are_unique(self):
         self.assertEqual(3, len(self.cases))
         for case in self.cases:
-            self.assertIn(case, self.matrix.select(Architecture.AMD64))
+            for architecture in Architecture:
+                self.assertIn(case, self.matrix.select(architecture))
             self.assertEqual(112, case.disk_gib)
             checks = scenario_check_ids(case)
             self.assertEqual(len(checks), len(set(checks)))
@@ -283,7 +296,7 @@ class CoexistenceWiringTests(unittest.TestCase):
     def test_unsupported_matrix_combinations_are_rejected(self):
         raw = json.loads((ROOT / "cases/install.json").read_text())
         case = next(c for c in raw["cases"] if c.get("storage_mode") == "coexistence-shared-esp")
-        for mutation in ({"disk_gib": 50}, {"architectures": ["arm64"]}, {"network": "online"},
+        for mutation in ({"disk_gib": 50}, {"network": "online"},
                          {"live_mode": "persistent"}, {"automatic_login": True},
                          {"filesystem": "ext4", "snapshots_manager": False}):
             with self.subTest(mutation=mutation), self.assertRaises(ConfigurationError):
@@ -294,13 +307,14 @@ class CoexistenceWiringTests(unittest.TestCase):
         case = next(c for c in raw["cases"] if c.get("storage_mode") == "coexistence-ext4-shrink")
         self.assertEqual(StorageMode.COEXISTENCE_EXT4_SHRINK, _load_scenario(case).storage_mode)
         for mutation in ({"filesystem": "btrfs"}, {"snapshots_manager": True},
-                         {"architectures": ["arm64"]}, {"disk_gib": 64},
+                         {"disk_gib": 64},
                          {"network": "online"}, {"automatic_login": True}):
             with self.subTest(mutation=mutation), self.assertRaises(ConfigurationError):
                 _load_scenario({**case, **mutation})
 
     def test_two_installs_do_not_raise_or_inherit_single_install_ram_limit(self):
         runner = ScenarioRunner.__new__(ScenarioRunner)
+        runner.architecture = Architecture.AMD64
         ramdisk = DiskStorage(Path("/example/ramdisk"), "ramdisk", "unit", qcow_limit_bytes=12 * 1024**3)
         runner.options = SimpleNamespace(disk_storage=ramdisk, artifacts_root=Path("/example/results"))
         for case in self.cases:
@@ -315,6 +329,7 @@ class CoexistenceWiringTests(unittest.TestCase):
         for scenario in self.cases:
             with self.subTest(scenario=scenario.id), tempfile.TemporaryDirectory() as temporary:
                 runner = ScenarioRunner.__new__(ScenarioRunner)
+                runner.architecture = Architecture.AMD64
                 runner.defaults = self.matrix.defaults
                 runner.check_status = None
                 runner._check_details = {}
@@ -369,6 +384,7 @@ class CoexistenceWiringTests(unittest.TestCase):
 
     def test_older_iso_fails_with_recorded_package_versions(self):
         runner = ScenarioRunner.__new__(ScenarioRunner)
+        runner.architecture = Architecture.AMD64
         vm = Mock()
         vm.serial.run.return_value = CommandResult("installer=2.0.4-1\ntoolkit=2.0.4-1", 1)
         with tempfile.TemporaryDirectory() as temporary:
@@ -379,6 +395,7 @@ class CoexistenceWiringTests(unittest.TestCase):
 
     def test_ext4_shrink_requires_the_new_installer_and_strict_manifest_evidence(self):
         runner = ScenarioRunner.__new__(ScenarioRunner)
+        runner.architecture = Architecture.AMD64
         runner._assert_live_cleanup = Mock()
         vm = Mock()
         with tempfile.TemporaryDirectory() as temporary:
@@ -398,6 +415,7 @@ class CoexistenceWiringTests(unittest.TestCase):
     def test_changed_ext4_file_manifest_blocks_boot_credit(self):
         case = next(c for c in self.cases if c.storage_mode is StorageMode.COEXISTENCE_EXT4_SHRINK)
         runner = ScenarioRunner.__new__(ScenarioRunner)
+        runner.architecture = Architecture.AMD64
         runner.defaults = self.matrix.defaults
         runner._check = Mock(side_effect=lambda *_args: contextlib.nullcontext())
         first = snapshot("ext4", 96)

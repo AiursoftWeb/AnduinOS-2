@@ -76,7 +76,8 @@ PY
         'e2fsck -f -n "$device"\nmount -o ro,noload')
 
 
-def chainload_selection_script(a: dict) -> str:
+def chainload_selection_script(a: dict, architecture: Architecture = Architecture.AMD64) -> str:
+    suffix = "x64" if architecture is Architecture.AMD64 else "aa64"
     esp_uuid = a["vfat"]["uuid"]
     if not re.fullmatch(r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}", esp_uuid):
         raise TestFailure("Unsafe FAT UUID in coexistence evidence")
@@ -87,7 +88,7 @@ def chainload_selection_script(a: dict) -> str:
 cfg="$mountpoint/boot/grub/grub.cfg"
 test -x "$mountpoint/etc/grub.d/43_anduinos_linux"
 test "$(grep -Fc {shlex.quote("menuentry '" + title + "'")} "$cfg")" = 1
-grep -F {shlex.quote('chainloader /EFI/AnduinOS/shimx64.efi')} "$cfg"
+grep -F {shlex.quote(f'chainloader /EFI/AnduinOS/shim{suffix}.efi')} "$cfg"
 grep -F 'set default="${{next_entry}}"' "$cfg"
 grub-script-check "$cfg"
 grub-editenv "$mountpoint/boot/grub/grubenv" set {shlex.quote('next_entry=' + title)}
@@ -188,7 +189,7 @@ printf 'HOSTNAME=%s\n' "$(hostname)"
 efibootmgr -v
 """.replace("ROOT_FSTYPE", installation_root(parts)["fstype"]), timeout=240)
         (artifacts / f"{phase}-identity.txt").write_text(result.stdout + "\n", encoding="utf-8")
-        validate_boot_identity(result.stdout, installation_root(parts), parts["vfat"], hostname, firmware_esp)
+        validate_boot_identity(result.stdout, installation_root(parts), parts["vfat"], hostname, firmware_esp, self.architecture)
         restored = vm.serial.run(render_installed_grub_restoration(), timeout=180)
         (artifacts / f"{phase}-restoration.txt").write_text(restored.stdout + "\n", encoding="utf-8")
         _login_gdm(vm, self.defaults.username, self.defaults.password, timeout=180)
@@ -220,7 +221,7 @@ efibootmgr -v
             self._coexistence_live(vm, scenario, b_dir, "live-b")
             initial = self._coexistence_snapshot(vm, b_dir, "initial-layout")
             a = installation_parts(initial, filesystem=filesystem, root_gib=96 if shrinking else 50)
-            vendor_entry(initial["nvram"], a["vfat"])
+            vendor_entry(initial["nvram"], a["vfat"], self.architecture)
             health = vm.serial.run(
                 "fsck.fat -n " + shlex.quote(a["vfat"]["path"]),
                 timeout=180, check=False,
@@ -253,7 +254,7 @@ efibootmgr -v
                     raise TestFailure("Original ext4 files, links or metadata changed during shrinking")
             if not shared:
                 b = installation_parts(after, excluded=paths, filesystem=filesystem)
-                b_entry = vendor_entry(after["nvram"], b["vfat"])
+                b_entry = vendor_entry(after["nvram"], b["vfat"], self.architecture)
                 order = re.findall(r"^BootOrder: (.+)$", after["nvram"], re.MULTILINE)
                 if len(order) != 1 or order[0].split(",")[0] != b_entry:
                     raise TestFailure("New installation B is not the default firmware entry")
@@ -271,7 +272,7 @@ efibootmgr -v
             self._coexistence_live(vm, scenario, chain_dir, "live-chainload")
             self._coexistence_arm(vm, a, chain_dir, "a-chainload")
             result = vm.serial.run(
-                mounted_root_script(installation_root(b), chainload_selection_script(a)).replace(
+                mounted_root_script(installation_root(b), chainload_selection_script(a, self.architecture)).replace(
                     "mount -o ro,noload", "mount -o rw"), timeout=180,
             )
             (chain_dir / "b-chainload-entry.txt").write_text(result.stdout + "\n", encoding="utf-8")

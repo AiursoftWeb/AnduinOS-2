@@ -550,8 +550,8 @@ def _wechat_install_command() -> str:
     return _flatpak_install_command(_WECHAT_APP_ID, "wechat")
 
 
-def _ghex_install_command() -> str:
-    return _flatpak_install_command(_GHEX_APP_ID, "ghex")
+def _ghex_install_command(architecture: str = "x86_64") -> str:
+    return _flatpak_install_command(_GHEX_APP_ID, "ghex", architecture)
 
 
 def _nextcloud_ppa_source_probe_command() -> str:
@@ -804,10 +804,10 @@ def _validate_flatpak_install_evidence(
     identifier: str,
     prefix: str,
     label: str,
+    architecture: str = "x86_64",
 ) -> dict[str, str]:
     """Require the selected public ref, commit, origin, and exported launcher."""
 
-    architecture = "x86_64"
     expected_ref = f"app/{identifier}/{architecture}/stable"
 
     if returncode != 0:
@@ -882,8 +882,9 @@ def _validate_wechat_install_evidence(output: str, returncode: int) -> dict[str,
     return _validate_flatpak_install_evidence(output, returncode, _WECHAT_APP_ID, "wechat", "WeChat")
 
 
-def _validate_ghex_install_evidence(output: str, returncode: int) -> dict[str, str]:
-    return _validate_flatpak_install_evidence(output, returncode, _GHEX_APP_ID, "ghex", "GHex")
+def _validate_ghex_install_evidence(output: str, returncode: int,
+                                    architecture: str = "x86_64") -> dict[str, str]:
+    return _validate_flatpak_install_evidence(output, returncode, _GHEX_APP_ID, "ghex", "GHex", architecture)
 
 
 def _validate_cpu_z_download_evidence(

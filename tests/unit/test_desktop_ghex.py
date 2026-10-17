@@ -14,6 +14,7 @@ from unittest.mock import Mock
 from assertions.desktop.system import _ghex_install_command, _validate_ghex_install_evidence
 from assertions.desktop.applications import _validate_ghex_install_events
 from framework.errors import TestFailure
+from framework.model import Architecture
 from business.desktop.applications import PublicApplicationChecks
 
 
@@ -23,25 +24,39 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class GhexAcceptanceTests(unittest.TestCase):
     def test_launch_and_post_launch_failures_remain_failures_but_are_distinguished(self):
-        for stage in ("launch", "invalid-evidence", "post-launch"):
-            with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
-                runner, vm = PublicApplicationChecks(), Mock()
-                vm.serial.run.return_value = SimpleNamespace(
-                    stdout=self.evidence(self.installation()), returncode=0)
-                def driver(*args, **kwargs):
-                    if stage == "launch":
-                        raise TestFailure("window absent")
-                    events = self.events()
-                    if stage == "invalid-evidence":
-                        events[-1]["windows"] = []
-                    kwargs["validator"](self.event_text(events))
-                    raise TestFailure("journal blocker")
-                runner._run_shell_driver = Mock(side_effect=driver)
-                with self.assertRaises(TestFailure):
-                    runner._exercise_ghex_install(vm, Mock(), Path(directory))
-                phase = "post-launch" if stage == "post-launch" else "launch"
-                self.assertEqual(f"classification={phase}-check-failed\nphase={phase}\n",
-                                 (Path(directory) / "ghex-classification.txt").read_text())
+        for architecture, flatpak_arch in ((Architecture.AMD64, "x86_64"),
+                                            (Architecture.ARM64, "aarch64")):
+            for stage in ("launch", "invalid-evidence", "post-launch"):
+                with self.subTest(stage=stage), tempfile.TemporaryDirectory() as directory:
+                    runner, vm = PublicApplicationChecks(), Mock()
+                    vm.config.architecture = architecture
+                    vm.serial.run.return_value = SimpleNamespace(
+                        stdout=self.evidence(self.installation()).replace("x86_64", flatpak_arch), returncode=0)
+                    def driver(*args, **kwargs):
+                        if stage == "launch":
+                            raise TestFailure("window absent")
+                        events = json.loads(json.dumps(self.events()).replace("x86_64", flatpak_arch))
+                        if stage == "invalid-evidence":
+                            events[-1]["windows"] = []
+                        kwargs["validator"](self.event_text(events))
+                        raise TestFailure("journal blocker")
+                    runner._run_shell_driver = Mock(side_effect=driver)
+                    with self.assertRaises(TestFailure):
+                        runner._exercise_ghex_install(vm, Mock(), Path(directory))
+                    phase = "post-launch" if stage == "post-launch" else "launch"
+                    self.assertEqual(f"classification={phase}-check-failed\nphase={phase}\n",
+                                     (Path(directory) / "ghex-classification.txt").read_text())
+
+    def test_native_arm_flatpak_is_required_at_install_and_launch(self):
+        installation = self.evidence(self.installation()).replace("x86_64", "aarch64")
+        events = self.event_text(self.events()).replace("x86_64", "aarch64")
+        self.assertIn("/aarch64/", _ghex_install_command("aarch64"))
+        self.assertEqual("aarch64", _validate_ghex_install_evidence(installation, 0, "aarch64")["ghex-arch"])
+        _validate_ghex_install_events(events, "aarch64")
+        with self.assertRaises(TestFailure):
+            _validate_ghex_install_evidence(installation, 0, "x86_64")
+        with self.assertRaises(TestFailure):
+            _validate_ghex_install_events(events, "x86_64")
 
     def test_flatpak_ps_accepts_omitted_trailing_status_columns(self):
         source = ROOT / "assertions/guest/ui/applications.py"

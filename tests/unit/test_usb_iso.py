@@ -4,7 +4,7 @@ import tempfile
 import io
 import json
 import xml.etree.ElementTree as ET
-from contextlib import redirect_stdout
+from contextlib import redirect_stdout, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -74,6 +74,7 @@ class RufusIsoModeTests(unittest.TestCase):
 
     def test_usb_checks_use_the_acceptance_dashboard_before_installation(self):
         inspection = SimpleNamespace(path=Path('image.iso'), sha256='fixture',
+                                     live_entries=(SimpleNamespace(kernel_arguments=('root=live:CDLABEL=AOS_LIVE',)),),
                                      architecture=Architecture.AMD64)
         with patch('business.live_usb.volume_label', return_value='AOS_LIVE'):
             checks = live_usb_suite_checks(inspection)
@@ -119,13 +120,20 @@ class RufusIsoModeTests(unittest.TestCase):
         self.assertTrue(all(case.state == 'passed' for case in dashboards[0].cases.values()))
 
     def test_usb_workflows_report_case_suite_and_real_check_levels(self):
+        for architecture in Architecture:
+            with self.subTest(architecture=architecture):
+                self._assert_usb_workflows(architecture)
+
+    def _assert_usb_workflows(self, architecture):
         configurations = []
         class FakeVm:
             def __init__(self, config):
                 configurations.append(config)
                 self.config = config
                 self.qmp = object()
+                self.spice_socket = Path("/test/spice.sock")
                 self.serial = SimpleNamespace(
+                    capture_output=nullcontext,
                     wait_for_shell=lambda _timeout: None,
                     run=lambda *_args, **_kwargs: SimpleNamespace(
                         returncode=0, stdout='ISO_USB_DESKTOP_PASSED'))
@@ -155,7 +163,8 @@ class RufusIsoModeTests(unittest.TestCase):
             variables = root / 'vars-template.fd'
             variables.write_bytes(b'fixture')
             inspection = SimpleNamespace(path=root / 'image.iso', sha256='fixture',
-                                         architecture=Architecture.AMD64)
+                                         live_entries=(SimpleNamespace(kernel_arguments=('root=live:CDLABEL=AOS_LIVE',)),),
+                                         architecture=architecture)
             with patch('business.live_usb.volume_label', return_value='AOS_LIVE'):
                 suites = live_usb_suite_checks(inspection)
                 dashboard = AcceptanceDashboard(
@@ -168,7 +177,7 @@ class RufusIsoModeTests(unittest.TestCase):
                       patch('business.live_usb.resolve_qemu', return_value=('qemu', 'kvm')),
                       patch('business.live_usb.prepare_iso_usb', side_effect=lambda _iso, work, _label: work / 'media.raw'),
                       patch('business.live_usb.QemuVm', FakeVm),
-                      patch('business.live_usb.boot_iso_with_debug_shell')):
+                      patch('business.live_usb.boot_iso_with_debug_shell') as boot):
                     passed = run_live_usb(inspection, root / 'run-live-usb', Mock(),
                                           dashboard=dashboard)
                 dashboard.close()
@@ -176,6 +185,12 @@ class RufusIsoModeTests(unittest.TestCase):
             junit = ET.parse(root / 'run-live-usb' / 'junit.xml').getroot()
         self.assertTrue(passed)
         self.assertEqual(len(configurations), 3)
+        self.assertTrue(all(config.architecture is architecture for config in configurations))
+        for index, label in enumerate(('AOS_LIVE', 'CUSTOM_USB')):
+            self.assertEqual(architecture, boot.call_args_list[index].args[2])
+            self.assertEqual((f'root=live:CDLABEL={label}',),
+                             boot.call_args_list[index].kwargs['kernel_arguments'])
+        self.assertFalse(boot.call_args_list[-1].kwargs['serial_debug'])
         self.assertTrue(all(config.firmware is Firmware.UEFI_SECURE_BOOT
                             for config in configurations))
         self.assertEqual(2, summary['schema_version'])

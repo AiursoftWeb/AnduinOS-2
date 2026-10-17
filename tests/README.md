@@ -1,6 +1,6 @@
 # ISO acceptance tests
 
-Run the complete release test below; `make test TEST_ARGS="--live-usb-only --no-tui"` selects only the AMD64 Rufus ISO-mode regression (default/custom FAT labels, UEFI, Live login and media integrity; not a release verdict):
+Run the complete release test below; `make test TEST_ARGS="--live-usb-only --no-tui"` selects only the Rufus ISO-mode regression (default/custom FAT labels, UEFI, Live login and media integrity; not a release verdict):
 
 ```bash
 make test
@@ -46,6 +46,20 @@ The check also runs in both online Secure Boot cases. Public status evidence,
 the accessibility tree, application log and a screenshot are retained; private
 keys are never copied into these artifacts. This is a semantic UI assertion,
 not a pixel-color test.
+
+## Architecture coverage
+
+Every UEFI installation case runs on AMD64 and ARM64, including Wi-Fi credential
+migration, cross-language installation, small disks and sequential coexistence.
+Both architectures run the same media checks and common desktop suites from the
+same UEFI installation bases. Firmware, EFI loader and native Flatpak names are
+selected for the guest architecture; wrong-architecture evidence remains a failure.
+
+The three BIOS cases are AMD64-only. The public Spotify catalog check is also
+AMD64-only because its upstream Flatpak publishes only x86_64; it has a separate
+`public-spotify` suite so it cannot exclude CPU-Z file handling or the Nextcloud
+PPA workflow from ARM64. CPU-Z is tested as a Windows file, not executed natively.
+GHex installation and launch use native x86_64/aarch64 refs on both platforms.
 
 ## Layout
 
@@ -142,7 +156,8 @@ across boots, not from GRUB text inspection alone.
 ## Firmware regression coverage
 
 The `uefi-unsupported-offline-btrfs` and `uefi-unsupported-offline-ext4`
-scenarios use the non-Secure-Boot OVMF image (`OVMF_CODE_4M.fd`). Override that
+scenarios use the non-Secure-Boot OVMF (`OVMF_CODE_4M.fd`) or AAVMF
+(`AAVMF_CODE.no-secboot.fd`) image for the target architecture. Override that
 specific image with `--uefi-unsupported-code`; `--uefi-code` remains the image
 for enabled/disabled Secure Boot scenarios. Each VM gets a fresh variable store.
 
@@ -157,7 +172,7 @@ The ISO must contain installer, toolkit, and Live settings versions at least
 
 ## Sequential AnduinOS coexistence
 
-The default AMD64 `make test` matrix includes three offline, UEFI Secure Boot
+The default AMD64 and ARM64 `make test` matrices includes three offline, UEFI Secure Boot
 disabled cases (one disposable 112 GiB sparse disk per case):
 
 - `uefi-nosb-coexistence-shared-esp-rejected`: install A through Advanced/manual
