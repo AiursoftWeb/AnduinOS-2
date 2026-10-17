@@ -1001,7 +1001,8 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
     def test_overlay_ssh_uses_only_its_ephemeral_key(self):
         runner = object.__new__(FeatureSuiteRunner)
         runner.username = "anduinostest"
-        vm = SimpleNamespace(config=SimpleNamespace(ssh_forward_port=2222))
+        vm = SimpleNamespace(config=SimpleNamespace(ssh_forward_port=2222),
+                             serial=SimpleNamespace(capture_output=nullcontext))
         result = SimpleNamespace(stdout="anduinostest\n", returncode=0)
         with patch("business.desktop.subprocess.run", return_value=result) as command:
             self.assertEqual("anduinostest\n", runner._ssh(vm, Path("control-key"), "id -un"))

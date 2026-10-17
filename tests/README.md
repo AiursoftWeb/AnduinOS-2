@@ -150,9 +150,9 @@ It requires Home-only support in the ISO; older packages fail, never skip.
 
 Wi-Fi lab setup waits for NetworkManager to answer before configuring radios;
 Live rescue waits for the active local Wayland session before launching its UI.
-Both waits are bounded and retain readiness evidence. Lifecycle shutdown waits
-continuously capture UART output and use SSH for additional stalled-shutdown
-diagnostics, without competing serial readers or extending the shutdown limit.
+Both waits are bounded and retain readiness evidence. Shutdown waits and
+feature SSH commands continuously capture UART output. Stalled-shutdown
+diagnostics use SSH, without competing serial readers or extending the shutdown limit.
 
 The installation matrix boots temporary Live overlays on the original
 read-only ISO. One amd64/arm64 scenario also boots a writable hybrid copy,

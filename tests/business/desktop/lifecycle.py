@@ -2,6 +2,7 @@
 
 import os
 import tempfile
+from contextlib import nullcontext
 
 from .context import *  # noqa: F403
 from framework.grub import boot_iso_with_debug_shell
@@ -1445,7 +1446,9 @@ class LifecycleChecks:
             "-u systemd-logind.service"
         )
         try:
-            output = self._ssh(vm, key, command, timeout=timeout, check=False)
+            output = self._ssh(
+                vm, key, command, timeout=timeout, check=False, capture_serial=False,
+            )
             return "Collected over SSH; UART retained in the serial log.\n" + output
         except Exception as error:
             return (
@@ -1518,7 +1521,9 @@ class LifecycleChecks:
                 # the overall deadline still bounds a genuinely broken boot.
                 attempt_timeout = max(1.0, min(30.0, remaining))
                 try:
-                    return self._ssh(vm, key, command, timeout=attempt_timeout)
+                    return self._ssh(
+                        vm, key, command, timeout=attempt_timeout, capture_serial=False,
+                    )
                 except (TestFailure, subprocess.TimeoutExpired) as error:
                     last = f"{type(error).__name__}: {error}"
                     time.sleep(2)
@@ -1532,6 +1537,7 @@ class LifecycleChecks:
         *,
         timeout: float = 60,
         check: bool = True,
+        capture_serial: bool = True,
     ) -> str:
         invocation = (
             "ssh",
@@ -1560,15 +1566,19 @@ class LifecycleChecks:
             f"{self.username}@127.0.0.1",
             command,
         )
-        result = subprocess.run(
-            invocation,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            check=False,
-            timeout=timeout,
-        )
+        # Ordinary SSH checks can also fill the guest UART after boot. Callers
+        # already holding the passive reader explicitly leave it in charge.
+        assert vm.serial is not None
+        with vm.serial.capture_output() if capture_serial else nullcontext():
+            result = subprocess.run(
+                invocation,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
         if check and result.returncode != 0:
             raise TestFailure(
                 f"Feature SSH control failed with {result.returncode}:\n"
