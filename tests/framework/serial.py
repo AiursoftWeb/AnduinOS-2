@@ -105,7 +105,7 @@ class SerialConsole:
 
     @contextlib.contextmanager
     def capture_output(self):
-        """Keep the UART draining during an exclusively graphical boot phase.
+        """Keep the UART draining during graphical or SSH-only observation.
 
         QEMU can block the guest and QMP when firmware fills an unread serial
         socket. No other serial operations may run inside this context. Keep

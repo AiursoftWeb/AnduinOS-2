@@ -1,5 +1,7 @@
 """Reboot, Btrfs rollback, and SSH recovery oracles."""
 
+from contextlib import nullcontext
+
 from unit.support import *  # noqa: F403
 from business.desktop.lifecycle import _validate_rescue_pointer_trace
 from assertions.guest.ui import rescue as rescue_ui
@@ -629,7 +631,8 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         )
         with patch("business.desktop.time.sleep"):
             output = runner._ssh_eventually(
-                SimpleNamespace(), Path("control-key"), command, timeout=60
+                SimpleNamespace(serial=SimpleNamespace(capture_output=nullcontext)),
+                Path("control-key"), command, timeout=60
             )
         self.assertEqual("graphical-ready\n", output)
         self.assertEqual(2, runner._ssh.call_count)
@@ -978,7 +981,8 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         )
         with patch("business.desktop.time.sleep"):
             output = runner._ssh_eventually(
-                SimpleNamespace(), Path("control-key"), "true", timeout=60
+                SimpleNamespace(serial=SimpleNamespace(capture_output=nullcontext)),
+                Path("control-key"), "true", timeout=60
             )
         self.assertEqual("ready\n", output)
         self.assertEqual(3, runner._ssh.call_count)
@@ -989,7 +993,8 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
     def test_ssh_eventually_fails_immediately_when_qemu_has_exited(self):
         runner = object.__new__(FeatureSuiteRunner)
         runner._ssh = Mock(side_effect=AssertionError("SSH must not be attempted"))
-        vm = SimpleNamespace(process=SimpleNamespace(poll=lambda: 0))
+        vm = SimpleNamespace(process=SimpleNamespace(poll=lambda: 0),
+                             serial=SimpleNamespace(capture_output=nullcontext))
 
         with self.assertRaisesRegex(TestFailure, "QEMU exited.*exit code 0"):
             runner._ssh_eventually(vm, Path("control-key"), "true", timeout=1200)
