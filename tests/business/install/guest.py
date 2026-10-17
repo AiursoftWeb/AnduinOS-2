@@ -426,12 +426,24 @@ def _power_off_clean_ext4(vm: QemuVm) -> None:
     """Normally shut down the installed ext4 guest; never fsck to hide a crash."""
     assert vm.serial is not None
     try:
-        vm.serial.run(
-            'test "$(findmnt -nro FSTYPE /)" = ext4 && sync && systemctl poweroff --no-block',
-            timeout=30,
-        )
+        deadline = time.monotonic() + 180
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TestFailure("Dracut migration kept the guest shutdown inhibited")
+            result = vm.serial.run(
+                'test "$(findmnt -nro FSTYPE /)" = ext4 && sync && systemctl poweroff --no-block',
+                timeout=min(30, remaining), check=False,
+            )
+            if result.returncode == 0:
+                break
+            # First-boot migration may still be writing the initrd. Respect
+            # its block inhibitor, and spend only the existing shutdown budget.
+            if "Dracut-migration-is-writing-boot-files" not in result.stdout:
+                raise TestFailure("Clean shutdown request failed:\n" + result.stdout)
+            time.sleep(1)
         with vm.serial.capture_output():
-            if vm.wait(180) != 0:
+            if vm.wait(max(0.1, deadline - time.monotonic())) != 0:
                 raise TestFailure("QEMU failed during the installed ext4 guest's normal shutdown")
     finally:
         vm.stop()
