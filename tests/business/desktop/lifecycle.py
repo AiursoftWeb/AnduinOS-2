@@ -1496,28 +1496,33 @@ class LifecycleChecks:
         *,
         timeout: float = 120,
     ) -> str:
-        deadline = time.monotonic() + timeout
-        last = ""
-        while time.monotonic() < deadline:
-            process = getattr(vm, "process", None)
-            if process is not None:
-                returncode = process.poll()
-                if returncode is not None:
-                    raise TestFailure(
-                        "QEMU exited while waiting for SSH control after boot "
-                        f"(exit code {returncode})"
-                    )
-            remaining = deadline - time.monotonic()
-            # A restored graphical session can saturate the disposable VM.
-            # Allow SSH key exchange and PAM more time than a TCP connect;
-            # the overall deadline still bounds a genuinely broken boot.
-            attempt_timeout = max(1.0, min(30.0, remaining))
-            try:
-                return self._ssh(vm, key, command, timeout=attempt_timeout)
-            except (TestFailure, subprocess.TimeoutExpired) as error:
-                last = f"{type(error).__name__}: {error}"
-                time.sleep(2)
-        raise TestFailure("SSH control did not become healthy after boot: " + last[-4000:])
+        # SSH does not consume the UART. Keep draining it so firmware or
+        # kernel output cannot block QEMU while we wait for the guest.
+        # No active serial commands run inside this context.
+        assert vm.serial is not None
+        with vm.serial.capture_output():
+            deadline = time.monotonic() + timeout
+            last = ""
+            while time.monotonic() < deadline:
+                process = getattr(vm, "process", None)
+                if process is not None:
+                    returncode = process.poll()
+                    if returncode is not None:
+                        raise TestFailure(
+                            "QEMU exited while waiting for SSH control after boot "
+                            f"(exit code {returncode})"
+                        )
+                remaining = deadline - time.monotonic()
+                # A restored graphical session can saturate the disposable VM.
+                # Allow SSH key exchange and PAM more time than a TCP connect;
+                # the overall deadline still bounds a genuinely broken boot.
+                attempt_timeout = max(1.0, min(30.0, remaining))
+                try:
+                    return self._ssh(vm, key, command, timeout=attempt_timeout)
+                except (TestFailure, subprocess.TimeoutExpired) as error:
+                    last = f"{type(error).__name__}: {error}"
+                    time.sleep(2)
+            raise TestFailure("SSH control did not become healthy after boot: " + last[-4000:])
 
     def _ssh(
         self,
