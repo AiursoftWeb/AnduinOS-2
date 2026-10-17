@@ -70,6 +70,7 @@ def second_install(first, filesystem="btrfs"):
 class CoexistenceOracleTests(unittest.TestCase):
     def test_ext4_baseline_requires_normal_shutdown_without_repair_or_qmp_kill(self):
         vm = Mock()
+        vm.serial.capture_output.side_effect = contextlib.nullcontext
         vm.wait.return_value = 0
         _power_off_clean_ext4(vm)
         self.assertIn("systemctl poweroff --no-block", vm.serial.run.call_args.args[0])

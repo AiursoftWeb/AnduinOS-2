@@ -430,8 +430,9 @@ def _power_off_clean_ext4(vm: QemuVm) -> None:
             'test "$(findmnt -nro FSTYPE /)" = ext4 && sync && systemctl poweroff --no-block',
             timeout=30,
         )
-        if vm.wait(180) != 0:
-            raise TestFailure("QEMU failed during the installed ext4 guest's normal shutdown")
+        with vm.serial.capture_output():
+            if vm.wait(180) != 0:
+                raise TestFailure("QEMU failed during the installed ext4 guest's normal shutdown")
     finally:
         vm.stop()
 
