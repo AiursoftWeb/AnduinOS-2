@@ -85,9 +85,12 @@ def verify():
     matches = [record for record in records if record.get("factory_home_snapshot_id") == state["target"]]
     require(len(matches) == 1, "Expected one completed Home recovery")
     record = matches[0]
-    require(record.get("schema_version") == 5 and record.get("home_only") is True
+    require(record.get("schema_version") in (5, 6) and record.get("home_only") is True
             and record.get("reset_home") is True and record.get("phase") == "confirmed"
             and record.get("failure") is None, "Home recovery did not confirm successfully")
+    if record["schema_version"] == 6:
+        require(record.get("purge_history") is False,
+                "Home-only recovery must not purge snapshot history")
     require(record.get("fallback_home_snapshot_id"), "Home safety snapshot is missing")
     for identifier, filename, content in (
         (state["target"], "deleted.txt", "baseline\n"),
