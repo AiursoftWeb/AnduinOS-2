@@ -83,18 +83,21 @@ def verify(workloads, erase_home):
                     key=lambda record: record["created_at"])
     require(len(resets) == len(workloads), "Expected one completed recovery per round")
     for index, record in enumerate(resets):
-        require(record.get("schema_version") in (4, 5), "Unsupported recovery history schema")
+        require(record.get("schema_version") in (4, 5, 6), "Unsupported recovery history schema")
         require(record["phase"] == "confirmed" and record["failure"] is None,
                 "Recovery history does not confirm a successful reset")
         require(record["reset_home"] is (index == 1),
                 "Recovery history disagrees with the requested Home policy")
-        if record["schema_version"] == 5:
+        if record["schema_version"] == 6:
+            require(record.get("purge_history") is False,
+                    "Factory recovery purged history without the workload requesting it")
+        if record["schema_version"] in (5, 6):
             require(record.get("home_only") is False, "Factory recovery must include the system")
             if record["reset_home"]:
                 require(record.get("fallback_home_snapshot_id"), "Home rollback has no safety snapshot")
-    # Keep the currently running older ISO qualification valid. New-format
-    # transactions MUST preserve history, not merely accept either outcome.
-    preserve_history = resets[-1]["schema_version"] == 5
+    # Schema v4 erased Home history with Home. Later schemas must preserve it
+    # for this workload, which never requests history cleanup.
+    preserve_history = resets[-1]["schema_version"] in (5, 6)
     for workload in workloads:
         for name, content in workload["files"].items():
             path = Path(name)
