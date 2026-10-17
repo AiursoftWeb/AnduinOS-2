@@ -12,7 +12,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[2]
 LOADERS = {
     "amd64": ("BOOTX64.EFI", "grubx64.efi", "mmx64.efi"),
-    "arm64": ("BOOTAA64.EFI", "grubaa64.efi", "mmaa64.efi", "BOOTAA64.CSV"),
+    "arm64": ("BOOTAA64.EFI", "grubaa64.efi", "mmaa64.efi"),
 }
 
 
@@ -81,7 +81,7 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
 
     def download(self, arch="amd64"):
         return self.run_function("download_live_efi", self.target,
-                                 self.output / arch, arch, "AnduinOS 测试")
+                                 self.output / arch, arch)
 
     def mock_steps(self, names):
         self.executable("print_ok", "#!/bin/sh\nexit 0\n")
@@ -113,7 +113,7 @@ raise SystemExit(23 if os.environ.get("FAIL_STEP") == name else 0)
                     ["configure_ubuntu_sources", root],
                     ["sudo", "chroot", root, "apt-get", "update"],
                     ["download_live_efi", root,
-                     str(self.work / "build root/image/isolinux/live-efi"), arch, "AnduinOS 测试"],
+                     str(self.work / "build root/image/isolinux/live-efi"), arch],
                     ["judge", "Export official Ubuntu Live bootloaders"],
                 ])
         for step in ("bootstrap_ubuntu_root", "configure_ubuntu_sources", "sudo", "download_live_efi"):
@@ -252,9 +252,12 @@ else:
                 for name in loaders:
                     result = subprocess.check_output(["mtype", "-i", str(image), f"::/EFI/BOOT/{name}"])
                     self.assertEqual(result, (self.output / arch / name).read_bytes())
-                    if name.endswith(".CSV"):
-                        self.assertEqual(result.decode("utf-16-le"),
-                                         "shimaa64.efi,AnduinOS 测试,,This is the boot entry for AnduinOS 测试\n")
+                listing = subprocess.check_output(
+                    ["mdir", "-b", "-i", str(image), "::/EFI/BOOT"], text=True)
+                self.assertEqual(
+                    {name.rsplit("/", 1)[-1] for name in listing.splitlines()},
+                    {*loaders, "grub.cfg"},
+                )
                 config = subprocess.check_output(["mtype", "-i", str(image), "::/EFI/BOOT/grub.cfg"], text=True)
                 self.assertIn("--label --set=anduinos_iso AOS_LIVE", config)
                 self.assertIn("configfile $prefix/grub.cfg", config)

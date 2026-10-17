@@ -289,7 +289,7 @@ function export_anduinos_payload() {
 # Contract: the configured Ubuntu suite/architecture must provide signed shim,
 # CD GRUB and MokManager. On success, image/isolinux/live-efi/ contains:
 #   amd64: BOOTX64.EFI, grubx64.efi, mmx64.efi
-#   arm64: BOOTAA64.EFI, grubaa64.efi, mmaa64.efi, BOOTAA64.CSV
+#   arm64: BOOTAA64.EFI, grubaa64.efi, mmaa64.efi
 # build_iso copies these files into efiboot.img and removes the staging folder.
 # official_ubuntu_os uses only Ubuntu sources; boot packages are downloaded and
 # extracted, not installed. Neither this root nor its APT cache enters the ISO
@@ -301,7 +301,7 @@ function run_chroot_ubuntu() {
     sudo chroot "$target_root" apt-get update
     download_live_efi \
         "$target_root" "$SCRIPT_DIR/image/isolinux/live-efi" \
-        "$TARGET_ARCH" "$TARGET_BUSINESS_NAME"
+        "$TARGET_ARCH"
     judge "Export official Ubuntu Live bootloaders"
 }
 
@@ -310,7 +310,6 @@ function download_live_efi() (
     target_root=$(realpath "$1")
     output=$(realpath -m "$2")
     target_arch=$3
-    business_name=$4
     case "$target_arch" in
         amd64) efi_suffix=x64; grub_platform=x86_64 ;;
         arm64) efi_suffix=aa64; grub_platform=arm64 ;;
@@ -334,12 +333,6 @@ function download_live_efi() (
     install -m 0644 "$scratch/payload/usr/lib/grub/$grub_platform-efi-signed/gcd$efi_suffix.efi.signed" "$output/grub$efi_suffix.efi"
     install -m 0644 "$scratch/payload/usr/lib/shim/shim$efi_suffix.efi.signed.latest" "$output/BOOT${efi_suffix^^}.EFI"
     install -m 0644 "$scratch/payload/usr/lib/shim/mm$efi_suffix.efi" "$output/mm$efi_suffix.efi"
-    # Preserve the existing ARM64 media registration descriptor.
-    if [ "$target_arch" = arm64 ]; then
-        printf 'shim%s.efi,%s,,This is the boot entry for %s\n' \
-            "$efi_suffix" "$business_name" "$business_name" \
-            | iconv -f UTF-8 -t UTF-16LE > "$output/BOOT${efi_suffix^^}.CSV"
-    fi
 )
 
 function generate_live_grub_config() {

@@ -131,7 +131,6 @@ class DracutLiveContractTests(unittest.TestCase):
         # repositories. Exact exported filenames and FAT contents are exercised
         # for both architectures in test_live_efi_inputs.
         self.assertIn('function download_live_efi()', build)
-        self.assertIn('"$TARGET_ARCH" "$TARGET_BUSINESS_NAME"', build)
         self.assertIn('chroot --userspec="$(id -u):$(id -g)" "$target_root"', build)
         self.assertIn('Dir::Etc::sourcelist=/etc/apt/sources.list.d/ubuntu.sources', build)
         self.assertIn('"grub-efi-$2-signed:$2" "shim-signed:$2"', build)
