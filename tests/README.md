@@ -27,6 +27,11 @@ summary explicitly mark it as a partial regression, **not a release verdict**.
 Unknown or architecture-incompatible IDs fail; `--case` cannot be combined with
 `--live-usb-only`. Plain `make test` continues to run the full release matrix.
 
+Installed graphical checks hold a temporary GNOME idle inhibitor after login
+and release it before shutdown, including on failure. Acquisition and release
+are recorded in the case artifacts. The product's idle delay and lock policy
+remain unchanged; passive boot checks run without the inhibitor.
+
 For the offline Secure Boot first-install regression:
 
 ```bash

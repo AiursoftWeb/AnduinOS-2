@@ -485,125 +485,126 @@ fi
                     "Installed GNOME session belongs to unexpected user: "
                     f"{graphical_user}"
                 )
-        with self._check(scenario, "regional.installed-zh-cn"):
-            self.status(
-                scenario.id,
-                "Checking installed configuration and the active GNOME region",
-            )
-            assert_installed_region(
-                vm.serial,
-                self.defaults.username,
-                self.defaults.live_locale,
-                self.defaults.live_timezone,
-                artifacts,
-            )
-            if scenario.live_region is not None:
-                assert_installed_keyboard(
+        with _inhibit_desktop_idle(vm.serial, self.defaults.username, artifacts):
+            with self._check(scenario, "regional.installed-zh-cn"):
+                self.status(
+                    scenario.id,
+                    "Checking installed configuration and the active GNOME region",
+                )
+                assert_installed_region(
                     vm.serial,
                     self.defaults.username,
-                    self.defaults.live_keyboard,
+                    self.defaults.live_locale,
+                    self.defaults.live_timezone,
                     artifacts,
                 )
-            self._assert_installed_ui_region(vm, scenario, artifacts)
-        with self._check(scenario, "theme.cursor-user-session"):
-            vm.screenshot("installed-desktop")
-            self._assert_desktop_session(vm, scenario, artifacts)
-        if scenario.mok_enrollment:
-            with self._check(scenario, "secure-boot.first-boot-green"):
-                self._assert_secure_boot_first_boot(vm, scenario, artifacts)
-        desktop_action_cursors = (
-            self._capture_journal_cursors(vm)
-            if scenario.desktop_contracts
-            else None
-        )
-        if scenario.desktop_contracts:
-            for label, check in (
-                (
-                    "render.twemoji-water-pistol",
-                    lambda: self._exercise_font_rendering(vm, scenario, artifacts),
-                ),
-                (
-                    "files.appimage-open",
-                    lambda: self._exercise_appimage_open(
-                        vm, scenario, artifacts
+                if scenario.live_region is not None:
+                    assert_installed_keyboard(
+                        vm.serial,
+                        self.defaults.username,
+                        self.defaults.live_keyboard,
+                        artifacts,
+                    )
+                self._assert_installed_ui_region(vm, scenario, artifacts)
+            with self._check(scenario, "theme.cursor-user-session"):
+                vm.screenshot("installed-desktop")
+                self._assert_desktop_session(vm, scenario, artifacts)
+            if scenario.mok_enrollment:
+                with self._check(scenario, "secure-boot.first-boot-green"):
+                    self._assert_secure_boot_first_boot(vm, scenario, artifacts)
+            desktop_action_cursors = (
+                self._capture_journal_cursors(vm)
+                if scenario.desktop_contracts
+                else None
+            )
+            if scenario.desktop_contracts:
+                for label, check in (
+                    (
+                        "render.twemoji-water-pistol",
+                        lambda: self._exercise_font_rendering(vm, scenario, artifacts),
                     ),
-                ),
-                (
-                    "files.exe-thumbnail-fixture",
-                    lambda: self._exercise_windows_executable_thumbnail(
-                        vm, scenario, artifacts
+                    (
+                        "files.appimage-open",
+                        lambda: self._exercise_appimage_open(
+                            vm, scenario, artifacts
+                        ),
                     ),
-                ),
-                (
-                    "files.exe-open-fixture",
-                    lambda: self._exercise_windows_executable_open(
-                        vm, scenario, artifacts
+                    (
+                        "files.exe-thumbnail-fixture",
+                        lambda: self._exercise_windows_executable_thumbnail(
+                            vm, scenario, artifacts
+                        ),
                     ),
-                ),
-                (
-                    "shell.extension-policy",
-                    lambda: self._assert_gnome_extensions(vm, scenario, artifacts),
-                ),
-                (
-                    "shell.extension-errors",
-                    lambda: self._assert_gnome_extension_errors(
-                        vm, scenario, artifacts
+                    (
+                        "files.exe-open-fixture",
+                        lambda: self._exercise_windows_executable_open(
+                            vm, scenario, artifacts
+                        ),
                     ),
-                ),
-                (
-                    "display.spice-resize",
-                    lambda: self._exercise_dynamic_resolution(
-                        vm, scenario, artifacts
+                    (
+                        "shell.extension-policy",
+                        lambda: self._assert_gnome_extensions(vm, scenario, artifacts),
                     ),
-                ),
-            ):
+                    (
+                        "shell.extension-errors",
+                        lambda: self._assert_gnome_extension_errors(
+                            vm, scenario, artifacts
+                        ),
+                    ),
+                    (
+                        "display.spice-resize",
+                        lambda: self._exercise_dynamic_resolution(
+                            vm, scenario, artifacts
+                        ),
+                    ),
+                ):
+                    self._collect_gate_failure(
+                        scenario, label, check, desktop_failures, artifacts
+                    )
+            if scenario.snapshots_manager:
+                with self._check(scenario, "snapshots-manager"):
+                    self._exercise_snapshots_manager(vm, scenario, artifacts)
+            if scenario.desktop_contracts:
                 self._collect_gate_failure(
-                    scenario, label, check, desktop_failures, artifacts
-                )
-        if scenario.snapshots_manager:
-            with self._check(scenario, "snapshots-manager"):
-                self._exercise_snapshots_manager(vm, scenario, artifacts)
-        if scenario.desktop_contracts:
-            self._collect_gate_failure(
-                scenario,
-                "host-ssh",
-                lambda: self._assert_host_ssh(vm, scenario, artifacts),
-                desktop_failures,
-                artifacts,
-            )
-        else:
-            with self._check(scenario, "host-ssh"):
-                self._assert_host_ssh(vm, scenario, artifacts)
-        if scenario.ssh is SshPolicy.TOGGLE:
-            with self._check(scenario, "gnome-ssh-toggle"):
-                self._exercise_gnome_ssh_switch(vm, scenario, artifacts)
-        if scenario.desktop_contracts:
-            assert desktop_action_cursors is not None
-            self._collect_gate_failure(
-                scenario,
-                "journal.action-scoped",
-                lambda: self._assert_action_scoped_journal(
-                    vm,
                     scenario,
-                    desktop_action_cursors,
+                    "host-ssh",
+                    lambda: self._assert_host_ssh(vm, scenario, artifacts),
+                    desktop_failures,
                     artifacts,
-                ),
-                desktop_failures,
-                artifacts,
-            )
-            self._collect_gate_failure(
-                scenario,
-                "journal.boot-and-idle",
-                lambda: self._assert_journal_health(vm, scenario, artifacts),
-                desktop_failures,
-                artifacts,
-            )
-        if scenario.desktop_contracts:
-            _retrieve_file(
-                vm.serial,
-                "/usr/share/plymouth/themes/anduinos/watermark.png",
-                artifacts / "plymouth-watermark.png",
-            )
+                )
+            else:
+                with self._check(scenario, "host-ssh"):
+                    self._assert_host_ssh(vm, scenario, artifacts)
+            if scenario.ssh is SshPolicy.TOGGLE:
+                with self._check(scenario, "gnome-ssh-toggle"):
+                    self._exercise_gnome_ssh_switch(vm, scenario, artifacts)
+            if scenario.desktop_contracts:
+                assert desktop_action_cursors is not None
+                self._collect_gate_failure(
+                    scenario,
+                    "journal.action-scoped",
+                    lambda: self._assert_action_scoped_journal(
+                        vm,
+                        scenario,
+                        desktop_action_cursors,
+                        artifacts,
+                    ),
+                    desktop_failures,
+                    artifacts,
+                )
+                self._collect_gate_failure(
+                    scenario,
+                    "journal.boot-and-idle",
+                    lambda: self._assert_journal_health(vm, scenario, artifacts),
+                    desktop_failures,
+                    artifacts,
+                )
+            if scenario.desktop_contracts:
+                _retrieve_file(
+                    vm.serial,
+                    "/usr/share/plymouth/themes/anduinos/watermark.png",
+                    artifacts / "plymouth-watermark.png",
+                )
         if prepare_overlay_base and not scenario.desktop_contracts:
             # Every overlay boots the product's generated default menuentry.
             # The immutable run-local base carries a byte-for-byte backup plus

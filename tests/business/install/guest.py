@@ -111,6 +111,66 @@ runuser -u "$user" -- env \
     return common + environment + f" \\\n    {rendered}\n"
 
 
+@contextmanager
+def _inhibit_desktop_idle(console, user: str, artifacts: Path):
+    """Keep graphical checks unlocked without changing the product's lock policy."""
+    unit = f"anduinos-acceptance-idle-{uuid.uuid4().hex}"
+    acquire = f"""
+set -eu
+systemd-run --user --unit={unit} --collect \\
+    --property=PartOf=graphical-session.target \\
+    --property=TimeoutStopSec=5 \\
+    gnome-session-inhibit --app-id={unit} \\
+    --reason='Installed desktop acceptance' --inhibit=idle --inhibit-only
+deadline=$((SECONDS + 30))
+while :; do
+    inhibitors=$(gnome-session-inhibit --list)
+    if printf '%s\\n' "$inhibitors" | grep -Fq '{unit}:'; then
+        break
+    fi
+    test "$SECONDS" -lt "$deadline"
+    sleep 0.2
+done
+printf '%s\\n' "$inhibitors"
+systemctl --user is-active {unit}
+active=$(gdbus call --session --dest org.gnome.ScreenSaver \\
+    --object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.GetActive)
+printf 'ScreenSaver.GetActive=%s\\n' "$active"
+test "$active" = '(false,)'
+"""
+    release = f"""
+set -eu
+systemctl --user stop {unit}
+deadline=$((SECONDS + 10))
+while :; do
+    inhibitors=$(gnome-session-inhibit --list)
+    if ! printf '%s\\n' "$inhibitors" | grep -Fq '{unit}:'; then
+        break
+    fi
+    test "$SECONDS" -lt "$deadline"
+    sleep 0.2
+done
+printf '%s\\n' "$inhibitors"
+"""
+    try:
+        result = console.run(
+            _desktop_command(user, ("bash", "-c", acquire)),
+            timeout=45, check=False,
+        )
+        (artifacts / "desktop-idle-inhibitor-acquire.txt").write_text(result.stdout)
+        if result.returncode:
+            raise TestFailure("Could not inhibit idle in the unlocked desktop session")
+        yield
+    finally:
+        result = console.run(
+            _desktop_command(user, ("bash", "-c", release)),
+            timeout=30, check=False,
+        )
+        (artifacts / "desktop-idle-inhibitor-release.txt").write_text(result.stdout)
+        if result.returncode:
+            raise TestFailure("Could not release the desktop idle inhibitor")
+
+
 def _retrieve_tree(console, remote_root: str, destination: Path) -> None:
     token = uuid.uuid4().hex
     remote_archive = f"/run/anduinos-evidence-{token}.tar.gz"
