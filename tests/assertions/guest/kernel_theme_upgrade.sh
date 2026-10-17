@@ -44,7 +44,7 @@ if [ "${#consumers[@]}" = 2 ]; then
 fi
 grub-script-check /boot/grub/grub.cfg
 dpkg-query -S /usr/sbin/update-initramfs | grep '^dracut:'
-dpkg-query -S /usr/sbin/update-grub | grep '^grub2-common:'
+dpkg-query -S /usr/sbin/update-grub | grep '^anduinos-grub:'
 test -z "$(dpkg-divert --list /usr/sbin/update-initramfs)"
 test -z "$(dpkg-divert --list /usr/sbin/update-grub)"
 printf 'kernel-theme-transaction=passed\n'
