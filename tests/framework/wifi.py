@@ -53,6 +53,26 @@ class WifiLab:
     ) -> WifiLabState:
         """Create two hwsim radios and a local-only WPA2 AP in the guest."""
 
+        ready = console.run(
+            """set -eu
+deadline=$((SECONDS + 120))
+until systemctl is-active --quiet NetworkManager && nmcli --wait 5 -t general status; do
+    if [ "$SECONDS" -ge "$deadline" ]; then
+        systemctl status NetworkManager --no-pager || true
+        exit 1
+    fi
+    sleep 1
+done
+printf 'network-manager-ready=yes\\n'
+""",
+            timeout=130,
+            check=False,
+        )
+        evidence.with_name(f"{evidence.stem}-network-ready.txt").write_text(
+            ready.stdout + "\n", encoding="utf-8"
+        )
+        if ready.returncode:
+            raise TestFailure("NetworkManager did not become ready for the Wi-Fi lab")
         result = console.run(
             self._setup_script(
                 require_client_disconnected=require_client_disconnected,

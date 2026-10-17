@@ -189,7 +189,13 @@ class LifecycleChecks:
         (artifacts / "rescue-live-preflight.txt").write_text(
             live_preflight.stdout + "\n", encoding="utf-8"
         )
-        live_user = _graphical_user(vm.serial)
+        live_user = "live"
+        session = self._wait_for_graphical_identity(
+            vm, live_user, timeout=self.options.boot_timeout_seconds,
+        )
+        (artifacts / "rescue-live-session.txt").write_text(
+            session + "\n", encoding="utf-8"
+        )
         live_remote = "/run/anduinos-live-rescue-acceptance"
         vm.serial.run(f"install -d -m 0777 {live_remote}/evidence")
         self.driver.upload(vm.serial, live_remote)
@@ -1382,14 +1388,20 @@ class LifecycleChecks:
         diagnostic_at = time.monotonic() + min(15.0, timeout / 3)
         diagnostic_path = artifacts / f"{label}-diagnostics.txt"
         diagnostic_written = False
-        while time.monotonic() < deadline:
-            if vm.process.poll() is not None:
-                return
-            if not diagnostic_written and time.monotonic() >= diagnostic_at:
-                diagnostic_written = True
-                output = self._collect_power_transition_diagnostics(vm, key)
-                diagnostic_path.write_text(output + "\n", encoding="utf-8")
-            time.sleep(0.5)
+        assert vm.serial is not None
+        # The guest can block on an unread UART while sshd is shutting down.
+        # Keep one passive reader; diagnostics below must use SSH, not serial.run.
+        with vm.serial.capture_output():
+            while time.monotonic() < deadline:
+                if vm.process.poll() is not None:
+                    return
+                if not diagnostic_written and time.monotonic() >= diagnostic_at:
+                    diagnostic_written = True
+                    output = self._collect_power_transition_diagnostics(
+                        vm, key, timeout=min(30.0, max(0.1, deadline - time.monotonic())),
+                    )
+                    diagnostic_path.write_text(output + "\n", encoding="utf-8")
+                time.sleep(0.5)
         if not diagnostic_written:
             diagnostic_path.write_text(
                 "QEMU remained alive but the diagnostic collection deadline "
@@ -1401,8 +1413,10 @@ class LifecycleChecks:
             f"{timeout:.0f} seconds; see {diagnostic_path.name}"
         )
 
-    def _collect_power_transition_diagnostics(self, vm: QemuVm, key: Path) -> str:
-        """Collect shutdown state over serial first, because sshd stops early."""
+    def _collect_power_transition_diagnostics(
+        self, vm: QemuVm, key: Path, *, timeout: float,
+    ) -> str:
+        """Try SSH diagnostics while the caller continuously captures the UART."""
 
         command = (
             "set +e; "
@@ -1430,29 +1444,15 @@ class LifecycleChecks:
             "-u anduinos-acceptance-poweroff.service "
             "-u systemd-logind.service"
         )
-        failures: list[str] = []
-        serial = getattr(vm, "serial", None)
-        if serial is not None:
-            try:
-                result = serial.run(command, timeout=20, check=False)
-                return "Collected over the root serial control channel.\n" + result.stdout
-            except Exception as error:
-                failures.append(
-                    "Serial diagnostic collection failed: "
-                    f"{type(error).__name__}: {error}"
-                )
         try:
-            output = self._ssh(vm, key, command, timeout=30, check=False)
-            prefix = "\n".join(failures)
-            if prefix:
-                prefix += "\n"
-            return prefix + "Collected over SSH.\n" + output
+            output = self._ssh(vm, key, command, timeout=timeout, check=False)
+            return "Collected over SSH; UART retained in the serial log.\n" + output
         except Exception as error:
-            failures.append(
+            return (
                 "SSH diagnostic collection failed while QEMU remained alive: "
-                f"{type(error).__name__}: {error}"
+                f"{type(error).__name__}: {error}\n"
+                "UART output remains available in the serial log."
             )
-            return "\n".join(failures)
 
     @staticmethod
     def _graphical_boot_ready_command() -> str:

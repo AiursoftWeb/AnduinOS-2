@@ -148,6 +148,12 @@ It requires Home-only support in the ISO; older packages fail, never skip.
 
 `rescue-center-offline-restore` takes a system snapshot, uninstalls GNOME Shell, proves the installed desktop cannot start, then boots the tested Live ISO and drives the real Rescue Center UI with host QMP pointer clicks. It selects the damaged installation and baseline, keeps the default safety snapshot enabled, restores offline, removes the Live ISO, and requires a healthy graphical boot, restored package state, preserved newer Home data, and an archived transaction.
 
+Wi-Fi lab setup waits for NetworkManager to answer before configuring radios;
+Live rescue waits for the active local Wayland session before launching its UI.
+Both waits are bounded and retain readiness evidence. Lifecycle shutdown waits
+continuously capture UART output and use SSH for additional stalled-shutdown
+diagnostics, without competing serial readers or extending the shutdown limit.
+
 The installation matrix boots temporary Live overlays on the original
 read-only ISO. One amd64/arm64 scenario also boots a writable hybrid copy,
 writes a sentinel, powers off, and boots the same media again before

@@ -134,7 +134,8 @@ def select_ext4_root():
         options = {"Btrfs (recommended)", "Btrfs（推荐）", "ext4 (classic)", "ext4（经典版）"}
         candidates = [node for node in visible_nodes() if role(node) == "combo box"
             and in_storage_editor(node) and options.intersection(dropdown_display_text(node))]
-        if len(candidates) != 1:
+        identities = {accessible_identity(node) for node in candidates}
+        if None in identities or len(identities) != 1:
             raise UiFailure("Cannot uniquely identify the manual root filesystem selector")
         return candidates[0]
     for attempt in range(80):
