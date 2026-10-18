@@ -52,6 +52,11 @@ the accessibility tree, application log and a screenshot are retained; private
 keys are never copied into these artifacts. This is a semantic UI assertion,
 not a pixel-color test.
 
+Factory-reset checks that erase Home use password SSH after the control key is
+removed. Both key and password SSH waits continuously drain the guest UART so
+firmware output cannot block boot; recovery health and old-key removal checks
+remain required.
+
 ## Architecture coverage
 
 Every UEFI installation case runs on AMD64 and ARM64, including Wi-Fi credential
