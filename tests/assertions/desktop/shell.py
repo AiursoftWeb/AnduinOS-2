@@ -807,7 +807,7 @@ def _validate_context_menu_keyboard(
     return plan_index, activated_index
 
 
-def _validate_store_search_events(output: str, app_name: str = "GHex") -> None:
+def _validate_store_search_events(output: str, app_name: str = "Inkscape") -> None:
     events = _all_event_objects(output)
     opened, _ = _one_event(
         events,

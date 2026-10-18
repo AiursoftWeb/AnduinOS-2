@@ -350,15 +350,15 @@ class DesktopShellOracleTests(FeatureOracleCase):
             {"event": "qmp-text", "request": "store-search-text"},
             {
                 "event": "start-search-result",
-                "query": "GHex",
-                "accessible_name": "GHex",
+                "query": "Inkscape",
+                "accessible_name": "Inkscape",
                 "role": "text",
                 "application": "gnome-shell",
                 "stable_observations": 4,
             },
             {
                 "event": "search-entry-focus",
-                "query": "GHex",
+                "query": "Inkscape",
                 "role": "text",
                 "application": "gnome-shell",
                 "focused": True,
@@ -370,19 +370,19 @@ class DesktopShellOracleTests(FeatureOracleCase):
             },
             {
                 "event": "store-result-activated",
-                "accessible_name": "GHex",
+                "accessible_name": "Inkscape",
                 "role": "text",
                 "method": "qmp-keyboard",
             },
             {
                 "event": "store-search",
                 "application": "gnome-software",
-                "detail_names": ["GHex"],
+                "detail_names": ["Inkscape"],
                 "visible": True,
             },
         )
         _validate_store_search_events(passing)
-        _validate_store_search_events(passing.replace("GHex", "Spotify"), "Spotify")
+        _validate_store_search_events(passing.replace("Inkscape", "Spotify"), "Spotify")
         with self.assertRaisesRegex(TestFailure, "unstable ArcMenu"):
             _validate_store_search_events(
                 passing.replace('"stable_observations": 4', '"stable_observations": 1')

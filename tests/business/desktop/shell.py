@@ -302,7 +302,7 @@ class ShellChecks:
         base: PromotedBase,
         artifacts: Path,
     ) -> None:
-        """Open GHex's cached Software details with the VM link down."""
+        """Open Inkscape's cached Software details with the VM link down."""
 
         assert vm.qmp is not None and vm.serial is not None
         vm.qmp.set_link("nic0", up=False)
@@ -339,8 +339,8 @@ class ShellChecks:
             artifacts,
             mode="shell-store-search",
             validator=_validate_store_search_events,
-            expected="GHex",
-            text_inputs={"store-search-text": "GHex"},
+            expected="Inkscape",
+            text_inputs={"store-search-text": "Inkscape"},
         )
     def _graphical_session_id(self, vm: QemuVm, user: str) -> str:
         assert vm.serial is not None
