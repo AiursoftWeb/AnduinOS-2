@@ -102,7 +102,7 @@ from business.desktop import (
     _validate_super_tab_events,
     _validate_super_u_events,
     _validate_video_open_events,
-    _validate_spotify_store_events,
+    _validate_store_search_events,
     _validate_wechat_install_evidence,
     _validate_wechat_install_events,
     _validate_wechat_tray_events,

@@ -665,7 +665,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             body[confirmation:],
         )
 
-    def test_spotify_release_check_physically_drops_the_qemu_nic(self):
+    def test_store_search_release_check_physically_drops_the_qemu_nic(self):
         runner = object.__new__(FeatureSuiteRunner)
         runner._run_shell_driver = Mock()
         serial = Mock()
@@ -680,8 +680,8 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         base = SimpleNamespace(scenario=SimpleNamespace(id="bios-online-btrfs"))
         with tempfile.TemporaryDirectory() as directory:
             artifacts = Path(directory)
-            runner._exercise_spotify_store(vm, base, artifacts)
-            evidence = (artifacts / "spotify-network-isolation.txt").read_text()
+            runner._exercise_store_search(vm, base, artifacts)
+            evidence = (artifacts / "store-search-network-isolation.txt").read_text()
 
         qmp.set_link.assert_called_once_with("nic0", up=False)
         self.assertIn("carrier=0", evidence)

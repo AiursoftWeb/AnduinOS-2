@@ -221,13 +221,13 @@
       ]
     },
     {
-      "id": "shell-spotify-store",
+      "id": "shell-store-search",
       "source_cases": {
         "amd64": "uefi-sb-online-btrfs",
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
-        "search.spotify-store"
+        "search.store-search"
       ],
       "isolation": "overlay",
       "observation_modes": ["controlled"]

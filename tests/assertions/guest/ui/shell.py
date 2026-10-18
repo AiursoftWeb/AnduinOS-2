@@ -703,47 +703,47 @@ def exercise_desktop_shortcut(evidence: Path) -> None:
     )
 
 
-def exercise_spotify_store(evidence: Path) -> None:
+def exercise_store_search(evidence: Path, app_name: str) -> None:
     dismiss_initial_setup()
     semantic, target, _search_entry = _open_arcmenu_search(
-        "Spotify",
-        "spotify-search",
+        app_name,
+        "store-search",
     )
     result_name = name(semantic)
     result_role = role(target)
-    event("qmp-key", request="spotify-result-activate", key="ret")
+    event("qmp-key", request="store-result-activate", key="ret")
     software_application = wait_application(
         ("gnome-software", "Software", "软件"), timeout=120
     )
     event(
-        "spotify-result-activated",
+        "store-result-activated",
         accessible_name=result_name,
         role=result_role,
         method="qmp-keyboard",
     )
     deadline = time.monotonic() + 120
-    spotify_nodes = []
+    app_nodes = []
     while time.monotonic() < deadline:
-        spotify_nodes = [
+        app_nodes = [
             item
             for item in visible_nodes()
-            if "spotify" in name(item).casefold()
+            if app_name.casefold() in name(item).casefold()
             and any(
                 token in owning_application(item).casefold()
                 for token in ("gnome-software", "software", "软件")
             )
         ]
-        if spotify_nodes:
+        if app_nodes:
             break
         time.sleep(0.5)
-    if not spotify_nodes:
-        dump_accessibility(evidence / "spotify-store-missing.txt")
-        raise UiFailure("GNOME Software did not open a Spotify details page")
-    dump_accessibility(evidence / "spotify-store-details.txt")
+    if not app_nodes:
+        dump_accessibility(evidence / "store-search-missing.txt")
+        raise UiFailure(f"GNOME Software did not open a {app_name} details page")
+    dump_accessibility(evidence / "store-search-details.txt")
     event(
-        "spotify-store",
+        "store-search",
         application=software_application,
-        detail_names=sorted({name(item) for item in spotify_nodes if name(item)}),
+        detail_names=sorted({name(item) for item in app_nodes if name(item)}),
         visible=True,
     )
 __all__ = tuple(name for name in globals() if not name.startswith("__"))

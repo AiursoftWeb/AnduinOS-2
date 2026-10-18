@@ -66,6 +66,11 @@ AMD64-only because its upstream Flatpak publishes only x86_64; it has a separate
 PPA workflow from ARM64. CPU-Z is tested as a Windows file, not executed natively.
 GHex installation and launch use native x86_64/aarch64 refs on both platforms.
 
+The shared `shell-store-search` suite searches for GHex on AMD64 and ARM64
+with the QEMU NIC disconnected, then opens its cached GNOME Software details.
+GHex is available on both architectures; the separate public Spotify check
+retains its AMD64-only catalog contract.
+
 ## Layout
 
 ```text

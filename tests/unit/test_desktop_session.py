@@ -245,7 +245,7 @@ class DesktopSessionOracleTests(FeatureOracleCase):
             "def _desktop_frames", 1
         )[0]
         shortcut_body = source.split("def exercise_desktop_shortcut", 1)[1].split(
-            "def exercise_spotify_store", 1
+            "def exercise_store_search", 1
         )[0]
         self.assertIn('owning_application(item) == "gjs"', wait_body)
         self.assertIn('role(item) == "label"', wait_body)

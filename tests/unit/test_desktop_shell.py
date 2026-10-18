@@ -340,53 +340,54 @@ class DesktopShellOracleTests(FeatureOracleCase):
                 passing.replace('"bounds": [0, 0, 1280, 752]', '"bounds": [0, 0, 10, 10]')
             )
 
-    def test_spotify_store_oracle_rejects_an_unrelated_details_page(self):
+    def test_store_search_oracle_rejects_an_unrelated_details_page(self):
         passing = self._events(
             {
                 "event": "qmp-key",
-                "request": "spotify-search-open",
+                "request": "store-search-open",
                 "key": "meta_l",
             },
-            {"event": "qmp-text", "request": "spotify-search-text"},
+            {"event": "qmp-text", "request": "store-search-text"},
             {
                 "event": "start-search-result",
-                "query": "Spotify",
-                "accessible_name": "Spotify",
+                "query": "GHex",
+                "accessible_name": "GHex",
                 "role": "text",
                 "application": "gnome-shell",
                 "stable_observations": 4,
             },
             {
                 "event": "search-entry-focus",
-                "query": "Spotify",
+                "query": "GHex",
                 "role": "text",
                 "application": "gnome-shell",
                 "focused": True,
             },
             {
                 "event": "qmp-key",
-                "request": "spotify-result-activate",
+                "request": "store-result-activate",
                 "key": "ret",
             },
             {
-                "event": "spotify-result-activated",
-                "accessible_name": "Spotify",
+                "event": "store-result-activated",
+                "accessible_name": "GHex",
                 "role": "text",
                 "method": "qmp-keyboard",
             },
             {
-                "event": "spotify-store",
+                "event": "store-search",
                 "application": "gnome-software",
-                "detail_names": ["Spotify"],
+                "detail_names": ["GHex"],
                 "visible": True,
             },
         )
-        _validate_spotify_store_events(passing)
+        _validate_store_search_events(passing)
+        _validate_store_search_events(passing.replace("GHex", "Spotify"), "Spotify")
         with self.assertRaisesRegex(TestFailure, "unstable ArcMenu"):
-            _validate_spotify_store_events(
+            _validate_store_search_events(
                 passing.replace('"stable_observations": 4', '"stable_observations": 1')
             )
         with self.assertRaisesRegex(TestFailure, "real Software details page"):
-            _validate_spotify_store_events(
+            _validate_store_search_events(
                 passing.replace('"application": "gnome-software"', '"application": "firefox"')
             )

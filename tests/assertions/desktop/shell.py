@@ -807,52 +807,52 @@ def _validate_context_menu_keyboard(
     return plan_index, activated_index
 
 
-def _validate_spotify_store_events(output: str) -> None:
+def _validate_store_search_events(output: str, app_name: str = "GHex") -> None:
     events = _all_event_objects(output)
     opened, _ = _one_event(
         events,
-        context="Spotify search",
+        context=f"{app_name} search",
         event="qmp-key",
-        request="spotify-search-open",
+        request="store-search-open",
         key="meta_l",
     )
     typed, _ = _one_event(
         events,
-        context="Spotify search",
+        context=f"{app_name} search",
         event="qmp-text",
-        request="spotify-search-text",
+        request="store-search-text",
     )
     result, search = _one_event(
         events,
-        context="Spotify search",
+        context=f"{app_name} search",
         event="start-search-result",
-        query="Spotify",
-        accessible_name="Spotify",
+        query=app_name,
+        accessible_name=app_name,
         application="gnome-shell",
     )
     if search.get("stable_observations") != 4:
-        raise TestFailure("Spotify used an unstable ArcMenu search result")
+        raise TestFailure(f"{app_name} used an unstable ArcMenu search result")
     focused, _ = _one_event(
         events,
-        context="Spotify search",
+        context=f"{app_name} search",
         event="search-entry-focus",
-        query="Spotify",
+        query=app_name,
         role="text",
         application="gnome-shell",
         focused=True,
     )
     activated, activation = _one_event(
         events,
-        context="Spotify search",
-        event="spotify-result-activated",
-        accessible_name="Spotify",
+        context=f"{app_name} search",
+        event="store-result-activated",
+        accessible_name=app_name,
         method="qmp-keyboard",
     )
     activation_key, _ = _one_event(
         events,
-        context="Spotify search",
+        context=f"{app_name} search",
         event="qmp-key",
-        request="spotify-result-activate",
+        request="store-result-activate",
         key="ret",
     )
     if activation.get("role") not in {
@@ -862,11 +862,11 @@ def _validate_spotify_store_events(output: str) -> None:
         "label",
         "text",
     }:
-        raise TestFailure("Spotify search activated an unrelated result role")
+        raise TestFailure(f"{app_name} search activated an unrelated result role")
     details, store = _one_event(
         events,
-        context="Spotify search",
-        event="spotify-store",
+        context=f"{app_name} search",
+        event="store-search",
         visible=True,
     )
     application = store.get("application")
@@ -878,11 +878,14 @@ def _validate_spotify_store_events(output: str) -> None:
             for token in ("gnome-software", "software", "软件")
         )
         or not isinstance(names, list)
-        or not any(isinstance(name, str) and name.casefold() == "spotify" for name in names)
+        or not any(
+            isinstance(name, str) and name.casefold() == app_name.casefold()
+            for name in names
+        )
     ):
-        raise TestFailure("Spotify did not open its real Software details page")
+        raise TestFailure(f"{app_name} did not open its real Software details page")
     if not opened < typed < result < focused < activation_key < activated < details:
-        raise TestFailure("Spotify search and Software navigation are out of order")
+        raise TestFailure(f"{app_name} search and Software navigation are out of order")
 
 
 __all__ = tuple(name for name in globals() if name.startswith("_"))

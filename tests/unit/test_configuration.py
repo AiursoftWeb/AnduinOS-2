@@ -248,7 +248,7 @@ class MatrixTests(unittest.TestCase):
                 "shell-start-menu",
                 "shell-panel-taskbar",
                 "shell-desktop-shortcut",
-                "shell-spotify-store",
+                "shell-store-search",
                 "public-ecosystem",
                 "public-ghex",
                 "public-spotify",

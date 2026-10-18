@@ -66,7 +66,7 @@ def main() -> int:
             "shell-desktop-icons",
             "shell-desktop-terminal",
             "shell-desktop-shortcut",
-            "shell-spotify-store",
+            "shell-store-search",
             "public-wechat-install",
             "public-ghex-install",
             "public-wechat-tray",
@@ -217,8 +217,10 @@ def main() -> int:
             exercise_desktop_terminal(args.evidence)
         elif args.mode == "shell-desktop-shortcut":
             exercise_desktop_shortcut(args.evidence)
-        elif args.mode == "shell-spotify-store":
-            exercise_spotify_store(args.evidence)
+        elif args.mode == "shell-store-search":
+            if not args.expected:
+                raise UiFailure("Store search requires --expected")
+            exercise_store_search(args.evidence, args.expected)
         elif args.mode == "public-wechat-install":
             exercise_wechat_install(args.evidence)
         elif args.mode == "public-ghex-install":
