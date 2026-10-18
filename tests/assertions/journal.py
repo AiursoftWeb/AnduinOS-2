@@ -198,6 +198,7 @@ class JournalPolicy:
         failed_system_units: Iterable[str] = (),
         failed_user_units: Iterable[str] = (),
         action_scope: str = "",
+        acpi_pci_without_dt: bool = False,
     ) -> JournalVerdict:
         merged = merge_journal_entries(entries)
         blockers: list[JournalFinding] = []
@@ -223,6 +224,21 @@ class JournalPolicy:
             "fatal message",
         )
         for entry in merged:
+            # Linux's optional PCI-to-DT helper used pr_err for a normal ACPI
+            # boot; upstream 0111d600f0f4 changes only that call to pr_debug.
+            if acpi_pci_without_dt and is_pci_of_root_diagnostic(entry):
+                rule_id = "pci-of-root-absent-on-acpi"
+                counts[rule_id] = counts.get(rule_id, 0) + 1
+                if counts[rule_id] == 1:
+                    known.append(JournalFinding(
+                        "known-diagnostic",
+                        "Linux PCI: optional Device Tree node creation was skipped. "
+                        "Guest evidence confirms one ACPI PCI root, no Device Tree, "
+                        "and bound storage, network and display controllers.",
+                        entry,
+                        rule_id,
+                    ))
+                    continue
             matching_rule = next(
                 (
                     rule
@@ -288,6 +304,44 @@ class JournalPolicy:
             tuple(observations),
             len(merged),
         )
+
+
+def is_pci_of_root_diagnostic(entry: JournalEntry) -> bool:
+    return (
+        entry.priority == 3
+        and entry.identifiers == ("kernel",)
+        and entry.message ==
+        "PCI: OF: of_root node is NULL, cannot create PCI host bridge node"
+    )
+
+
+def render_pci_firmware_script() -> str:
+    """Collect actual guest topology; never infer firmware from CPU architecture."""
+    program = """
+import json
+from pathlib import Path
+
+roots = sorted(Path('/sys/devices').glob('pci????:??'))
+firmware = [str((root / 'firmware_node').resolve()) for root in roots]
+devices = [
+    {'address': device.name, 'class': (device / 'class').read_text().strip(),
+     'driver': (device / 'driver').resolve().name if (device / 'driver').exists() else None}
+    for device in sorted(Path('/sys/bus/pci/devices').glob('*'))
+]
+device_tree = Path('/sys/firmware/devicetree/base').exists()
+bound_classes = {int(device['class'], 16) >> 16 for device in devices if device['driver']}
+eligible = (
+    Path('/sys/firmware/acpi/tables').is_dir()
+    and len(roots) == 1
+    and (roots[0] / 'firmware_node/subsystem').resolve() == Path('/sys/bus/acpi')
+    and not device_tree
+    and {1, 2, 3} <= bound_classes
+    and all(device['driver'] for device in devices if int(device['class'], 16) >> 16 in {1, 2, 3})
+)
+print(json.dumps({'pci_root_firmware': firmware, 'device_tree': device_tree,
+                  'pci_devices': devices, 'acpi_pci_without_dt': eligible}, indent=2))
+""".strip()
+    return f"python3 -c {shlex.quote(program)}"
 
 
 def render_guest_collection_script(

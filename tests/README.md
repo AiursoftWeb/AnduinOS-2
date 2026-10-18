@@ -133,6 +133,16 @@ require maintaining a hash in this repository.
 GHex uses an isolated local search; Spotify suites retain the Software provider.
 Plymouth is checked before debug injection and retains failed frames; **BLOCKED** prerequisites prevent release.
 
+The boot journal retains one exact kernel `PCI: OF: of_root node is NULL,
+cannot create PCI host bridge node` message as a known diagnostic only when
+guest sysfs confirms one ACPI PCI root, no Device Tree, and driver-bound storage,
+network and display controllers. The collected topology is retained in
+`installed-pci-firmware.json`; missing evidence, repeated messages and other PCI
+errors still fail. This rule is identical on both architectures and leaves all
+functional assertions intact. The optional PCI-to-DT helper continues normal PCI
+enumeration; [the upstream fix](https://github.com/torvalds/linux/commit/0111d600f0f456d09eb0ff6ac217fa5f30ae79ab)
+changes only its log level from error to debug.
+
 `system-lifecycle` reinstalls the actual installed kernel and theme packages in
 its disposable VM, removes generated module dependency indexes, and configures
 Plymouth and Disk Snapshots Manager before the pending kernel. Their updates

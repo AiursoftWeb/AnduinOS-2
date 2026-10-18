@@ -1,6 +1,7 @@
 """Action-scoped, idle-boot journal, and passive Plymouth behavior."""
 
 from .context import *  # noqa: F403
+from assertions.journal import is_pci_of_root_diagnostic, render_pci_firmware_script
 
 
 class JournalChecks:
@@ -232,12 +233,22 @@ printf 'input-sources=%s\n' "$sources"
         entries = parse_journal_jsonl(system_journal.stdout, "system") + (
             parse_journal_jsonl(user_journal.stdout, "user")
         )
+        acpi_pci_without_dt = False
+        if any(is_pci_of_root_diagnostic(entry) for entry in entries):
+            firmware = vm.serial.run(render_pci_firmware_script(), timeout=60)
+            (artifacts / "installed-pci-firmware.json").write_text(
+                firmware.stdout + "\n", encoding="utf-8"
+            )
+            acpi_pci_without_dt = (
+                json.loads(firmware.stdout).get("acpi_pci_without_dt") is True
+            )
         verdict = policy.classify(
             entries,
             scenario,
             package_versions,
             failed_system_units=system_units.stdout.splitlines(),
             failed_user_units=user_units.stdout.splitlines(),
+            acpi_pci_without_dt=acpi_pci_without_dt,
         )
         report = render_verdict(verdict)
         (artifacts / "installed-journal-verdict.json").write_text(
