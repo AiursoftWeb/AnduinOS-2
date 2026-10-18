@@ -70,14 +70,24 @@ def second_install(first, filesystem="btrfs"):
 class CoexistenceOracleTests(unittest.TestCase):
     def test_ext4_baseline_requires_normal_shutdown_without_repair_or_qmp_kill(self):
         vm = Mock()
+        vm.serial.capture_output.side_effect = contextlib.nullcontext
+        vm.serial.run.return_value = SimpleNamespace(returncode=0, stdout="")
+        vm.serial.run.side_effect = [
+            SimpleNamespace(returncode=1, stdout="Dracut-migration-is-writing-boot-files"),
+            vm.serial.run.return_value,
+        ]
         vm.wait.return_value = 0
-        _power_off_clean_ext4(vm)
+        with patch("business.install.guest.time.sleep"):
+            _power_off_clean_ext4(vm)
         self.assertIn("systemctl poweroff --no-block", vm.serial.run.call_args.args[0])
         self.assertNotIn("e2fsck", vm.serial.run.call_args.args[0])
         vm.qmp.quit.assert_not_called()
-        vm.wait.assert_called_once_with(180)
+        vm.wait.assert_called_once()
+        self.assertGreater(vm.wait.call_args.args[0], 0)
+        self.assertLessEqual(vm.wait.call_args.args[0], 180)
         vm.stop.assert_called_once_with()
         vm.reset_mock()
+        vm.serial.run.side_effect = None
         vm.wait.side_effect = TestFailure("shutdown timed out")
         with self.assertRaisesRegex(TestFailure, "shutdown timed out"):
             _power_off_clean_ext4(vm)

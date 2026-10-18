@@ -57,6 +57,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         runner._login_gdm_over_ssh = Mock()
         runner._ssh = Mock(return_value="poweroff-requested")
         runner._wait_for_power_transition = Mock()
+        runner._wait_for_graphical_identity = Mock(return_value="graphical-user=live\n")
         restored_commands = []
         runner._ssh_eventually = Mock(
             side_effect=lambda _vm, _key, command, **_kwargs: (
@@ -90,10 +91,6 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                 patch("business.desktop.lifecycle.boot_iso_with_debug_shell"),
                 patch("business.desktop.lifecycle._run_with_qmp_key_requests", side_effect=run_ui),
                 patch("business.desktop.lifecycle._retrieve_tree"),
-                patch(
-                    "business.desktop.lifecycle._graphical_user",
-                    return_value="acceptance",
-                ),
             ):
                 runner._exercise_rescue_center_offline_restore(
                     vm, base, Path(directory)
@@ -1004,7 +1001,8 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
     def test_overlay_ssh_uses_only_its_ephemeral_key(self):
         runner = object.__new__(FeatureSuiteRunner)
         runner.username = "anduinostest"
-        vm = SimpleNamespace(config=SimpleNamespace(ssh_forward_port=2222))
+        vm = SimpleNamespace(config=SimpleNamespace(ssh_forward_port=2222),
+                             serial=SimpleNamespace(capture_output=nullcontext))
         result = SimpleNamespace(stdout="anduinostest\n", returncode=0)
         with patch("business.desktop.subprocess.run", return_value=result) as command:
             self.assertEqual("anduinostest\n", runner._ssh(vm, Path("control-key"), "id -un"))
@@ -1027,7 +1025,10 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
 
         runner = object.__new__(FeatureSuiteRunner)
         runner._ssh = lambda *_args, **_kwargs: "timer failed: inhibitor active"
-        vm = SimpleNamespace(process=SimpleNamespace(poll=lambda: None))
+        vm = SimpleNamespace(
+            process=SimpleNamespace(poll=lambda: None),
+            serial=SimpleNamespace(capture_output=nullcontext),
+        )
         with tempfile.TemporaryDirectory() as directory:
             artifacts = Path(directory)
             with (
@@ -1047,7 +1048,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             ).read_text(encoding="utf-8")
         self.assertIn("inhibitor active", evidence)
 
-    def test_stalled_btrfs_power_transition_prefers_root_serial_diagnostics(self):
+    def test_stalled_btrfs_power_transition_retains_ssh_systemd_state(self):
         class Clock:
             now = 0.0
 
@@ -1059,13 +1060,9 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             def sleep(cls, seconds):
                 cls.now += seconds
 
-        serial = SimpleNamespace(
-            run=lambda *_args, **_kwargs: SimpleNamespace(
-                stdout="42 shutdown.target start running"
-            )
-        )
+        serial = SimpleNamespace(capture_output=nullcontext)
         runner = object.__new__(FeatureSuiteRunner)
-        runner._ssh = Mock(side_effect=AssertionError("SSH must not be preferred"))
+        runner._ssh = Mock(return_value="42 shutdown.target start running")
         vm = SimpleNamespace(
             process=SimpleNamespace(poll=lambda: None),
             serial=serial,
@@ -1087,6 +1084,6 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             evidence = (
                 artifacts / "btrfs-rollback-reboot-diagnostics.txt"
             ).read_text(encoding="utf-8")
-        self.assertIn("root serial control channel", evidence)
+        self.assertIn("Collected over SSH", evidence)
         self.assertIn("shutdown.target", evidence)
-        runner._ssh.assert_not_called()
+        runner._ssh.assert_called_once()
