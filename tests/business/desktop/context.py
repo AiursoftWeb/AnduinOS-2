@@ -74,7 +74,7 @@ _SHELL_DRIVER_CHECKS = frozenset(
         "desktop.icons-visible",
         "desktop.context-menu-terminal",
         "desktop.create-shortcut",
-        "search.spotify-store",
+        "search.store-search",
         "store.spotify-public",
         "app.ghex-install",
     }
@@ -106,7 +106,7 @@ _LOCAL_SEARCH_DRIVER_MODES = frozenset(
 )
 _SOFTWARE_SEARCH_DRIVER_MODES = frozenset(
     {
-        "shell-spotify-store",
+        "shell-store-search",
         "public-wechat-install",
     }
 )

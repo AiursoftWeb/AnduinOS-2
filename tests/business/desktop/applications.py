@@ -128,9 +128,10 @@ class PublicApplicationChecks:
                 vm,
                 base,
                 artifacts,
-                mode="shell-spotify-store",
-                validator=_validate_spotify_store_events,
-                text_inputs={"spotify-search-text": "Spotify"},
+                mode="shell-store-search",
+                validator=lambda output: _validate_store_search_events(output, "Spotify"),
+                expected="Spotify",
+                text_inputs={"store-search-text": "Spotify"},
             )
         except TestFailure as error:
             (artifacts / "spotify-public-classification.txt").write_text(

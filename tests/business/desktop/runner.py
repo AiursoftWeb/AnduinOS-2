@@ -81,7 +81,7 @@ class FeatureSuiteRunner(
         "terminal.ptyxis-initial-size": "_exercise_ptyxis_initial_size",
         "desktop.context-menu-terminal": "_exercise_desktop_terminal",
         "desktop.create-shortcut": "_exercise_desktop_shortcut",
-        "search.spotify-store": "_exercise_spotify_store",
+        "search.store-search": "_exercise_store_search",
         "files.cpuz-thumbnail-and-open": "_exercise_public_cpu_z",
         "apt.nextcloud-client-ppa": "_exercise_nextcloud_ppa",
         "store.spotify-public": "_exercise_spotify_public",

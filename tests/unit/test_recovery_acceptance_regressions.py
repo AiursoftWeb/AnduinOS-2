@@ -284,7 +284,7 @@ class AcceptanceRegressionTests(unittest.TestCase):
         self.assertIn("app.ghex-install", _LOCAL_ARCMENU_SEARCH_CHECKS)
         self.assertIn("public-ghex-install", _LOCAL_SEARCH_DRIVER_MODES)
         self.assertNotIn("public-ghex-install", _SOFTWARE_SEARCH_DRIVER_MODES)
-        self.assertIn("shell-spotify-store", _SOFTWARE_SEARCH_DRIVER_MODES)
+        self.assertIn("shell-store-search", _SOFTWARE_SEARCH_DRIVER_MODES)
         self.assertNotIn("store.spotify-public", _LOCAL_ARCMENU_SEARCH_CHECKS)
         # Isolation runs before login and is asserted around each local probe.
         boot = inspect.getsource(FeatureSuiteRunner._boot_overlay)

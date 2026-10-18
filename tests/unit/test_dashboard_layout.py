@@ -19,7 +19,7 @@ def sample_dashboard():
            "uefi-sb-online-btrfs", "uefi-sb-online-ext4", "uefi-nosb-offline-manual-small-disk")
     suite_names = ("input-and-appearance", "file-integration", "accounts-gdm", "desktop-theme",
                    "shell-shortcuts", "shell-start-menu", "shell-panel-taskbar",
-                   "shell-desktop-shortcut", "shell-spotify-store", "public-ecosystem", "public-ghex")
+                   "shell-desktop-shortcut", "shell-store-search", "public-ecosystem", "public-ghex")
     suites = {name: (name + ".check",) for name in suite_names}
     suites["desktop-theme"] = ("appearance.theme-menu-localized", "appearance.theme-gtk",
                                "appearance.theme-qt", "appearance.theme-firefox")

@@ -296,13 +296,13 @@ class ShellChecks:
             validator=_validate_desktop_terminal_events,
         )
 
-    def _exercise_spotify_store(
+    def _exercise_store_search(
         self,
         vm: QemuVm,
         base: PromotedBase,
         artifacts: Path,
     ) -> None:
-        """Open Spotify's cached Software details with the VM link down."""
+        """Open Inkscape's cached Software details with the VM link down."""
 
         assert vm.qmp is not None and vm.serial is not None
         vm.qmp.set_link("nic0", up=False)
@@ -328,7 +328,7 @@ class ShellChecks:
             "\"$iface\" \"$carrier\" \"$state\"",
             timeout=45,
         )
-        (artifacts / "spotify-network-isolation.txt").write_text(
+        (artifacts / "store-search-network-isolation.txt").write_text(
             network.stdout + "\n",
             encoding="utf-8",
         )
@@ -337,9 +337,10 @@ class ShellChecks:
             vm,
             base,
             artifacts,
-            mode="shell-spotify-store",
-            validator=_validate_spotify_store_events,
-            text_inputs={"spotify-search-text": "Spotify"},
+            mode="shell-store-search",
+            validator=_validate_store_search_events,
+            expected="Inkscape",
+            text_inputs={"store-search-text": "Inkscape"},
         )
     def _graphical_session_id(self, vm: QemuVm, user: str) -> str:
         assert vm.serial is not None
@@ -539,6 +540,7 @@ class ShellChecks:
         mode: str,
         validator: Callable[[str], object],
         text_inputs: dict[str, str] | None = None,
+        expected: str = "",
         secret_texts: dict[str, str] | None = None,
         screenshot_validator: Callable[[Path, object], None] | None = None,
     ) -> object:
@@ -574,6 +576,8 @@ class ShellChecks:
                 mode,
                 "--evidence",
                 f"{remote}/evidence/{mode}",
+                "--expected",
+                expected,
             ),
         )
         result = _run_with_qmp_key_requests(

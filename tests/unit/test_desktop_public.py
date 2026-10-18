@@ -375,7 +375,7 @@ class PublicDesktopOracleTests(FeatureOracleCase):
         self.assertNotIn("set_link", body)
         self.assertIn("store.spotify-public", _SHELL_DRIVER_CHECKS)
         self.assertIn("systemctl --user stop gnome-software.service", body)
-        self.assertIn('mode="shell-spotify-store"', body)
+        self.assertIn('mode="shell-store-search"', body)
 
     def test_public_wechat_install_and_tray_oracles_fail_closed(self):
         commit = "b" * 64
