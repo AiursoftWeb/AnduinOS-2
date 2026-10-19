@@ -35,6 +35,8 @@ from assertions.journal import (
 from framework.qemu import QemuVm
 from business.install import (
     RunnerOptions,
+    _authenticate_gdm_account,
+    _gdm_user_optional,
     _desktop_command,
     _graphical_user,
     _graphical_user_optional,

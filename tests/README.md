@@ -52,6 +52,12 @@ the accessibility tree, application log and a screenshot are retained; private
 keys are never copied into these artifacts. This is a semantic UI assertion,
 not a pixel-color test.
 
+Installed GDM login uses the same AT-SPI account and password-page recognition
+as the account-management checks, then sends the password through QMP once.
+It waits for the requested user’s session bus and Wayland socket within the
+existing login timeout; a slow greeter cannot consume blind keyboard retries.
+The modular guest driver is transferred as one verified compressed archive.
+
 Factory-reset checks that erase Home use password SSH after the control key is
 removed. Both key and password SSH waits continuously drain the guest UART so
 firmware output cannot block boot; recovery health and old-key removal checks

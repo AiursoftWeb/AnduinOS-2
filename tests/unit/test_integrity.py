@@ -146,7 +146,8 @@ class AcceptanceWiringTests(unittest.TestCase):
         self.assertNotIn("/tmp/gnome-users.stdout", body)
 
     def test_accounts_evidence_is_separated_across_graphical_users(self):
-        source = _source_tree(ROOT / "business/desktop")
+        source = (_source_tree(ROOT / "business/desktop")
+                  + _source_tree(ROOT / "business/install"))
         for directory in (
             "evidence/account-create",
             "evidence/account-change-password",
