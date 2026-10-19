@@ -61,9 +61,12 @@ def validate_quiet_start(report: object) -> None:
     expected = (allowed.get('title'), allowed.get('body'))
     translated = all(isinstance(value, str) and value for value in expected)
     unexpected = [notice for notice in notifications if not (
-        translated and isinstance(notice, dict)
-        and notice.get('app_id') == 'org.gnome.Software'
-        and (notice.get('title'), notice.get('body')) == expected
+        isinstance(notice, dict) and (
+            (translated and notice.get('app_id') == 'org.gnome.Software'
+             and (notice.get('title'), notice.get('body')) == expected)
+            or (notice.get('app_id') == 'anduinos-installer-beta'
+                and notice.get('installer_window_ready') is True)
+        )
     )]
     if unexpected:
         raise TestFailure('Offline Live startup produced notifications: ' + json.dumps(

@@ -2,6 +2,7 @@
 // not installed as an extension and never included in the ISO.
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
+import Shell from 'gi://Shell';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const output = '/tmp/anduinos-live-notifications.json';
@@ -26,10 +27,17 @@ function record(source, notification, phase) {
     if (notifications.has(notification))
         return;
     notifications.add(notification);
+    const windowApp = source.constructor.name === 'WindowAttentionSource'
+        ? Shell.WindowTracker.get_default().get_window_app(source._window) : null;
     report.notifications.push({
         phase,
         source: source.title ?? '',
-        app_id: source._appId ?? source.app?.get_id()?.replace(/\.desktop$/, '') ?? '',
+        app_id: source._appId ?? (source.app ?? windowApp)?.get_id()?.replace(/\.desktop$/, '') ?? '',
+        // Match Shell's window-attention notice, not arbitrary installer messages.
+        installer_window_ready: windowApp?.get_id() === 'anduinos-installer-beta.desktop'
+            && notification.title === windowApp.get_name()
+            && notification.body === GLib.dgettext('gnome-shell', '“%s” is ready')
+                .format(source._window.get_title()),
         title: notification.title ?? '',
         body: notification.body ?? '',
         seconds: (GLib.get_monotonic_time() - started) / 1000000,
