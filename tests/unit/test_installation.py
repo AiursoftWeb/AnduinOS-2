@@ -1,6 +1,7 @@
 """Installation, firmware, storage, and Wi-Fi tests."""
 
 import ast
+from contextlib import nullcontext
 
 from unit.support import *  # noqa: F403
 
@@ -980,6 +981,7 @@ runuser() {{ printf '0\\n'; }}
 
     def test_arm_grub_gates_graphical_commands_then_proves_pl011_handoff(self):
         console = Mock()
+        console.capture_output.return_value = nullcontext()
         qmp = Mock()
 
         with (
@@ -1038,6 +1040,7 @@ runuser() {{ printf '0\\n'; }}
 
     def test_arm_grub_missing_menu_sends_no_command(self):
         console = Mock()
+        console.capture_output.return_value = nullcontext()
         qmp = Mock()
 
         with (
