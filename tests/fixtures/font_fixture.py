@@ -6,7 +6,7 @@ from __future__ import annotations
 import gi
 
 gi.require_version("Gtk", "4.0")
-from gi.repository import Gtk, Gdk
+from gi.repository import Gtk, Gdk, GLib
 
 
 EMOJI_SAMPLE = "🤓 🍔 🔫 👽 ✨"
@@ -52,7 +52,8 @@ class FontFixture(Gtk.Application):
         box.append(emoji)
         box.append(chinese)
         window.set_child(box)
-        window.fullscreen()
+        # Let initial surface updates run before requesting fullscreen in Mutter.
+        GLib.idle_add(window.fullscreen)
         window.present()
 
 
