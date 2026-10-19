@@ -307,11 +307,14 @@ def _login_gdm(vm: QemuVm, username: str, password: str, timeout: float) -> None
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     break
-                artifacts = vm.config.artifacts / f"gdm-login-{uuid.uuid4().hex}"
+                # GDM can allocate a different greeter UID after logout. Keep
+                # each login's evidence separate instead of reusing its files.
+                label = f"login-{uuid.uuid4().hex}"
+                artifacts = vm.config.artifacts / f"gdm-{label}"
                 artifacts.mkdir(parents=True)
                 _authenticate_gdm_account(
                     vm, gdm, remote, artifacts, username, full_name, password,
-                    "login", timeout=remaining,
+                    label, timeout=remaining,
                 )
                 submitted = True
         time.sleep(1)

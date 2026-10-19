@@ -857,8 +857,9 @@ runuser() {{ printf '0\\n'; }}
         self.assertGreaterEqual(clock[0], 18)
         upload.assert_called_once()
         authenticate.assert_called_once()
-        self.assertEqual(("anduinostest", "inactive", "secret", "login"),
-                         authenticate.call_args.args[4:])
+        self.assertEqual(("anduinostest", "inactive", "secret"),
+                         authenticate.call_args.args[4:7])
+        self.assertTrue(authenticate.call_args.args[7].startswith("login-"))
         vm.qmp.send_key.assert_not_called()
         vm.qmp.type_text.assert_not_called()
 
