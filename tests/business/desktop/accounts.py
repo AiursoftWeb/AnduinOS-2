@@ -602,37 +602,13 @@ class AccountChecks:
     ) -> None:
         assert vm.serial is not None
         remote = "/run/anduinos-feature-accounts"
-        gdm = self._gdm_user(vm)
-        command = _desktop_command(
-            gdm,
-            (
-                "python3",
-                f"{remote}/atspi_driver.py",
-                "gdm-select-user",
-                "--account",
-                account,
-                "--full-name",
-                full_name,
-                "--evidence",
-                f"{remote}/evidence/gdm-{label}",
-            ),
-        )
-        result = _run_with_qmp_key_requests(
-            vm,
-            command,
-            timeout=120,
-            secret_texts={"gdm-password": password},
-        )
-        (artifacts / f"gdm-{label}-events.jsonl").write_text(
-            result.stdout + "\n", encoding="utf-8"
-        )
-        _retrieve_tree(vm.serial, remote, artifacts / "guest-account-evidence")
-        if result.returncode != 0:
-            raise TestFailure(
-                f"Could not select and authenticate GDM account {account}:\n"
-                + result.stdout[-8000:]
+        try:
+            _authenticate_gdm_account(
+                vm, self._gdm_user(vm), remote, artifacts,
+                account, full_name, password, label, timeout=120,
             )
-        _validate_gdm_login_events(result.stdout, account, full_name)
+        finally:
+            _retrieve_tree(vm.serial, remote, artifacts / "guest-account-evidence")
 
     def _wait_for_graphical_identity(
         self,
@@ -687,20 +663,10 @@ class AccountChecks:
     def _gdm_user(self, vm: QemuVm) -> str:
         assert vm.serial is not None
         deadline = time.monotonic() + 120
-        probe = (
-            "for user in gdm-greeter gdm; do "
-            "uid=$(id -u \"$user\" 2>/dev/null) || continue; "
-            "runtime=/run/user/$uid; "
-            "test -S \"$runtime/bus\" || continue; "
-            "find \"$runtime\" -maxdepth 1 -type s -name 'wayland-[0-9]*' "
-            "2>/dev/null | grep -q . || continue; "
-            "printf '%s\\n' \"$user\"; exit 0; "
-            "done; exit 1"
-        )
         while time.monotonic() < deadline:
-            result = vm.serial.run(probe, timeout=30, check=False)
-            if result.returncode == 0 and result.stdout.strip():
-                return result.stdout.strip().splitlines()[-1]
+            user = _gdm_user_optional(vm.serial)
+            if user:
+                return user
             time.sleep(1)
         diagnostics = vm.serial.run(
             "loginctl list-sessions --no-legend || true; "

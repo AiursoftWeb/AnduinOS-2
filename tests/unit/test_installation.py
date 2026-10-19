@@ -833,16 +833,8 @@ runuser() {{ printf '0\\n'; }}
     def test_gdm_login_types_once_then_waits_for_slow_wayland_session(self):
         clock = [0.0]
         serial = Mock()
-        state_probes = [0]
-
-        def loginctl_state(*_args, **_kwargs):
-            state_probes[0] += 1
-            state = "inactive" if state_probes[0] == 1 else "active"
-            return CommandResult(state + "\n", 0)
-
-        serial.run.side_effect = loginctl_state
-        qmp = Mock()
-        vm = SimpleNamespace(serial=serial, qmp=qmp)
+        serial.run.return_value = CommandResult("inactive\n", 0)
+        vm = SimpleNamespace(serial=serial, qmp=Mock())
         probe_count = [0]
 
         def graphical_user(_console):
@@ -850,44 +842,50 @@ runuser() {{ printf '0\\n'; }}
             return "anduinostest" if probe_count[0] == 20 else ""
 
         with (
-            patch(
-                "business.install.guest._graphical_user_optional",
-                side_effect=graphical_user,
-            ),
-            patch(
-                "business.install.guest.time.monotonic",
-                side_effect=lambda: clock[0],
-            ),
-            patch(
-                "business.install.guest.time.sleep",
-                side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
-            ),
-        ):
-            _login_gdm(vm, "anduinostest", "secret", timeout=120)
-
-        self.assertGreaterEqual(clock[0], 19)
-        self.assertEqual([call("ret"), call("ret")], qmp.send_key.call_args_list)
-        qmp.type_text.assert_called_once_with("secret", interval=0.06)
-
-    def test_gdm_retry_replaces_password_without_submitting_empty_entry(self):
-        clock = [0.0]
-        serial = Mock()
-        serial.run.return_value = CommandResult("inactive\n", 0)
-        qmp = Mock()
-        vm = SimpleNamespace(serial=serial, qmp=qmp)
-
-        with (
-            patch("business.install.guest._graphical_user_optional",
-                  side_effect=lambda _console: "anduinostest" if qmp.type_text.call_count == 3 else ""),
+            tempfile.TemporaryDirectory() as directory,
+            patch("business.install.guest.GuestUiDriver.upload") as upload,
+            patch("business.install.guest._gdm_user_optional", return_value="gdm-greeter"),
+            patch("business.install.guest._authenticate_gdm_account") as authenticate,
+            patch("business.install.guest._graphical_user_optional", side_effect=graphical_user),
             patch("business.install.guest.time.monotonic", side_effect=lambda: clock[0]),
             patch("business.install.guest.time.sleep",
                   side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
         ):
+            vm.config = SimpleNamespace(artifacts=Path(directory))
             _login_gdm(vm, "anduinostest", "secret", timeout=120)
 
-        self.assertEqual(3, qmp.type_text.call_count)
-        self.assertEqual([call("ret"), call("ret"), call("ctrl-a"), call("ret"),
-                          call("ctrl-a"), call("ret")], qmp.send_key.call_args_list)
+        self.assertGreaterEqual(clock[0], 18)
+        upload.assert_called_once()
+        authenticate.assert_called_once()
+        self.assertEqual(("anduinostest", "inactive", "secret"),
+                         authenticate.call_args.args[4:7])
+        self.assertTrue(authenticate.call_args.args[7].startswith("login-"))
+        vm.qmp.send_key.assert_not_called()
+        vm.qmp.type_text.assert_not_called()
+
+    def test_gdm_login_never_blindly_types_before_the_greeter_is_ready(self):
+        clock = [0.0]
+        serial = Mock()
+        serial.run.return_value = CommandResult("inactive\n", 0)
+        vm = SimpleNamespace(serial=serial, qmp=Mock())
+
+        with (
+            patch("business.install.guest.GuestUiDriver.upload") as upload,
+            patch("business.install.guest._gdm_user_optional", return_value=""),
+            patch("business.install.guest._authenticate_gdm_account") as authenticate,
+            patch("business.install.guest._graphical_user_optional", return_value=""),
+            patch("business.install.guest.time.monotonic", side_effect=lambda: clock[0]),
+            patch("business.install.guest.time.sleep",
+                  side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)),
+        ):
+            with self.assertRaisesRegex(TestFailure, "password-submitted=False"):
+                _login_gdm(vm, "anduinostest", "secret", timeout=120)
+
+        self.assertEqual(120, clock[0])
+        upload.assert_called_once()
+        authenticate.assert_not_called()
+        vm.qmp.type_text.assert_not_called()
+        vm.qmp.send_key.assert_not_called()
 
     def test_installed_region_requires_configuration_and_real_gnome_process(self):
         console = Mock()

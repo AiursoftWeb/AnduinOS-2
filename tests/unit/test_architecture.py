@@ -6,6 +6,7 @@ import builtins
 import dis
 import importlib
 import types
+import tarfile
 import warnings
 
 from business.acceptance import _parser
@@ -98,26 +99,35 @@ class GuestUiDriverPackagingTests(unittest.TestCase):
         self.assertEqual({}, failures)
 
     def test_upload_deploys_the_entrypoint_and_every_ui_module(self):
-        console = SimpleNamespace(run=Mock(), upload=Mock())
         driver = GuestUiDriver(ROOT / "assertions/guest")
+        contents = {}
+        modes = {}
 
+        def capture_archive(source, destination, mode):
+            self.assertEqual("/run/anduinos-acceptance/driver.tar.gz", destination)
+            self.assertEqual(0o644, mode)
+            with tarfile.open(source, "r:gz") as archive:
+                for member in archive.getmembers():
+                    contents[member.name] = archive.extractfile(member).read()
+                    modes[member.name] = member.mode
+
+        console = SimpleNamespace(run=Mock(), upload=Mock(side_effect=capture_archive))
         driver.upload(console, "/run/anduinos-acceptance")
 
-        console.run.assert_called_once_with(
-            "install -d -m 0755 /run/anduinos-acceptance/ui"
-        )
-        calls = console.upload.call_args_list
-        self.assertEqual(
-            driver.entry_point,
-            calls[0].args[0],
-        )
-        self.assertEqual(0o755, calls[0].args[2])
-        uploaded_modules = {call.args[0].name for call in calls[1:]}
-        expected_modules = {
-            path.name for path in (driver.source / "ui").glob("*.py")
-        }
-        self.assertEqual(expected_modules, uploaded_modules)
-        self.assertTrue(all(call.args[2] == 0o644 for call in calls[1:]))
+        expected = {"atspi_driver.py": driver.entry_point.read_bytes()}
+        expected.update({
+            f"ui/{path.name}": path.read_bytes()
+            for path in (driver.source / "ui").glob("*.py")
+        })
+        self.assertEqual(expected, contents)
+        self.assertEqual(0o755, modes.pop("atspi_driver.py"))
+        self.assertTrue(all(mode == 0o644 for mode in modes.values()))
+        console.upload.assert_called_once()
+        self.assertEqual([
+            call("install -d -m 0755 /run/anduinos-acceptance/ui"),
+            call("tar --no-same-owner -xzf /run/anduinos-acceptance/driver.tar.gz -C /run/anduinos-acceptance"),
+            call("rm -f /run/anduinos-acceptance/driver.tar.gz", check=False),
+        ], console.run.call_args_list)
 
 
 def _missing_function_globals(code, namespace):

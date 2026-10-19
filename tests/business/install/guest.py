@@ -1,6 +1,8 @@
 """Installed-guest command, transfer, login, SSH, and shutdown helpers."""
 
 from .shared import *  # noqa: F403
+from .protocol import _run_with_qmp_key_requests
+from assertions.desktop.accounts import _validate_gdm_login_events
 
 
 _GRAPHICAL_USER_SCRIPT = r"""
@@ -212,11 +214,65 @@ def _retrieve_file(console, source: str, destination: Path) -> None:
     console.download(source, destination, missing_ok=True)
 
 
+def _gdm_user_optional(console) -> str:
+    probe = (
+        "for user in gdm-greeter gdm; do "
+        "uid=$(id -u \"$user\" 2>/dev/null) || continue; "
+        "runtime=/run/user/$uid; "
+        "test -S \"$runtime/bus\" || continue; "
+        "find \"$runtime\" -maxdepth 1 -type s -name 'wayland-[0-9]*' "
+        "2>/dev/null | grep -q . || continue; "
+        "printf '%s\\n' \"$user\"; exit 0; "
+        "done; exit 1"
+    )
+    result = console.run(probe, timeout=30, check=False)
+    if result.returncode == 0 and result.stdout.strip():
+        return result.stdout.strip().splitlines()[-1]
+    return ""
+
+
+def _authenticate_gdm_account(
+    vm: QemuVm, gdm: str, remote: str, artifacts: Path,
+    account: str, full_name: str, password: str, label: str, *, timeout: float,
+) -> None:
+    assert vm.serial is not None
+    command = _desktop_command(
+        gdm,
+        (
+            "python3",
+            f"{remote}/atspi_driver.py",
+            "gdm-select-user",
+            "--account",
+            account,
+            "--full-name",
+            full_name,
+            "--evidence",
+            f"{remote}/evidence/gdm-{label}",
+        ),
+    )
+    result = _run_with_qmp_key_requests(
+        vm,
+        command,
+        timeout=timeout,
+        secret_texts={"gdm-password": password},
+    )
+    (artifacts / f"gdm-{label}-events.jsonl").write_text(
+        result.stdout + "\n", encoding="utf-8"
+    )
+    if result.returncode != 0:
+        raise TestFailure(
+            f"Could not select and authenticate GDM account {account}:\n"
+            + result.stdout[-8000:]
+        )
+    _validate_gdm_login_events(result.stdout, account, full_name)
+
+
 def _login_gdm(vm: QemuVm, username: str, password: str, timeout: float) -> None:
     assert vm.qmp is not None and vm.serial is not None
     deadline = time.monotonic() + timeout
-    next_input = 0.0
-    attempts = 0
+    remote = "/run/anduinos-acceptance-gdm"
+    prepared = False
+    submitted = False
     last_state = "unknown"
     while time.monotonic() < deadline:
         graphical_user = _graphical_user_optional(vm.serial)
@@ -228,38 +284,43 @@ def _login_gdm(vm: QemuVm, username: str, password: str, timeout: float) -> None
                 )
             return
 
-        now = time.monotonic()
-        if now >= next_input:
-            last_state = vm.serial.run(
-                f"loginctl show-user {shlex.quote(username)} "
-                "-p State --value 2>/dev/null || true"
-            ).stdout.strip() or "unknown"
-            # `active` only proves that PAM/user@.service has started.  On a
-            # TCG-emulated ARM guest GNOME may need considerably longer to
-            # create its D-Bus and Wayland sockets.  Do not type the password
-            # into that partially started session; wait for the real desktop
-            # boundary checked above.
-            if last_state != "active" and attempts < 3:
-                if attempts == 0:
-                    # The first Return selects the account from GDM's picker.
-                    vm.qmp.send_key("ret")
-                    time.sleep(2)
-                else:
-                    # On an authentication failure GDM keeps the password
-                    # entry open. Another Return would submit an empty
-                    # password while the retry is still being typed.
-                    vm.qmp.send_key("ctrl-a")
-                    time.sleep(1)
-                vm.qmp.type_text(password, interval=0.06)
-                vm.qmp.send_key("ret")
-                attempts += 1
-                next_input = time.monotonic() + 15
-            else:
-                next_input = now + 2
+        last_state = vm.serial.run(
+            f"loginctl show-user {shlex.quote(username)} "
+            "-p State --value 2>/dev/null || true"
+        ).stdout.strip() or "unknown"
+        # PAM can start the user manager before GNOME creates its sockets.
+        # Never send login input into a partially started desktop.
+        if not submitted and last_state != "active":
+            if not prepared:
+                GuestUiDriver(Path(__file__).parents[2] / "assertions/guest").upload(
+                    vm.serial, remote
+                )
+                vm.serial.run(f"install -d -m 0777 {remote}/evidence")
+                prepared = True
+                # Auto-login may have completed during the transfer.
+                continue
+            gdm = _gdm_user_optional(vm.serial)
+            if gdm:
+                full_name = vm.serial.run(
+                    f"getent passwd {shlex.quote(username)} | cut -d: -f5 | cut -d, -f1"
+                ).stdout.strip() or username
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                # GDM can allocate a different greeter UID after logout. Keep
+                # each login's evidence separate instead of reusing its files.
+                label = f"login-{uuid.uuid4().hex}"
+                artifacts = vm.config.artifacts / f"gdm-{label}"
+                artifacts.mkdir(parents=True)
+                _authenticate_gdm_account(
+                    vm, gdm, remote, artifacts, username, full_name, password,
+                    label, timeout=remaining,
+                )
+                submitted = True
         time.sleep(1)
     raise TestFailure(
         "Could not log the test account into a ready GNOME session through "
-        f"GDM; attempts={attempts}, loginctl-state={last_state}"
+        f"GDM; password-submitted={submitted}, loginctl-state={last_state}"
     )
 
 
