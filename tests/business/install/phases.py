@@ -659,6 +659,9 @@ fi
         options = "-o subvol=@root" if filesystem == "btrfs" else ""
         script = f"""
 set -euo pipefail
+# The debug shell can precede coldplug; lsblk reads filesystem types from udev.
+systemctl start systemd-udev-trigger.service
+udevadm settle --timeout=60
 root_device=$(lsblk -pnro NAME,FSTYPE,TYPE | awk '$2 == "{filesystem}" && $3 == "part" {{ print $1 }}')
 test "$(printf '%s\\n' "$root_device" | grep -c .)" = 1
 test -b "$root_device"
