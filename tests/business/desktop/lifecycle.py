@@ -1123,26 +1123,30 @@ class LifecycleChecks:
         *,
         timeout: float,
     ) -> str:
-        deadline = time.monotonic() + timeout
-        last = ""
-        while time.monotonic() < deadline:
-            process = getattr(vm, "process", None)
-            if process is not None and process.poll() is not None:
-                raise TestFailure(
-                    "QEMU exited while waiting for password SSH after factory reset"
-                )
-            try:
-                return self._ssh_password(
-                    vm,
-                    command,
-                    timeout=max(1.0, min(20.0, deadline - time.monotonic())),
-                )
-            except (TestFailure, subprocess.TimeoutExpired) as error:
-                last = f"{type(error).__name__}: {error}"
-                time.sleep(2)
-        raise TestFailure(
-            "Password SSH did not become healthy after factory reset: " + last[-4000:]
-        )
+        # Clearing Home removes the control key, but password SSH still leaves
+        # the UART unread. Drain it throughout retries, as for key-based SSH.
+        assert vm.serial is not None
+        with vm.serial.capture_output():
+            deadline = time.monotonic() + timeout
+            last = ""
+            while time.monotonic() < deadline:
+                process = getattr(vm, "process", None)
+                if process is not None and process.poll() is not None:
+                    raise TestFailure(
+                        "QEMU exited while waiting for password SSH after factory reset"
+                    )
+                try:
+                    return self._ssh_password(
+                        vm,
+                        command,
+                        timeout=max(1.0, min(20.0, deadline - time.monotonic())),
+                    )
+                except (TestFailure, subprocess.TimeoutExpired) as error:
+                    last = f"{type(error).__name__}: {error}"
+                    time.sleep(2)
+            raise TestFailure(
+                "Password SSH did not become healthy after factory reset: " + last[-4000:]
+            )
 
     def _ssh_password(
         self,
