@@ -155,18 +155,22 @@ def boot_iso_with_debug_shell(
 
     if spice_socket is None:
         raise ProtocolError("ARM GRUB requires its private SPICE input channel")
-    started = time.monotonic()
-    console.wait_for_text("BdsDxe: starting Boot", timeout=120)
-    remaining_delay = firmware_delay - (time.monotonic() - started)
-    if remaining_delay > 0:
-        time.sleep(remaining_delay)
-    _boot_iso_from_grub_prompt(
-        qmp, spice_socket, architecture,
-        kernel_arguments=kernel_arguments,
-        extra_kernel_arguments=extra_kernel_arguments,
-        serial_debug=serial_debug,
-        menu_is_ready=False,
-    )
+    # Keep the firmware UART draining while observing the graphical menu.
+    with console.capture_output():
+        # Firmware handing off to GRUB does not mean its menu accepts input yet.
+        # Use the same visible-menu gate and countdown cancellation as AMD64.
+        editor = _GraphicalGrubMenuEditor(qmp, scratch_dir=scratch_dir)
+        try:
+            editor.wait_for_top_menu(timeout=30)
+        finally:
+            editor.close()
+        _boot_iso_from_grub_prompt(
+            qmp, spice_socket, architecture,
+            kernel_arguments=kernel_arguments,
+            extra_kernel_arguments=extra_kernel_arguments,
+            serial_debug=serial_debug,
+            menu_is_ready=True,
+        )
     console.wait_for_kernel_console(timeout=120)
 
 

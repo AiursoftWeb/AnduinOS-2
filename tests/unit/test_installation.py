@@ -1,6 +1,7 @@
 """Installation, firmware, storage, and Wi-Fi tests."""
 
 import ast
+from contextlib import nullcontext
 
 from unit.support import *  # noqa: F403
 
@@ -980,9 +981,11 @@ runuser() {{ printf '0\\n'; }}
 
     def test_arm_grub_gates_graphical_commands_then_proves_pl011_handoff(self):
         console = Mock()
+        console.capture_output.return_value = nullcontext()
         qmp = Mock()
 
         with (
+            patch("framework.grub._GraphicalGrubMenuEditor") as menu,
             patch("framework.grub.SpiceInputClient") as input_client,
             patch("framework.grub._GraphicalGrubCommandLine") as controller,
         ):
@@ -1009,7 +1012,7 @@ runuser() {{ printf '0\\n'; }}
             )
 
         command_line.open.assert_called_once_with(
-            timeout=120, menu_is_ready=False
+            timeout=120, menu_is_ready=True
         )
         self.assertEqual(
             [
@@ -1026,24 +1029,26 @@ runuser() {{ printf '0\\n'; }}
         )
         command_line.boot.assert_called_once_with()
         command_line.close.assert_called_once_with()
-        console.wait_for_text.assert_called_once_with(
-            "BdsDxe: starting Boot", timeout=120
-        )
+        menu.return_value.wait_for_top_menu.assert_called_once_with(timeout=30)
+        menu.return_value.close.assert_called_once_with()
+        console.wait_for_text.assert_not_called()
         console.wait_for_kernel_console.assert_called_once_with(timeout=120)
         input_client.assert_called_once_with(Path("/test/spice.sock"), timeout=30)
         keyboard.connect.assert_called_once_with(require_agent=False)
         keyboard.close.assert_called_once_with()
         controller.assert_called_once_with(qmp, keyboard)
 
-    def test_arm_grub_missing_banner_sends_no_command_or_gpu(self):
+    def test_arm_grub_missing_menu_sends_no_command(self):
         console = Mock()
-        console.wait_for_text.side_effect = ProtocolError("injected missing banner")
+        console.capture_output.return_value = nullcontext()
         qmp = Mock()
 
         with (
+            patch("framework.grub._GraphicalGrubMenuEditor") as menu,
             patch("framework.grub.SpiceInputClient") as input_client,
-            self.assertRaisesRegex(ProtocolError, "injected missing banner"),
+            self.assertRaisesRegex(ProtocolError, "injected missing menu"),
         ):
+            menu.return_value.wait_for_top_menu.side_effect = ProtocolError("injected missing menu")
             boot_iso_with_debug_shell(
                 qmp,
                 console,
@@ -1054,6 +1059,7 @@ runuser() {{ printf '0\\n'; }}
             )
 
         input_client.assert_not_called()
+        menu.return_value.close.assert_called_once_with()
         qmp.assert_not_called()
 
     def test_arm_qemu_uses_neoverse_and_virtio_scsi(self):
