@@ -107,12 +107,16 @@ case must exercise that entry's user-visible behavior.
 desktop before opening the installer. QEMU disconnects its NIC before boot.
 The check inventories retained startup notifications and observes new Shell
 MessageTray notifications for at least 10 seconds, recording title/body in
-`live-notifications.json`. The only permitted notice is GNOME Software's
-**Updates Are Out of Date / Please check for available updates** reminder.
-The observer records application identity and resolves the exact title/body
-through the guest's Software translation catalog; other Software notices and
-notifications from other applications or extensions still fail. Permitted
-notices remain in the evidence, and Software's normal update behavior is retained.
+`live-notifications.json`. Two normal notices are permitted:
+
+- GNOME Software's **Updates Are Out of Date / Please check for available updates**
+  reminder, matched by application identity and exact translated title/body.
+- GNOME Shell's **installer window is ready** notice, matched by its native
+  window-attention source, tracked installer identity and exact translated text.
+  An ordinary application notification with the same wording is not exempt.
+
+Other notices still fail. Permitted notices remain in the evidence; application
+behavior and notification settings are unchanged.
 The check covers Shell-native and D-Bus notifications in any language.
 A test-only module is loaded
 through Looking Glass, which immediately closes; it neither clears notifications
