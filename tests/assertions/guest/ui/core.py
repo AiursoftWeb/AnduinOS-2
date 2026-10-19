@@ -1379,26 +1379,21 @@ def set_desktop_theme(expected: str, evidence: Path) -> None:
     if current == desired:
         transitions = ["default" if desired == "prefer-dark" else "prefer-dark", desired]
 
+    # Establish a closed menu before opening it once. A transiently missing
+    # selector during a theme refresh does not mean the menu is closed;
+    # toggling the panel button in that state would close the menu ourselves.
+    event("qmp-key", request=f"theme-close-menu-{expected}", key="esc")
+    wait_absent("dark_style", timeout=15)
+    request_shell_click("system_menu", f"theme-system-menu-{expected}")
+
     observed_label = ""
     for index, transition in enumerate(transitions):
-        try:
-            selector = shell_control("dark_style", timeout=0.5)
-            event(
-                "theme-menu",
-                transition=transition,
-                method="already-open",
-            )
-        except UiFailure:
-            request_shell_click(
-                "system_menu",
-                f"theme-system-menu-{expected}-{index}",
-            )
-            selector = shell_control("dark_style", timeout=15)
-            event(
-                "theme-menu",
-                transition=transition,
-                method="opened",
-            )
+        selector = shell_control("dark_style", timeout=15)
+        event(
+            "theme-menu",
+            transition=transition,
+            method="opened" if index == 0 else "already-open",
+        )
         observed_label = next(
             (
                 name(item)

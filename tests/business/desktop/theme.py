@@ -248,6 +248,20 @@ class ThemeChecks:
             result.stdout + "\n", encoding="utf-8"
         )
         if result.returncode != 0:
+            # Capture the failed menu before subsequent independent checks
+            # change the desktop, without replacing the original failure.
+            try:
+                vm.screenshot(f"theme-{label}-failure")
+                assert vm.serial is not None
+                vm.serial.download(
+                    f"{remote}/evidence/last-accessibility-tree.txt",
+                    artifacts / f"theme-{label}-failure-tree.txt",
+                    missing_ok=True,
+                )
+            except Exception as error:
+                (artifacts / f"theme-{label}-diagnostics-error.txt").write_text(
+                    f"{type(error).__name__}: {error}\n", encoding="utf-8"
+                )
             raise TestFailure(
                 f"GNOME Shell could not select the {expected} theme:\n"
                 + result.stdout[-8000:]
