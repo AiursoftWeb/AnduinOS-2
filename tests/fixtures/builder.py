@@ -67,9 +67,12 @@ def build_file_integration_fixtures(destination: Path) -> FileIntegrationFixture
             "-i",
             str(image),
             "-t",
-            "3",
+            # Keep playing through GUI discovery and playback verification.
+            # A 3-second clip can finish before AT-SPI finds its window on ARM.
+            "120",
             "-r",
-            "12",
+            # The still image needs no repeated high-rate frames over serial.
+            "1",
             "-c:v",
             "mpeg4",
             "-q:v",
