@@ -10,18 +10,18 @@ import time
 
 
 ROW_STATES = (
-    ("Secure Boot", "Motherboard hardware protection is active"),
-    ("Local MOK Certificate", "Certificate generated locally"),
-    ("Certificate Signing Permissions", "Can sign both GRUB and kernel modules"),
-    ("UEFI Firmware Trust", "This certificate is enrolled in MOK"),
-    ("Third-party Drivers", "Secure Boot trust is ready. No third-party kernel modules are currently installed."),
+    ("Secure Boot", "Motherboard Secure Boot is enabled."),
+    ("Local MOK Certificate", "The signing certificate and private key are valid and match."),
+    ("Certificate Signing Purpose", "This certificate can sign both the bootloader and kernel modules."),
+    ("Certificate Enrollment", "This certificate is enrolled in MOK."),
+    ("Third-party Drivers", "No third-party kernel modules need attention."),
 )
 REPAIR_ACTIONS = (
-    "Repair Signing Defaults", "Repair Automatic DKMS Signing", "Repair Module Signatures",
-    "Create Unified Certificate", "Submit Enrollment Request", "Recreate Certificate…",
-    "Use Enrolled Certificate", "Prepare AnduinOS for Secure Boot", "Enable Secure Boot",
-    "Open UEFI Settings", "Check Again",
+    "Create Signing Certificate", "Replace Signing Certificate…",
+    "Repair Automatic Signing", "Repair Driver Signatures",
     "Install AnduinOS Bootloader", "Repair AnduinOS Bootloader",
+    "Restart to Enroll Certificate", "Check Before Enabling Secure Boot",
+    "Firmware Help", "Boot Recovery Help",
 )
 
 
@@ -48,11 +48,11 @@ def validate_ui(names, translate=lambda value: value):
     """Semantic health contract; screenshot accompanies it, not pixel matching."""
     required = {translate(text) for pair in ROW_STATES for text in pair}
     # The same check also runs in online installations which may have modules.
-    if translate("Drivers are signed and ready to load") in names:
+    if translate("Installed drivers are trusted, including signatures from previously enrolled certificates.") in names:
         required.discard(translate(ROW_STATES[-1][1]))
     required.add(translate("Trusted"))
     required.update(translate(text) for text in
-                    ("AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed"))
+                    ("AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed."))
     missing = required - names
     actions = {translate(text) for text in REPAIR_ACTIONS} & names
     if missing or actions:
