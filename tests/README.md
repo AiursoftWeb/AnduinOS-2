@@ -45,7 +45,8 @@ purpose, matching protected private key, default DKMS signing configuration,
 enrollment and driver trust. It then opens the real Driver Center as the logged-in
 user and requires all six healthy row states on AMD64 and ARM64, including the
 AnduinOS bootloader signature, enrollment and deployment, the `Trusted` summary and no
-repair/enrollment/Use action. No repair is performed by this check. No installed
+repair/enrollment action. The normal Check Again button is allowed. No repair
+is performed by this check. No installed
 third-party modules is a valid healthy state; DKMS itself need not be installed.
 The check also runs in both online Secure Boot cases. Public status evidence,
 the accessibility tree, application log and a screenshot are retained; private
