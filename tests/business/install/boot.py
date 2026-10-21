@@ -96,13 +96,98 @@ printf '%s\n' "$nvram_output"
             "AnduinOS vendor loader is first in BootOrder; shim fallback registrar absent",
         )
 
+    def _remove_vendor_boot_entry(
+        self, vm: QemuVm, scenario: Scenario, artifacts: Path,
+    ) -> None:
+        """Lose only the verified install entry, preserving the trust store."""
+        assert vm.serial is not None
+        evidence = (artifacts / "uefi-boot-registration.txt").read_text()
+        entries = re.findall(r"^Boot([0-9A-Fa-f]{4})\*?\s+AnduinOS\s+.*$", evidence, re.MULTILINE)
+        partuuids = re.findall(r"^ESP_PARTUUID=(\S+)$", evidence, re.MULTILINE)
+        if len(entries) != 1 or len(partuuids) != 1:
+            raise TestFailure("Cannot identify the verified installation entry and ESP")
+        number, partuuid = entries[0], partuuids[0]
+        suffix = "x64" if self.architecture is Architecture.AMD64 else "aa64"
+        boot_name = "BOOTX64.EFI" if suffix == "x64" else "BOOTAA64.EFI"
+        script = f"""
+python3 - <<'PY'
+import hashlib, json, re, subprocess, tempfile
+from pathlib import Path
+def command(*args):
+    return subprocess.check_output(args, text=True)
+def trust():
+    return {{p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in Path('/sys/firmware/efi/efivars').iterdir()
+            if p.name.split('-')[0] in ('PK', 'KEK', 'db', 'dbx') or p.name.startswith('Mok')}}
+before = command('efibootmgr', '--verbose')
+entry = next(line for line in before.splitlines() if line.startswith('Boot{number}'))
+assert 'AnduinOS' in entry and {partuuid.lower()!r} in entry.lower(), entry
+assert r'\\EFI\\AnduinOS\\shim{suffix}.efi'.lower() in entry.lower(), entry
+assert not re.search(r'^BootNext:', before, re.M), before
+keys = trust()
+device = command('findfs', 'PARTUUID={partuuid}').strip()
+with tempfile.TemporaryDirectory(prefix='anduinos-fallback-', dir='/run') as directory:
+    subprocess.run(['mount', '-t', 'vfat', '-o', 'ro,nosuid,nodev,noexec', device, directory], check=True)
+    try:
+        esp = Path(directory)
+        for source, target in (('shim{suffix}.efi', '{boot_name}'), ('grub{suffix}.efi', 'grub{suffix}.efi'),
+                               ('mm{suffix}.efi', 'mm{suffix}.efi'), ('grub.cfg', 'grub.cfg')):
+            payload = (esp / 'EFI/AnduinOS' / source).read_bytes()
+            assert payload and payload == (esp / 'EFI/BOOT' / target).read_bytes(), target
+        assert not list((esp / 'EFI/BOOT').glob('fb*.efi'))
+    finally:
+        subprocess.run(['umount', directory], check=True)
+subprocess.run(['efibootmgr', '--bootnum', '{number}', '--delete-bootnum'], check=True)
+after = command('efibootmgr', '--verbose')
+numbers = lambda text: set(re.findall(r'^Boot([0-9A-Fa-f]{{4}})\\*?\\s', text, re.M))
+assert numbers(after) == numbers(before) - {{{number!r}}}, after
+assert not re.search(r'^BootNext:', after, re.M), after
+assert trust() == keys, 'Firmware trust variables changed'
+print(json.dumps({{'removed': '{number}', 'esp_partuuid': '{partuuid}', 'before': before,
+                  'after': after, 'trust_unchanged': True}}))
+PY
+"""
+        result = vm.serial.run(script, timeout=120, check=False)
+        (artifacts / "uefi-entry-loss-injection.txt").write_text(result.stdout + "\n")
+        if result.returncode:
+            raise TestFailure("UEFI entry-loss injection failed:\n" + result.stdout[-8000:])
+        self._check_note(scenario, "boot.uefi-entry-loss-injection",
+                         "Only the verified vendor entry removed; direct fallback matches; firmware trust unchanged")
+
+    def _assert_fallback_boot(
+        self, vm: QemuVm, scenario: Scenario, artifacts: Path,
+    ) -> None:
+        assert vm.serial is not None
+        script = r"""
+python3 - <<'PY'
+import json, re, subprocess
+def command(*args):
+    return subprocess.check_output(args, text=True)
+nvram = command('efibootmgr', '--verbose')
+current = re.search(r'^BootCurrent:\s*([0-9A-Fa-f]{4})$', nvram, re.M).group(1)
+entry = next(line for line in nvram.splitlines() if line.startswith('Boot' + current))
+assert '\\efi\\anduinos\\' not in entry.lower(), entry
+assert not re.search(r'^BootNext:', nvram, re.M), nvram
+state = json.loads(command('/usr/libexec/anduinos-grub-probe'))
+assert state['signature'] == 'valid' and state['deployment'] == 'ready', state
+print(json.dumps({'boot_current': entry, 'nvram': nvram, 'grub': state,
+                  'root': command('findmnt', '-no', 'SOURCE,UUID', '/')}))
+PY
+"""
+        result = vm.serial.run(script, timeout=120, check=False)
+        (artifacts / "uefi-entry-loss-recovery.txt").write_text(result.stdout + "\n")
+        if result.returncode:
+            raise TestFailure("Default firmware fallback boot is not healthy:\n" + result.stdout[-8000:])
+        self._check_note(scenario, "boot.uefi-entry-loss-recovery",
+                         "Booted without ISO or vendor entry; signed boot chain deployed and healthy")
+
     def _enroll_mok(
         self,
         vm: QemuVm,
         scenario: Scenario,
         artifacts: Path,
     ) -> None:
-        self.status(scenario.id, "Completing MOK enrollment with fresh UEFI VARS")
+        self.status(scenario.id, "Completing MOK enrollment in the existing UEFI VARS")
         vm.start(attach_iso=False)
         assert vm.qmp is not None
         assert vm.serial is not None

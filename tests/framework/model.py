@@ -114,6 +114,7 @@ class Scenario:
     mok_enrollment: bool
     storage_mode: StorageMode = StorageMode.AUTOMATIC
     disk_gib: int | None = None
+    boot_entry_loss: bool = False
 
     def supports(self, architecture: Architecture) -> bool:
         return architecture in self.architectures
@@ -238,7 +239,7 @@ def _load_scenario(value: object) -> Scenario:
         "snapshots_manager",
         "mok_enrollment",
     }
-    optional = {"live_region", "storage_mode", "disk_gib"}
+    optional = {"live_region", "storage_mode", "disk_gib", "boot_entry_loss"}
     if not required <= set(value) or not set(value) <= required | optional:
         raise ConfigurationError("A test case has an invalid shape")
     identifier = value["id"]
@@ -311,6 +312,13 @@ def _load_scenario(value: object) -> Scenario:
             f"{identifier}: coexistence requires uefi-nosb, offline, "
             "temporary Live, Btrfs (ext4 for the shrink case), 112 GiB, and normal desktop login"
         )
+    boot_entry_loss = value.get("boot_entry_loss", False)
+    if type(boot_entry_loss) is not bool or (boot_entry_loss and (
+        not firmware.is_uefi or storage_mode is not StorageMode.AUTOMATIC
+    )):
+        raise ConfigurationError(
+            f"{identifier}: boot_entry_loss requires an automatic UEFI install"
+        )
     live_region = None
     if "live_region" in value:
         live_region = _load_live_region(value["live_region"], identifier)
@@ -332,6 +340,7 @@ def _load_scenario(value: object) -> Scenario:
         mok_enrollment=value["mok_enrollment"],
         storage_mode=storage_mode,
         disk_gib=disk_gib,
+        boot_entry_loss=boot_entry_loss,
     )
 
 

@@ -628,6 +628,7 @@ test \"$value\" = 'nested quotes'
                 firmware=Firmware.BIOS,
                 network=Network.OFFLINE,
                 mok_enrollment=False,
+                boot_entry_loss=False,
                 passwordless_sudo=False,
                 automatic_login=False,
                 desktop_contracts=False,

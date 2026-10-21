@@ -64,6 +64,16 @@ removed. Both key and password SSH waits continuously drain the guest UART so
 firmware output cannot block boot; recovery health and old-key removal checks
 remain required.
 
+The offline Secure Boot Btrfs and offline non-Secure-Boot ext4 cases also
+remove only the verified AnduinOS NVRAM entry after checking normal registration.
+Before removal, they require the four direct `EFI/BOOT` files to match the vendor
+chain and reject the shim fallback registrar. Firmware trust variables and all
+other boot entries must remain unchanged. The ISO is detached and the existing
+VARS file is retained for default firmware boot, including MokManager when
+required. First target boot must use a non-vendor entry and report a valid,
+deployed GRUB. Other installation cases retain normal vendor-entry coverage.
+The injection and recovery probes are saved as case artifacts.
+
 ## Architecture coverage
 
 Every UEFI installation case runs on AMD64 and ARM64, including Wi-Fi credential
