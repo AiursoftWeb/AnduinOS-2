@@ -150,6 +150,9 @@ class InstallationPhases:
                     "Checking UEFI vendor entry before the first target boot",
                 )
                 self._assert_uefi_boot_registration(vm, scenario, artifacts)
+        if scenario.boot_entry_loss:
+            with self._check(scenario, "boot.uefi-entry-loss-injection"):
+                self._remove_vendor_boot_entry(vm, scenario, artifacts)
         _power_off(vm)
         self.status(scenario.id, "Installation complete; ISO detached")
         return boot_files
@@ -420,6 +423,9 @@ fi
                 restoration.stdout + "\n",
                 encoding="utf-8",
             )
+        if scenario.boot_entry_loss:
+            with self._check(scenario, "boot.uefi-entry-loss-recovery"):
+                self._assert_fallback_boot(vm, scenario, artifacts)
         if scenario.mok_enrollment:
             with self._check(scenario, "mok-enrollment"):
                 self._assert_mok_enrollment_lifecycle(vm, scenario, artifacts)

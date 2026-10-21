@@ -54,9 +54,13 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
         checks.insert(checks.index("live-boot") + 1, "live.offline-no-notifications")
     if scenario.firmware.is_uefi:
         checks.append("boot.uefi-vendor-registration")
+    if scenario.boot_entry_loss:
+        checks.append("boot.uefi-entry-loss-injection")
     if scenario.mok_enrollment:
         checks.append("mok-manager-workflow")
     checks.append("installed-boot")
+    if scenario.boot_entry_loss:
+        checks.append("boot.uefi-entry-loss-recovery")
     if scenario.mok_enrollment:
         checks.append("mok-enrollment")
     if scenario.network is Network.WIFI:

@@ -171,7 +171,8 @@
       "automatic_login": false,
       "desktop_contracts": false,
       "snapshots_manager": false,
-      "mok_enrollment": false
+      "mok_enrollment": false,
+      "boot_entry_loss": true
     },
     {
       "id": "uefi-nosb-wifi-btrfs",
@@ -209,7 +210,8 @@
       "automatic_login": false,
       "desktop_contracts": false,
       "snapshots_manager": true,
-      "mok_enrollment": true
+      "mok_enrollment": true,
+      "boot_entry_loss": true
     },
     {
       "id": "uefi-sb-online-btrfs",
