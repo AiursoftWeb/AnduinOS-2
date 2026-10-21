@@ -5,11 +5,60 @@ from contextlib import nullcontext
 from unit.support import *  # noqa: F403
 from business.desktop.lifecycle import _validate_rescue_pointer_trace
 from assertions.guest.ui import rescue as rescue_ui
+from assertions.guest.ui import session as session_ui
 from assertions.guest.ui import shell as shell_ui
 from assertions.guest.ui import core as ui_core
 
 
 class DesktopLifecycleOracleTests(FeatureOracleCase):
+    def test_installed_region_waits_for_chinese_shell_registration(self):
+        markers = (("menu", "系统"), ("toggle button", "显示应用"))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(session_ui, "visible_application_nodes", side_effect=[(), markers]),
+            patch.object(session_ui, "role", side_effect=lambda item: item[0]),
+            patch.object(session_ui, "name", side_effect=lambda item: item[1]),
+            patch.object(session_ui.time, "monotonic", side_effect=[0, 1]),
+            patch.object(session_ui.time, "sleep") as pause,
+            patch.object(session_ui, "event") as record,
+        ):
+            session_ui.observe_installed_region_zh_cn(Path(directory))
+        pause.assert_called_once_with(0.25)
+        self.assertEqual("installed-region-zh-cn", record.call_args.args[0])
+
+    def test_installed_region_waits_for_the_foreground_chinese_setup(self):
+        system = (("menu", "系统"),)
+        setup = (("frame", "AnduinOS 设置"), ("button", "开始设置"), ("label", "欢迎回家。"))
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(session_ui, "visible_application_nodes", return_value=system),
+            patch.object(session_ui, "visible_nodes", side_effect=[(), (setup[0],)]),
+            patch.object(session_ui, "walk", return_value=setup),
+            patch.object(session_ui, "showing", return_value=True),
+            patch.object(session_ui, "role", side_effect=lambda item: item[0]),
+            patch.object(session_ui, "name", side_effect=lambda item: item[1]),
+            patch.object(session_ui.time, "monotonic", side_effect=[0, 1]),
+            patch.object(session_ui.time, "sleep") as pause,
+            patch.object(session_ui, "event"),
+        ):
+            session_ui.observe_installed_region_zh_cn(Path(directory))
+        pause.assert_called_once_with(0.25)
+
+    def test_installed_region_still_rejects_a_persistently_english_shell(self):
+        with (
+            tempfile.TemporaryDirectory() as directory,
+            patch.object(session_ui, "visible_application_nodes", return_value=(("menu", "System"),)),
+            patch.object(session_ui, "role", side_effect=lambda item: item[0]),
+            patch.object(session_ui, "name", side_effect=lambda item: item[1]),
+            patch.object(session_ui.time, "monotonic", side_effect=[0, 121]),
+            patch.object(session_ui, "dump_accessibility") as diagnostic,
+            patch.object(session_ui, "event") as record,
+        ):
+            with self.assertRaisesRegex(session_ui.UiFailure, "not visibly localized"):
+                session_ui.observe_installed_region_zh_cn(Path(directory))
+        diagnostic.assert_called_once()
+        record.assert_not_called()
+
     def test_rescue_center_workflow_is_offline_safe_and_shell_valid(self):
         deployment_id = "11111111-2222-4333-8444-555555555555"
         commands = []
@@ -184,23 +233,44 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
     def test_rescue_center_guest_driver_follows_new_pages_and_requires_safety_default(self):
         labels = []
         clicks = []
+        installer = {"seen": False, "visible": False, "closed": False}
+        frame = ("frame", "AnduinOS Installer")
 
         def find(candidates, **_kwargs):
             labels.append(candidates[0])
+            if candidates[0] == "Welcome to AnduinOS":
+                installer.update(seen=True, visible=True)
+            elif candidates[0] == "Find the system you want to repair" and not installer["seen"]:
+                # Autostart finishes after the initial accessibility scan.
+                installer["visible"] = True
             return candidates[0]
 
+        def close(_node, _index):
+            self.assertEqual("Close", _node)
+            installer["visible"] = False
+            return True
+
+        def wait_closed(_key, **_kwargs):
+            self.assertFalse(installer["visible"])
+            installer["closed"] = True
+
         def click(_node, request, **_kwargs):
+            self.assertTrue(installer["closed"], "The Live installer still blocks the rescue pointer")
             clicks.append(request)
 
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(rescue_ui, "visible_nodes", return_value=()),
+                patch.object(rescue_ui, "visible_nodes", side_effect=lambda: (frame,) if installer["visible"] else ()),
+                patch.object(rescue_ui, "role", side_effect=lambda item: item[0]),
+                patch.object(rescue_ui, "name", side_effect=lambda item: item[1]),
+                patch.object(rescue_ui, "perform_action", side_effect=close),
+                patch.object(rescue_ui, "wait_absent", side_effect=wait_closed),
                 patch.object(rescue_ui, "find_candidates", side_effect=find),
                 patch.object(rescue_ui, "request_node_click", side_effect=click),
                 patch.object(rescue_ui, "_rescue_window_origin", return_value=(0, 0)),
                 patch.object(rescue_ui, "_scroll_rescue_target_into_view"),
                 patch.object(rescue_ui, "_ancestor_containing", return_value="snapshot row"),
-                patch.object(rescue_ui, "_named_descendant", return_value="Restore"),
+                patch.object(rescue_ui, "_named_descendant", side_effect=lambda _parent, text, *_args: text),
                 patch.object(rescue_ui, "checked", return_value=True),
                 patch.object(rescue_ui, "dump_accessibility"),
                 patch.object(rescue_ui, "event"),
@@ -208,21 +278,27 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                 rescue_ui.restore_offline_system("AnduinOS Test", "Baseline", Path(directory))
 
         self.assertIn("Find the system you want to repair", labels)
+        self.assertIn("Welcome to AnduinOS", labels)
         self.assertIn("Open Snapshots & restore page", labels)
         self.assertEqual(clicks, [
             "rescue-select-installation", "rescue-open-snapshots",
             "rescue-select-snapshot", "rescue-confirm-restore",
         ])
 
+        installer.update(seen=False, visible=False, closed=False)
         with tempfile.TemporaryDirectory() as directory:
             with (
-                patch.object(rescue_ui, "visible_nodes", return_value=()),
+                patch.object(rescue_ui, "visible_nodes", side_effect=lambda: (frame,) if installer["visible"] else ()),
+                patch.object(rescue_ui, "role", side_effect=lambda item: item[0]),
+                patch.object(rescue_ui, "name", side_effect=lambda item: item[1]),
+                patch.object(rescue_ui, "perform_action", side_effect=close),
+                patch.object(rescue_ui, "wait_absent", side_effect=wait_closed),
                 patch.object(rescue_ui, "find_candidates", side_effect=find),
                 patch.object(rescue_ui, "request_node_click", side_effect=click),
                 patch.object(rescue_ui, "_rescue_window_origin", return_value=(0, 0)),
                 patch.object(rescue_ui, "_scroll_rescue_target_into_view"),
                 patch.object(rescue_ui, "_ancestor_containing", return_value="snapshot row"),
-                patch.object(rescue_ui, "_named_descendant", return_value="Restore"),
+                patch.object(rescue_ui, "_named_descendant", side_effect=lambda _parent, text, *_args: text),
                 patch.object(rescue_ui, "checked", return_value=False),
             ):
                 with self.assertRaisesRegex(rescue_ui.UiFailure, "not enabled by default"):

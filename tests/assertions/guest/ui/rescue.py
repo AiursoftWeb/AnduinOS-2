@@ -131,10 +131,11 @@ def restore_offline_system(
 ) -> None:
     """Restore one exact snapshot using only real pointer requests."""
 
-    # The Live session launches the installer automatically.  Close that
-    # unrelated window before testing pointer coordinates in Rescue Center;
-    # otherwise Mutter can leave the newly launched rescue window behind it,
-    # and GTK reports the hidden row at (0, 0).
+    # Autostart can finish after the first accessibility scan. Wait for the
+    # installer and its asynchronous close before sending rescue pointer input.
+    find_candidates(
+        aliases("welcome"), label="automatic Live installer", timeout=180,
+    )
     for item in visible_nodes():
         if role(item) != "frame" or name(item) != "AnduinOS Installer":
             continue
@@ -142,6 +143,7 @@ def restore_offline_system(
         if not perform_action(close, 0):
             raise UiFailure("Could not close the Live installer before rescue")
         break
+    wait_absent("welcome", timeout=180)
 
     find_candidates(
         ("Find the system you want to repair",),
