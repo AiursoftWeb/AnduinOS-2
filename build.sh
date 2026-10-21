@@ -388,7 +388,11 @@ if [ "\$grub_platform" = "pc" ]; then
 else
     set gfxmode=auto
 fi
-insmod all_video
+if [ "\$grub_platform" = "efi" ]; then
+    insmod efi_gop
+else
+    insmod all_video
+fi
 insmod gfxterm
 insmod font
 set theme_font_ready=0
