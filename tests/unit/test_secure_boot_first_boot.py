@@ -4,7 +4,7 @@ import copy
 from pathlib import Path
 import unittest
 
-from assertions.guest.ui.secure_boot import ROW_STATES, REPAIR_ACTIONS, validate_status, validate_ui
+from assertions.guest.ui.secure_boot import ROW_STATES, validate_status, validate_ui
 from business.install.context import scenario_check_ids
 from framework.model import TestMatrix
 
@@ -24,12 +24,22 @@ class SecureBootFirstBootTests(unittest.TestCase):
             },
             "dkms": {"untrusted_modules": []},
         }
-        self.names = {text for pair in ROW_STATES for text in pair} | {
-            "Trusted", "AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed"}
+        # Independent public UI contract, as shown by a healthy installation.
+        self.names = {
+            "Secure Boot", "Motherboard Secure Boot is enabled.",
+            "Local MOK Certificate", "The signing certificate and private key are valid and match.",
+            "Certificate Signing Purpose", "This certificate can sign both the bootloader and kernel modules.",
+            "Certificate Enrollment", "This certificate is enrolled in MOK.",
+            "Third-party Drivers", "No third-party kernel modules need attention.",
+            "Trusted", "AnduinOS Bootloader", "AnduinOS GRUB is signed, trusted and deployed.",
+        }
 
     def test_fresh_certificate_without_any_dkms_modules_is_healthy(self):
         validate_status(self.status)
         validate_ui(self.names)
+
+    def test_normal_refresh_is_available_on_a_healthy_page(self):
+        validate_ui(self.names | {"Check Again"})
 
     def test_every_backend_health_boundary_is_required(self):
         for field in ("enabled", "key_present", "certificate_present", "enrolled", "configuration_present"):
@@ -76,7 +86,7 @@ class SecureBootFirstBootTests(unittest.TestCase):
 
     def test_own_bootloader_requires_the_visible_sixth_healthy_row(self):
         with self.assertRaises(ValueError):
-            validate_ui(self.names - {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed'})
+            validate_ui(self.names - {'AnduinOS Bootloader', 'AnduinOS GRUB is signed, trusted and deployed.'})
         with self.assertRaises(ValueError):
             validate_ui(self.names | {'Repair AnduinOS Bootloader'})
 
@@ -86,7 +96,13 @@ class SecureBootFirstBootTests(unittest.TestCase):
                 validate_ui(self.names - {text})
 
     def test_repair_or_use_buttons_fail_even_with_all_healthy_labels(self):
-        for action in REPAIR_ACTIONS:
+        for action in (
+            "Create Signing Certificate", "Replace Signing Certificate…",
+            "Repair Automatic Signing", "Repair Driver Signatures",
+            "Install AnduinOS Bootloader", "Repair AnduinOS Bootloader",
+            "Restart to Enroll Certificate", "Check Before Enabling Secure Boot",
+            "Firmware Help", "Boot Recovery Help",
+        ):
             with self.subTest(action=action), self.assertRaises(ValueError):
                 validate_ui(self.names | {action})
 
@@ -95,10 +111,10 @@ class SecureBootFirstBootTests(unittest.TestCase):
         names = {translate(text) for text in self.names}
         validate_ui(names, translate)
         names.remove(translate(ROW_STATES[-1][1]))
-        names.add(translate("Drivers are signed and ready to load"))
-        validate_ui(names, translate)
+        names.add(translate("Installed drivers are trusted, including signatures from previously enrolled certificates."))
+        validate_ui(names | {translate("Check Again")}, translate)
         with self.assertRaises(ValueError):
-            validate_ui(names | {translate("Repair Module Signatures")}, translate)
+            validate_ui(names | {translate("Repair Driver Signatures")}, translate)
 
     def test_offline_sb_case_and_all_mok_cases_assert_real_first_boot_ui(self):
         matrix = TestMatrix.load(Path(__file__).resolve().parents[1] / "cases/install.json")
