@@ -161,12 +161,18 @@ class LifecycleChecks:
             'export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus; '
             'export WAYLAND_DISPLAY=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 '
             '-type s -name "wayland-[0-9]*" -printf "%f\\n" | head -n1); '
+            'systemd-run --user --wait --pipe --collect --quiet '
+            '--setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" '
+            '--setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" '
+            '--setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" '
             f'python3 {remote}/atspi_driver.py secure-boot-green --evidence {remote}/evidence',
-            timeout=180)
+            timeout=180, check=False)
         (artifacts / "rescue-boot-health-ui.jsonl").write_text(ui)
         tree = self._ssh(vm, key, f"cat {remote}/evidence/secure-boot-accessibility.txt")
         (artifacts / "rescue-boot-health-accessibility.txt").write_text(tree)
         vm.screenshot("rescue-boot-six-green")
+        if not any(line.startswith('{"event": "secure-boot-green"') for line in ui.splitlines()):
+            raise TestFailure("Repaired boot did not show six healthy rows:\n" + ui[-8000:])
         self._ssh(vm, key, "sudo -n /usr/local/sbin/anduinos-acceptance-poweroff")
         self._wait_for_power_transition(vm, key, artifacts, "rescue-boot-poweroff", timeout=150)
         vm.stop()
