@@ -2,6 +2,20 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "voice-typing",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-toggle",
+        "arm64": "uefi-nosb-online-btrfs-ssh-toggle"
+      },
+      "checks": [
+        "voice.install-login-calibration-cache"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
+    },
+    {
       "id": "input-and-appearance",
       "source_cases": {
         "amd64": "uefi-sb-online-btrfs",

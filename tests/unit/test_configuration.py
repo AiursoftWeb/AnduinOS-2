@@ -232,6 +232,7 @@ class MatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             (
+                "voice-typing",
                 "input-and-appearance",
                 "system-lifecycle",
                 "file-integration",

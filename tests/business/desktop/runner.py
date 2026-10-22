@@ -11,6 +11,7 @@ from .home_recovery import HomeRecoveryChecks
 from .session import SessionChecks
 from .shell import ShellChecks
 from .theme import ThemeChecks
+from .voice import VoiceChecks
 
 
 @dataclass(frozen=True)
@@ -32,10 +33,12 @@ class FeatureSuiteRunner(
     SessionChecks,
     ShellChecks,
     ThemeChecks,
+    VoiceChecks,
 ):
     """Run a declared suite without ever mutating its verified base image."""
 
     IMPLEMENTATION_METHODS = {
+        "voice.install-login-calibration-cache": "_exercise_voice_typing",
         "input.super-space-rime": "_exercise_rime_input",
         "system.kernel-theme-upgrade": "_exercise_kernel_theme_upgrade",
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
