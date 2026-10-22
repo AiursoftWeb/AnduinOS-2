@@ -45,6 +45,8 @@ class FeatureSuiteRunner(
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
         "storage.btrfs-home-rollback": "_exercise_btrfs_home_rollback",
         "storage.rescue-center-offline-restore": "_exercise_rescue_center_offline_restore",
+        "boot.rescue-repair": "_exercise_rescue_boot_repair",
+        "boot.rescue-reject-source": "_exercise_rescue_boot_reject_source",
         "storage.factory-reset-preserve-home": "_exercise_factory_reset_preserve_home",
         "storage.factory-reset-erase-home": "_exercise_factory_reset_erase_home",
         "storage.factory-reset-power-loss": "_exercise_factory_reset_power_loss",
@@ -305,6 +307,8 @@ class FeatureSuiteRunner(
             "storage.factory-reset-repeat",
             "storage.btrfs-home-rollback",
             "storage.rescue-center-offline-restore",
+            "boot.rescue-repair",
+            "boot.rescue-reject-source",
         }.intersection(suite.checks):
             # Block guest Internet access in QEMU throughout both recoveries;
             # explicit localhost SSH forwarding remains available for evidence.

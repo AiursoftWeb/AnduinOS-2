@@ -46,6 +46,7 @@ def main() -> int:
             "home-restore-arm",
             "factory-reset-arm",
             "rescue-center-offline-restore",
+            "rescue-center-boot",
             "accounts-create",
             "accounts-change-password",
             "gdm-select-user",
@@ -149,6 +150,10 @@ def main() -> int:
                                  home_only=args.mode == "home-restore-arm")
         elif args.mode == "factory-reset-arm":
             arm_factory_reset(args.erase_home, args.evidence)
+        elif args.mode == "rescue-center-boot":
+            if not args.system_name or args.expected not in {"diagnosis", "Boot repair finished", "Boot repair failed"}:
+                raise UiFailure("Boot rescue requires system name and expected outcome")
+            repair_offline_boot(args.system_name, args.expected, args.evidence)
         elif args.mode == "rescue-center-offline-restore":
             if not args.expected or not args.system_name:
                 raise UiFailure(

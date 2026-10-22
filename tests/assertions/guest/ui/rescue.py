@@ -87,7 +87,7 @@ def _scroll_rescue_target_into_view(target) -> None:
     """Expose an off-screen row before asking QEMU to click its coordinates."""
 
     frame = target
-    while frame is not None and role(frame) != "frame":
+    while frame is not None and role(frame) not in {"frame", "dialog"}:
         frame = _parent(frame)
     if frame is None:
         raise UiFailure("Rescue control has no accessible window frame")
@@ -131,35 +131,7 @@ def restore_offline_system(
 ) -> None:
     """Restore one exact snapshot using only real pointer requests."""
 
-    # The Live session launches the installer automatically.  Close that
-    # unrelated window before testing pointer coordinates in Rescue Center;
-    # otherwise Mutter can leave the newly launched rescue window behind it,
-    # and GTK reports the hidden row at (0, 0).
-    for item in visible_nodes():
-        if role(item) != "frame" or name(item) != "AnduinOS Installer":
-            continue
-        close = _named_descendant(item, "Close", "button")
-        if not perform_action(close, 0):
-            raise UiFailure("Could not close the Live installer before rescue")
-        break
-
-    find_candidates(
-        ("Find the system you want to repair",),
-        label="Rescue Center installation chooser",
-        timeout=180,
-    )
-    installation = find_candidates(
-        (system_name,),
-        label="detected AnduinOS installation",
-        timeout=180,
-        require_enabled=True,
-    )
-    request_node_click(
-        installation,
-        "rescue-select-installation",
-        semantic_target=f"installation:{system_name}",
-        window_origin=_rescue_window_origin(installation),
-    )
+    select_rescue_installation(system_name)
 
     snapshots = find_candidates(
         ("Open Snapshots & restore page", "Snapshots & restore"),
@@ -234,3 +206,75 @@ def restore_offline_system(
         heading=name(complete),
         safety_snapshot=True,
     )
+
+
+def select_rescue_installation(system_name: str) -> None:
+    # The Live session launches the installer automatically.  Close that
+    # unrelated window before testing pointer coordinates in Rescue Center;
+    # otherwise Mutter can leave the newly launched rescue window behind it,
+    # and GTK reports the hidden row at (0, 0).
+    for item in visible_nodes():
+        if role(item) != "frame" or name(item) != "AnduinOS Installer":
+            continue
+        close = _named_descendant(item, "Close", "button")
+        if not perform_action(close, 0):
+            raise UiFailure("Could not close the Live installer before rescue")
+        break
+
+    find_candidates(
+        ("Find the system you want to repair",),
+        label="Rescue Center installation chooser",
+        timeout=180,
+    )
+    installation = find_candidates(
+        (system_name,),
+        label="detected AnduinOS installation",
+        timeout=180,
+        require_enabled=True,
+    )
+    request_node_click(
+        installation,
+        "rescue-select-installation",
+        semantic_target=f"installation:{system_name}",
+        window_origin=_rescue_window_origin(installation),
+    )
+
+
+def repair_offline_boot(system_name: str, expected: str, evidence: Path) -> None:
+    """Repair the selected installation via real pointer input only."""
+    if expected == "diagnosis":
+        select_rescue_installation(system_name)
+        actions = ((("Open Boot repair page", "Boot repair"), "rescue-open-boot"),)
+    else:
+        actions = (
+            (("Rebuild AnduinOS boot",), "rescue-rebuild-boot"),
+            (("Repair boot",), "rescue-confirm-boot"),
+        )
+    for candidates, request in actions:
+        if request == "rescue-confirm-boot":
+            confirmation = find_candidates(("Rebuild boot for this installation?",),
+                                           label="boot repair confirmation", timeout=60)
+            dialog = _ancestor_containing(confirmation, "Repair boot", "button")
+            target = _named_descendant(dialog, "Repair boot", "button")
+        else:
+            target = find_candidates(candidates, label=request, timeout=180, require_enabled=True)
+        _scroll_rescue_target_into_view(target)
+        dump_accessibility(evidence / f"{request}.txt")
+        request_node_click(target, request, semantic_target=name(target),
+                           window_origin=_rescue_window_origin(target))
+    if expected == "diagnosis":
+        find_candidates(("Rebuild AnduinOS boot",), label="repairable diagnosis",
+                        timeout=180, require_enabled=True)
+        dump_accessibility(evidence / "rescue-boot-diagnosis.txt")
+        return
+    result = find_candidates(
+        ("Boot repair finished", "Boot repair failed", "Boot repair needs review"),
+        label="boot repair result", timeout=900,
+    )
+    dump_accessibility(evidence / "rescue-boot-result.txt")
+    if name(result) != expected:
+        raise UiFailure(f"Expected {expected!r}, got {name(result)!r}")
+    if expected == "Boot repair failed":
+        find_candidates(("Package bootloader payload was modified",),
+                        label="untrusted package payload rejection", timeout=30)
+    event("rescue-boot-result", result=name(result))
