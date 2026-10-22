@@ -45,7 +45,7 @@ def _rescue_window_origin(target) -> tuple[float, float]:
     """Locate a GTK Wayland frame or modal dialog via Shell geometry."""
 
     frame = target
-    while frame is not None and role(frame) != "frame":
+    while frame is not None and role(frame) not in {"frame", "dialog"}:
         frame = _parent(frame)
     if frame is None:
         raise UiFailure("Rescue control has no accessible window frame")
