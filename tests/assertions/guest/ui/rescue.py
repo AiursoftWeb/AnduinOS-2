@@ -45,7 +45,7 @@ def _rescue_window_origin(target) -> tuple[float, float]:
     """Locate a GTK Wayland frame or modal dialog via Shell geometry."""
 
     frame = target
-    while frame is not None and role(frame) not in {"frame", "dialog"}:
+    while frame is not None and role(frame) != "frame":
         frame = _parent(frame)
     if frame is None:
         raise UiFailure("Rescue control has no accessible window frame")
@@ -251,7 +251,13 @@ def repair_offline_boot(system_name: str, expected: str, evidence: Path) -> None
             (("Repair boot",), "rescue-confirm-boot"),
         )
     for candidates, request in actions:
-        target = find_candidates(candidates, label=request, timeout=180, require_enabled=True)
+        if request == "rescue-confirm-boot":
+            confirmation = find_candidates(("Rebuild boot for this installation?",),
+                                           label="boot repair confirmation", timeout=60)
+            dialog = _ancestor_containing(confirmation, "Repair boot", "button")
+            target = _named_descendant(dialog, "Repair boot", "button")
+        else:
+            target = find_candidates(candidates, label=request, timeout=180, require_enabled=True)
         _scroll_rescue_target_into_view(target)
         dump_accessibility(evidence / f"{request}.txt")
         request_node_click(target, request, semantic_target=name(target),
