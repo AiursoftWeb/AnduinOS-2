@@ -156,15 +156,23 @@ class LifecycleChecks:
         )
         (artifacts / "rescue-boot-vendor-startup.txt").write_text(booted)
         self._login_gdm_over_ssh(vm, key, timeout=120)
-        ui = self._ssh(vm, key,
+        desktop_environment = (
             'export XDG_RUNTIME_DIR=/run/user/$(id -u); '
             'export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus; '
             'export WAYLAND_DISPLAY=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 '
             '-type s -name "wayland-[0-9]*" -printf "%f\\n" | head -n1); '
-            'systemd-run --user --wait --pipe --collect --quiet '
+        )
+        desktop_service = (
+            'systemd-run --user --collect --quiet '
             '--setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" '
             '--setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" '
             '--setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" '
+        )
+        # Keep the real window in its own desktop service, so completion of
+        # the read-only driver does not close it before the host screenshot.
+        self._ssh(vm, key, desktop_environment + desktop_service +
+                  'anduinos-driver-center --page secure-boot')
+        ui = self._ssh(vm, key, desktop_environment + desktop_service + '--wait --pipe ' +
             f'python3 {remote}/atspi_driver.py secure-boot-green --evidence {remote}/evidence',
             timeout=180, check=False)
         (artifacts / "rescue-boot-health-ui.jsonl").write_text(ui)
