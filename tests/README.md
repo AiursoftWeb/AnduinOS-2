@@ -304,3 +304,15 @@ Preview reclaimable allocation without changing files:
 ```bash
 python3 tests/run.py clean-disks --dry-run
 ```
+
+The `voice-typing` installed-system suite runs on both architectures using
+`uefi-nosb-online-btrfs-ssh-toggle`. It installs the optional Voice Typing package
+through Control Panel and its real authorization dialog, logs out and back in
+through GDM, then sends Super+H through QMP. The native daemon must calibrate on
+its first start, reach listening with the Shell overlay, and persist a valid
+selection. A second invocation and another login after changing the recognition
+language must reach listening without calibration or rewriting that cache.
+D-Bus transitions, cache snapshots, package versions, keyboard requests and
+screenshots are retained. A PipeWire virtual microphone supplies silence in the
+VM; this check covers installation, activation and caching, not physical audio
+hardware or transcription accuracy. Package/download errors fail the check.

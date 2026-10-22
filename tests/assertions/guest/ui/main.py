@@ -1,5 +1,6 @@
 """Command dispatch for the in-guest AT-SPI driver."""
 
+from .voice import exercise_voice_install, exercise_voice_activation
 from .accounts import *  # noqa: F403
 from .applications import *  # noqa: F403
 from .core import *  # noqa: F403
@@ -16,6 +17,8 @@ def main() -> int:
     parser.add_argument(
         "mode",
         choices=(
+            "voice-install",
+            "voice-activation",
             "install",
             "secure-shell-prepare",
             "secure-shell-row",
@@ -87,7 +90,11 @@ def main() -> int:
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
-        if args.mode == "secure-boot-green":
+        if args.mode == "voice-install":
+            exercise_voice_install(args.evidence)
+        elif args.mode == "voice-activation":
+            exercise_voice_activation(args.evidence, args.expected)
+        elif args.mode == "secure-boot-green":
             verify_secure_boot_green(args.evidence)
         elif args.mode == "install":
             if args.config is None:

@@ -35,6 +35,7 @@ _SUPPORTED_GUEST_QMP_KEYS = frozenset(
         "meta_l-tab",
         "meta_l-d",
         "meta_l-i",
+        "meta_l-h",
         "meta_l-u",
         "meta_l-shift-s",
         "meta_l",
