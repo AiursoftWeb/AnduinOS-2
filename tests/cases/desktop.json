@@ -77,6 +77,34 @@
       "observation_modes": ["controlled"]
     },
     {
+      "id": "rescue-boot-reject-source",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": [
+        "boot.rescue-reject-source"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
+    },
+    {
+      "id": "rescue-boot-repair",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": [
+        "boot.rescue-repair"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
+    },
+    {
       "id": "factory-reset-preserve-home",
       "source_cases": {
         "amd64": "uefi-nosb-online-btrfs-ssh-enabled",

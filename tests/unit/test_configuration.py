@@ -238,6 +238,8 @@ class MatrixTests(unittest.TestCase):
                 "btrfs-rollback",
                 "btrfs-home-rollback",
                 "rescue-center-offline-restore",
+                "rescue-boot-reject-source",
+                "rescue-boot-repair",
                 "factory-reset-preserve-home",
                 "factory-reset-erase-home",
                 "factory-reset-repeat",

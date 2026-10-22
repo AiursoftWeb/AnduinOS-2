@@ -74,6 +74,18 @@ required. First target boot must use a non-vendor entry and report a valid,
 deployed GRUB. Other installation cases retain normal vendor-entry coverage.
 The injection and recovery probes are saved as case artifacts.
 
+The `rescue-boot-repair` and `rescue-boot-reject-source` desktop suites use
+separate overlays of the online Secure Boot Btrfs installation on both architectures,
+with external network access blocked throughout rescue. The first corrupts the
+derived signed GRUB and removes the vendor ESP GRUB, then drives the ISO's Rescue
+Center with real pointer input. Independent readback verifies the target certificate,
+PE architecture, configuration and unchanged fallback files before a normal boot
+without the ISO. The actual vendor boot entry, Secure Boot and six healthy Driver
+Center rows must pass. The second corrupts the pristine package payload and requires
+an explicit GUI rejection with all previous EFI files preserved. Neither suite
+installs repair packages into Live or repairs the target outside the GUI. Fault,
+repair-result and final desktop screenshots accompany signature and boot evidence.
+
 ## Architecture coverage
 
 Every UEFI installation case runs on AMD64 and ARM64, including Wi-Fi credential
