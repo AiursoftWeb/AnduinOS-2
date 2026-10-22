@@ -24,6 +24,15 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def assert_enrolled(cert):
+    # Compare actual MOK certificates, independently of localized status text
+    # and the installed mokutil version's --test-key exit-code convention.
+    with tempfile.TemporaryDirectory() as temporary:
+        subprocess.run(['mokutil', '--export'], cwd=temporary, check=True)
+        assert any(p.read_bytes() == cert.read_bytes()
+                   for p in Path(temporary).glob('*.der')), 'Certificate is not enrolled'
+
+
 def efi_files(esp):
     return {str(p.relative_to(esp)): digest(p) for p in sorted(esp.rglob('*'))
             if p.is_file() and not p.name.lower().endswith('grubenv')}
@@ -92,7 +101,7 @@ def inject(mode, record):
     vendor = esp / f'EFI/AnduinOS/grub{suffix}.efi'
     verify_image(vendor, cert, machine)
     verify_image(compat, cert, machine)
-    run('mokutil', '--test-key', str(cert))
+    assert_enrolled(cert)
     state = dict(mode=mode, suffix=suffix, machine=machine,
                  root_uuid=run('findmnt', '-n', '-o', 'UUID', '/'),
                  esp_uuid=run('findmnt', '-n', '-o', 'UUID', '/boot/efi'),
@@ -137,7 +146,7 @@ def verify(state, root, esp):
     cert = root / state['certificate'].lstrip('/')
     assert digest(cert) == state['certificate_hash'], 'Rescue changed the identity'
     assert run('mokutil', '--list-enrolled') == state['enrolled'], 'MOK changed'
-    run('mokutil', '--test-key', str(cert))
+    assert_enrolled(cert)
     files = efi_files(esp)
     if state['mode'] == 'source':
         assert files == state['files'], 'Rejected repair changed EFI files'
