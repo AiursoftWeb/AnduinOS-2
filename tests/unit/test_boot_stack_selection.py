@@ -1,6 +1,8 @@
 """The ISO boot-stack policy is architectural, not tied to a release name."""
 
 from pathlib import Path
+import hashlib
+import json
 import subprocess
 import shutil
 import struct
@@ -87,7 +89,7 @@ class RootfsBootStackTests(unittest.TestCase):
                     source = root / 'source'
                     status = source / 'var/lib/dpkg/status'
                     status.parent.mkdir(parents=True)
-                    packages = ['anduinos-grub', 'anduinos-shim-signed']
+                    packages = ['anduinos-grub', 'anduinos-shim-signed', 'anduinos-recovery-env']
                     if fault == 'missing-package':
                         packages.pop()
                     if fault == 'ubuntu-package':
@@ -97,6 +99,14 @@ class RootfsBootStackTests(unittest.TestCase):
                         f'Package: {name}\nStatus: install ok installed\nArchitecture: {package_arch}\n'
                         'Version: 1\nMaintainer: Test <test@example.com>\nDescription: fixture\n\n'
                         for name in packages))
+                    recovery = source / 'usr/lib/anduinos-recovery-env'
+                    recovery.mkdir(parents=True)
+                    files = {}
+                    for name in ('vmlinuz', 'initrd.img'):
+                        (recovery / name).write_bytes(b'recovery payload fixture')
+                        files[name] = hashlib.sha256((recovery / name).read_bytes()).hexdigest()
+                    (recovery / 'manifest.json').write_text(json.dumps(
+                        {'schema': 1, 'architecture': arch.value, 'files': files}))
                     template = source / f'usr/lib/anduinos-grub/grub{suffix}.efi'
                     template.parent.mkdir(parents=True)
                     # Minimal non-executable PE32+ fixture accepted by sbverify.
