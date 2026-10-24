@@ -15,14 +15,15 @@ PROMPT_PROBE = '/tmp/anduinos-shell-prompt.py'
 
 
 def _wait_shell_prompt(console, evidence: Path, prompt: str, text: str = '', *,
-                       timeout: int = 15, check: bool = True) -> bool:
+                       timeout: int = 15, check: bool = True, user: str = 'live',
+                       evidence_name: str = 'live-notifications-ui.jsonl') -> bool:
     result = console.run(f"""
-uid=$(id -u live)
-runuser -u live -- env XDG_RUNTIME_DIR="/run/user/$uid" \\
+uid=$(id -u {shlex.quote(user)})
+runuser -u {shlex.quote(user)} -- env XDG_RUNTIME_DIR="/run/user/$uid" \\
     DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \\
     python3 {PROMPT_PROBE} {shlex.quote(prompt)} --text {shlex.quote(text)} --timeout {timeout}
 """, timeout=timeout + 15, check=False)
-    with (evidence / 'live-notifications-ui.jsonl').open('a', encoding='utf-8') as stream:
+    with (evidence / evidence_name).open('a', encoding='utf-8') as stream:
         stream.write(result.stdout.strip() + '\n')
     # The serial channel also carries GTK/AT-SPI stderr. Preserve warnings in
     # evidence, but parse the probe's JSON line rather than the whole stream.
@@ -38,7 +39,7 @@ runuser -u live -- env XDG_RUNTIME_DIR="/run/user/$uid" \\
     ready = (result.returncode == 0 and isinstance(report, dict) and report.get('ready') is True and
              report.get('expected_prompt') == prompt and report.get('expected_text') == text)
     if not ready and check:
-        raise TestFailure(f'Live notification UI not ready: {prompt}; see UI evidence')
+        raise TestFailure(f'Shell UI not ready: {prompt}; see UI evidence')
     return ready
 
 

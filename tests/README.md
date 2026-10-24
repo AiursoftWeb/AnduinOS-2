@@ -218,6 +218,17 @@ case executes the real To Go menu entry and requires its rejection warning.
 Persistence is credited only when the running guest retains the sentinel
 across boots, not from GRUB text inspection alone.
 
+`unlock-theme` runs on a fresh installed-system overlay using the account's
+existing extension preferences. It requires default unlock-theme enablement,
+then locks and authenticates with real keyboard input in Fluent dark and light
+modes. A read-only Looking Glass observer records the actual application and
+custom stylesheets: the unlock extension and readability layer must own the
+locked screen, then relinquish ownership to desktop User Themes after unlock.
+The Shell PID must stay unchanged. Missing enablement is a failure, never repaired
+by the test. The observer neither changes styles nor reads password contents;
+per-mode screenshots and structured state evidence are retained. This is a
+loading/ownership and authentication check, not a pixel-perfect visual verdict.
+
 ## Firmware regression coverage
 
 The `uefi-unsupported-offline-btrfs` and `uefi-unsupported-offline-ext4`

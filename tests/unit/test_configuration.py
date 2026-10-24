@@ -246,6 +246,7 @@ class MatrixTests(unittest.TestCase):
                 "factory-reset-repeat",
                 "factory-reset-power-loss",
                 "accounts-gdm",
+                "unlock-theme",
                 "desktop-theme",
                 "shell-shortcuts",
                 "shell-start-menu",

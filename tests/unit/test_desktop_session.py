@@ -1,9 +1,28 @@
 """Session shortcut, localization, file, and appearance oracles."""
 
 from unit.support import *  # noqa: F403
+from assertions.desktop.session import _validate_unlock_theme
 
 
 class DesktopSessionOracleTests(FeatureOracleCase):
+    def test_unlock_theme_requires_loaded_styles_and_mode_ownership(self):
+        name = "Fluent-round-Dark"
+        for locked in (False, True):
+            snapshot = dict(pid=123, locked=locked, greeter=False, selected=name,
+                            application=f"/usr/share/themes/{name}/gnome-shell/gnome-shell.css",
+                            stylesheets=(["/usr/share/gnome-shell/extensions/unlock-theme@anduinos.com/readability.css"]
+                                         if locked else []), unlockEnabled=True,
+                            unlockActive=locked, desktopActive=not locked)
+            _validate_unlock_theme(snapshot, locked=locked, theme=name, pid=123)
+            for wrong in (dict(unlockEnabled=False), dict(pid=456), dict(greeter=True),
+                          dict(application=None), dict(selected="Adwaita"),
+                          dict(unlockActive=not locked), dict(desktopActive=locked),
+                          dict(stylesheets=[] if locked else [snapshot["application"].replace(
+                              f"themes/{name}/gnome-shell/gnome-shell.css",
+                              "gnome-shell/extensions/unlock-theme@anduinos.com/readability.css")])):
+                with self.subTest(locked=locked, wrong=wrong), self.assertRaises(TestFailure):
+                    _validate_unlock_theme({**snapshot, **wrong}, locked=locked, theme=name, pid=123)
+
     def test_alt_tab_oracle_rejects_unchanged_focus(self):
         passing = self._events(
             {
