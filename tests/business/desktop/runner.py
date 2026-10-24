@@ -59,6 +59,7 @@ class FeatureSuiteRunner(
         "theme.cursor-gdm": "_exercise_gdm_cursor",
         "localization.zh-cn-contract": "_exercise_localization_zh_cn",
         "localization.english-fallback": "_exercise_locale_fallback",
+        "appearance.unlock-theme": "_exercise_unlock_theme",
         "appearance.theme-menu-localized": "_exercise_theme_selector",
         "appearance.theme-gtk": "_exercise_gtk_theme",
         "appearance.theme-qt": "_exercise_qt_theme",

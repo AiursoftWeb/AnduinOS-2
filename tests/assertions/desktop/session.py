@@ -685,4 +685,24 @@ def _validate_screenshot_shortcut_events(output: str) -> dict[str, object]:
     return result
 
 
+def _validate_unlock_theme(snapshot: object, *, locked: bool, theme: str, pid: int) -> None:
+    """Require actual theme loading and mode ownership, not just preferences."""
+    if not isinstance(snapshot, dict) or snapshot.get("pid") != pid or snapshot.get("greeter") is not False:
+        raise TestFailure("Unlock theme observer lost the original user Shell")
+    if snapshot.get("locked") is not locked or snapshot.get("selected") != theme:
+        raise TestFailure("Unlock theme mode or selected theme does not match")
+    if snapshot.get("unlockEnabled") is not True:
+        raise TestFailure("Default account did not enable the unlock theme")
+    application = snapshot.get("application")
+    if not isinstance(application, str) or not application.endswith(f"/{theme}/gnome-shell/gnome-shell.css"):
+        raise TestFailure("Fluent application stylesheet is not loaded")
+    stylesheets = snapshot.get("stylesheets")
+    if not isinstance(stylesheets, list) or any(not isinstance(path, str) for path in stylesheets):
+        raise TestFailure("Unlock theme stylesheet inventory is missing")
+    readability = any(path.endswith("/unlock-theme@anduinos.com/readability.css") for path in stylesheets)
+    if (snapshot.get("unlockActive") is not locked or
+            snapshot.get("desktopActive") is not (not locked) or readability is not locked):
+        raise TestFailure("Unlock/desktop theme ownership did not transfer correctly")
+
+
 __all__ = tuple(name for name in globals() if name.startswith("_"))

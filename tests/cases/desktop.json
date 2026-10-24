@@ -182,6 +182,16 @@
       "observation_modes": ["passive", "controlled"]
     },
     {
+      "id": "unlock-theme",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": ["appearance.unlock-theme"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "desktop-theme",
       "source_cases": {
         "amd64": "uefi-sb-online-btrfs",
