@@ -256,6 +256,7 @@ class MatrixTests(unittest.TestCase):
                 "public-ecosystem",
                 "public-ghex",
                 "public-spotify",
+                "recovery-kernel-rollback",
             ),
             tuple(item.id for item in suites),
         )
@@ -280,6 +281,7 @@ class MatrixTests(unittest.TestCase):
                 "uefi-sb-online-btrfs",
                 "uefi-nosb-online-btrfs-ssh-enabled",
                 "uefi-nosb-online-btrfs-ssh-toggle",
+                "uefi-nosb-offline-btrfs",
             },
         )
         with self.assertRaisesRegex(ConfigurationError, "no installation base"):

@@ -321,6 +321,16 @@
       "observation_modes": [
         "controlled"
       ]
+    },
+    {
+      "id": "recovery-kernel-rollback",
+      "source_cases": {
+        "amd64": "uefi-nosb-offline-btrfs",
+        "arm64": "uefi-nosb-offline-btrfs"
+      },
+      "checks": ["storage.recovery-kernel-rollback"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
     }
   ]
 }
