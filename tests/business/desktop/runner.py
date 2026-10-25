@@ -1,6 +1,7 @@
 """Desktop suite scheduling over immutable installed-system overlays."""
 
 from dataclasses import replace
+from framework.model import Network
 
 from .context import *  # noqa: F403
 from .accounts import AccountChecks
@@ -8,6 +9,7 @@ from .applications import PublicApplicationChecks
 from .input import InputChecks
 from .lifecycle import LifecycleChecks
 from .home_recovery import HomeRecoveryChecks
+from .recovery import RecoveryChecks
 from .session import SessionChecks
 from .shell import ShellChecks
 from .theme import ThemeChecks
@@ -25,6 +27,7 @@ class FeatureSuiteResult:
 
 
 class FeatureSuiteRunner(
+    RecoveryChecks,
     AccountChecks,
     PublicApplicationChecks,
     InputChecks,
@@ -38,6 +41,7 @@ class FeatureSuiteRunner(
     """Run a declared suite without ever mutating its verified base image."""
 
     IMPLEMENTATION_METHODS = {
+        "storage.recovery-kernel-rollback": "_exercise_recovery_kernel_rollback",
         "voice.install-login-calibration-cache": "_exercise_voice_typing",
         "input.super-space-rime": "_exercise_rime_input",
         "system.kernel-theme-upgrade": "_exercise_kernel_theme_upgrade",
@@ -305,6 +309,7 @@ class FeatureSuiteRunner(
     ) -> None:
         self.phase_callback(base.scenario.id, suite.id, "Booting verified installation base")
         if {
+            "storage.recovery-kernel-rollback",
             "storage.factory-reset-repeat",
             "storage.btrfs-home-rollback",
             "storage.rescue-center-offline-restore",
@@ -314,6 +319,10 @@ class FeatureSuiteRunner(
             # Block guest Internet access in QEMU throughout both recoveries;
             # explicit localhost SSH forwarding remains available for evidence.
             vm.config = replace(vm.config, restrict_network=True)
+        if suite.id == "recovery-kernel-rollback":
+            # The offline install base has its virtual cable unplugged. Allow
+            # host-forwarded SSH while restrict_network still blocks Internet.
+            vm.config = replace(vm.config, network=Network.ONLINE)
         vm.start(attach_iso=False, phase="feature")
         assert vm.qmp is not None and vm.serial is not None
         vm.serial.timeout = self.options.command_timeout_seconds
@@ -353,6 +362,10 @@ class FeatureSuiteRunner(
                 vm,
                 vm.config.artifacts,
             )
+        if suite.id == "recovery-kernel-rollback":
+            # Recovery records a successful graphical boot at the greeter.
+            # This suite exercises boot/recovery, not desktop login controls.
+            return
         self.phase_callback(base.scenario.id, suite.id, "Logging into GNOME through GDM")
         _login_gdm(vm, self.username, self.password, timeout=120)
         if _graphical_user(vm.serial) != self.username:

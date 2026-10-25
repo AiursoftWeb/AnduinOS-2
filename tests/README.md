@@ -199,6 +199,8 @@ The power-loss overlay adds serial observation and a temporary confirmation mask
 root/package state stays unchanged, both histories are browsable and login works.
 It requires Home-only support in the ISO; older packages fail, never skip.
 
+`recovery-kernel-rollback` runs on both architectures as part of default `make test`, using the offline Btrfs installation. It creates A, boots it successfully, corrupts all installed kernels and initrds, and creates B. The normal boot must fail. With no Live ISO attached, it enters the dedicated recovery environment through GRUB, selects the row marked as the last successful boot, confirms rollback, and restarts. Independent checks require A's original kernel/initrd hashes, preserved newer Home data, B still containing the fault, and two successful graphical boots. Screenshots cover the fault, recovery list, confirmation, result, and restored system. This case currently uses Secure Boot disabled; it does not claim recovery payload authentication.
+
 `rescue-center-offline-restore` takes a system snapshot, uninstalls GNOME Shell, proves the installed desktop cannot start, then boots the tested Live ISO and drives the real Rescue Center UI with host QMP pointer clicks. It selects the damaged installation and baseline, keeps the default safety snapshot enabled, restores offline, removes the Live ISO, and requires a healthy graphical boot, restored package state, preserved newer Home data, and an archived transaction.
 
 Wi-Fi lab setup waits for NetworkManager to answer before configuring radios;
