@@ -215,7 +215,7 @@ Extensions are fetched from [extensions.gnome.org](https://extensions.gnome.org/
 | Font | Homepage / Repository | License |
 |------|----------------------|---------|
 | **Cascadia Code** | [github.com/microsoft/cascadia-code](https://github.com/microsoft/cascadia-code) | SIL OFL-1.1 |
-| **Nerd Fonts Symbols** | [github.com/ryanoasis/nerd-fonts](https://github.com/ryanoasis/nerd-fonts) | MIT |
+| **Nerd Fonts Symbols** | [github.com/ryanoasis/nerd-fonts](https://github.com/ryanoasis/nerd-fonts) | Various — see the [packaged copyright and license notices](https://github.com/AiursoftWeb/AnduinOS-Packages/blob/release-2.0.5/anduinos-fonts/COPYRIGHT) |
 | **Noto Sans** | [github.com/notofonts/latin-greek-cyrillic](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL-1.1 |
 | **Noto Serif** | [github.com/notofonts/latin-greek-cyrillic](https://github.com/notofonts/latin-greek-cyrillic) | SIL OFL-1.1 |
 | **Noto Sans CJK** | [github.com/notofonts/noto-cjk](https://github.com/notofonts/noto-cjk) | SIL OFL-1.1 |
