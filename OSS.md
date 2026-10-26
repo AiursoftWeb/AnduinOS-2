@@ -547,6 +547,22 @@ These video and audio codec libraries power media playback through GStreamer and
 - **"Various" license entries:** Some projects (particularly Debian and Ubuntu) are aggregations of many sub-projects. Consult the upstream distribution's copyright file for per-component details.
 - **Version information:** The package manifest below records the binary package versions in the identified image. For upstream sources and build inputs, consult the corresponding AnduinOS-Packages release tag and its `.aosproj` definitions, source pins, and build scripts. Some upstream versions are resolved at package build time.
 
+## Obtaining Source Code for a Release
+
+Use the image identity and package versions recorded below to locate the source for that image. An installed system may have newer packages after updates.
+
+1. **AnduinOS-maintained code and packaging:** Use the **Packages source release** recorded with the image inventory. For these images, [AnduinOS-Packages `release-2.0.5`](https://github.com/AiursoftWeb/AnduinOS-Packages/tree/release-2.0.5) contains the AnduinOS source, patches, `.aosproj` recipes, and build scripts. Follow each package's recipe for third-party inputs; the repository snapshot alone does not contain every upstream dependency. Use the recorded release rather than the current `master` branch.
+2. **Ubuntu packages:** Look up the exact source package name and version, which can differ from the binary package name and version. For an installed package, this command reports the binary identity followed by its source identity (replace `bash` with the package you want):
+
+   ```bash
+   dpkg-query -W -f='${binary:Package} ${Version} (source: ${source:Package} ${source:Version})\n' bash
+   ```
+
+   Find that source version in [Ubuntu's Launchpad source archive](https://launchpad.net/ubuntu/+source/bash). Download its `.dsc` and all files listed in it, including the original source and Debian/Ubuntu packaging and patches. For example, the Bash version in these images corresponds to [source package `bash` version `5.3-2ubuntu1`](https://launchpad.net/ubuntu/+source/bash/5.3-2ubuntu1). For a downloaded `.deb`, inspect its `Package`, `Version`, and `Source` fields with `dpkg-deb -f`; if `Source` omits a version, use the binary version, and if the field is absent, use the binary name and version.
+3. **Reassembled upstream packages, such as AnduinOS GRUB:** Also inspect `/usr/share/doc/anduinos-grub/manifest.json` in the installed package. It records the exact upstream binary inputs, versions, architectures, repositories, and hashes used for that build. Inspect those inputs' source identities and obtain their corresponding Ubuntu source packages as above, together with the AnduinOS assembly scripts and configuration from the recorded Packages release. Different inputs can come from different source packages, such as `grub2` and `grub2-unsigned`.
+
+Upstream project homepages and current releases are useful references, but do not replace the source and distribution patches corresponding to the binaries you received. Copyright and license notices remain in the relevant packages.
+
 ## Full List of Packages in AnduinOS 2.0.5 — amd64
 
 This inventory was extracted from `LiveOS/filesystem.manifest` in the following production image:
