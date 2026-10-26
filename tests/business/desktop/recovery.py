@@ -3,6 +3,9 @@ from .context import *  # noqa: F403
 from framework.grub import _GraphicalGrubMenuEditor
 
 
+_RECOVERY_ACCENT = (50, 129, 234)
+
+
 class RecoveryChecks:
     def _exercise_recovery_kernel_rollback(self, vm, base, artifacts):
         remote = '/usr/local/lib/anduinos-recovery-acceptance'
@@ -76,10 +79,10 @@ class RecoveryChecks:
                              if image.getpixel((x, y)) == (146, 212, 167)]
                     if len(green) > 50:
                         y = sum(p[1] for p in green) // len(green)
-                        orange = [x for x in range(image.width // 2, image.width)
-                                  if image.getpixel((x, y)) == (233, 84, 32)]
-                        if orange:
-                            self._recovery_click(vm, (min(orange) + max(orange)) / 2 / image.width,
+                        button = [x for x in range(image.width // 2, image.width)
+                                  if image.getpixel((x, y)) == _RECOVERY_ACCENT]
+                        if button:
+                            self._recovery_click(vm, (min(button) + max(button)) / 2 / image.width,
                                                  y / image.height)
                             break
                 time.sleep(1)
@@ -90,21 +93,27 @@ class RecoveryChecks:
             # Confirmation initially focuses Cancel; Tab selects Roll Back.
             vm.qmp.send_key('tab')
             vm.qmp.send_key('ret')
-            # Recovery completion has an orange Restart button in the footer
-            # and no remaining list/confirmation actions above it.
+            # Completion has a primary Restart button in the footer and no
+            # remaining list/confirmation actions below the navigation tabs.
             deadline = time.monotonic() + 180
             while time.monotonic() < deadline:
                 frame = vm.screenshot('recovery-09-result')
                 with Image.open(frame) as image:
                     image = image.convert('RGB')
-                    upper = list(image.crop((0, 0, image.width, image.height * 3 // 4)).getdata())
+                    upper = list(image.crop((0, image.height // 5, image.width, image.height * 3 // 4)).getdata())
                     lower = list(image.crop((0, image.height * 3 // 4, image.width, image.height)).getdata())
-                    if upper.count((233, 84, 32)) < 10 and lower.count((233, 84, 32)) > 500:
+                    if upper.count(_RECOVERY_ACCENT) < 10 and lower.count(_RECOVERY_ACCENT) > 500:
+                        restart = [(x, y) for y in range(image.height * 3 // 4, image.height)
+                                   for x in range(image.width)
+                                   if image.getpixel((x, y)) == _RECOVERY_ACCENT]
+                        restart_point = (sum(p[0] for p in restart) / len(restart) / image.width,
+                                         sum(p[1] for p in restart) / len(restart) / image.height)
                         break
                 time.sleep(1)
             else:
                 raise TestFailure('Recovery GUI did not reach its completion page')
-            vm.qmp.send_key('ret')
+            # Navigation tabs also take keyboard focus; click Restart itself.
+            self._recovery_click(vm, *restart_point)
             deadline = time.monotonic() + 60
             while vm.running and time.monotonic() < deadline:
                 time.sleep(.2)
