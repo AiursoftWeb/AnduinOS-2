@@ -513,7 +513,19 @@ This image is built with the following configurations:
 - **Version**: $TARGET_BUILD_VERSION
 - **Date**: $DATE
 
-$TARGET_BUSINESS_NAME is distributed under the GPLv3 license. You can find the license at [GPL-v3](https://github.com/aiursoftweb/anduinos-2/blob/master/LICENSE).
+## Licensing and source code
+
+$TARGET_BUSINESS_NAME includes components under different licenses. Our [ISO build scripts](https://github.com/AiursoftWeb/AnduinOS-2) are licensed under [GPLv3](https://github.com/AiursoftWeb/AnduinOS-2/blob/master/LICENSE), except where otherwise stated. Other components retain their respective licenses; including them in this image does not place the entire operating system under GPLv3.
+
+The [package manifest](LiveOS/filesystem.manifest) is generated automatically from this image and lists its installed package names and versions.
+
+After booting the live system or installing it, consult \`/usr/share/doc/<package>/copyright\` for each package's copyright and license notices, and \`/usr/share/common-licenses/\` for common license texts.
+
+Our [package sources and build recipes](https://github.com/AiursoftWeb/AnduinOS-Packages) are public. See the existing [source and license references](https://github.com/AiursoftWeb/AnduinOS-2/blob/master/OSS.md#obtaining-source-code-for-a-release) for guidance on obtaining corresponding source for a release.
+
+## Privacy
+
+See our [privacy statement](https://www.anduinos.com/privacy.html) for the distinction between operating-system telemetry, website logs, and third-party network services.
 
 ## Please verify the checksum!!!
 
