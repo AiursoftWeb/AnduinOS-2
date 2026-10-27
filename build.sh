@@ -75,7 +75,8 @@ function run_chroot_anduinos() {
 }
 
 function download_base_system() {
-    bootstrap_ubuntu_root "$SCRIPT_DIR/new_building_os" ca-certificates,wget,dbus
+    # Early mods need dbus-uuidgen; anduinos-core-system selects the suite's bus daemon.
+    bootstrap_ubuntu_root "$SCRIPT_DIR/new_building_os" ca-certificates,wget,dbus-bin
 }
 
 # Shared bootstrap only; package sources and workshop actions remain explicit.
