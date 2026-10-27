@@ -1042,13 +1042,15 @@ def _assert_optional_software(
     username: str,
     evidence: Path,
 ) -> None:
+    # Reading dconf does not require a private session bus. Stonking uses
+    # dbus-broker and does not install the dbus-daemon-only dbus-run-session.
     rime = f"""
 set -euo pipefail
 """
     if scenario.rime:
         rime += f"""
 dpkg-query -W -f='${{db:Status-Abbrev}} ${{Package}} ${{Version}}\\n' anduinos-rime | grep '^ii '
-sources=$(runuser -u {username} -- env HOME=/home/{username} dbus-run-session -- \\
+sources=$(runuser -u {username} -- env HOME=/home/{username} \\
     gsettings get org.gnome.desktop.input-sources sources)
 printf 'input-sources=%s\\n' "$sources"
 printf '%s' "$sources" | grep -q "'ibus', 'rime'"
@@ -1056,7 +1058,7 @@ printf '%s' "$sources" | grep -q "'ibus', 'rime'"
     else:
         rime += f"""
 ! dpkg-query -W -f='${{db:Status-Abbrev}}' anduinos-rime 2>/dev/null | grep -q '^ii '
-sources=$(runuser -u {username} -- env HOME=/home/{username} dbus-run-session -- \\
+sources=$(runuser -u {username} -- env HOME=/home/{username} \\
     gsettings get org.gnome.desktop.input-sources sources)
 printf 'input-sources=%s\\n' "$sources"
 ! printf '%s' "$sources" | grep -q "'ibus', 'rime'"

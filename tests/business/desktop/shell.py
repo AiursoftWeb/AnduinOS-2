@@ -644,7 +644,12 @@ provider_file=/usr/share/gnome-shell/search-providers/org.gnome.Software-search-
 test -r "$provider_file"
 declared=$(sed -n 's/^DesktopId=//p' "$provider_file")
 test "$declared" = "$provider"
-runuser -u "$user" -- env HOME="$home" dbus-run-session -- \
+# Use the installed user bus (dbus-daemon or dbus-broker) before login.
+uid=$(id -u "$user")
+systemctl start "user@$uid.service"
+runuser -u "$user" -- env HOME="$home" \
+    XDG_RUNTIME_DIR="/run/user/$uid" \
+    DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus" \
     python3 - "$provider" <<'PY'
 import sys
 
