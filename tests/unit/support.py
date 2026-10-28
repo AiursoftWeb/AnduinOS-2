@@ -407,7 +407,7 @@ class FeatureOracleCase(unittest.TestCase):
 
     @staticmethod
     def _context_action_events(target, label, request_prefix, items, target_index):
-        down_presses = target_index + 1
+        down_presses = target_index
         return [
             {
                 "event": "context-menu-plan",
@@ -415,8 +415,7 @@ class FeatureOracleCase(unittest.TestCase):
                 "accessible_name": label,
                 "items": items,
                 "target_index": target_index,
-                "down_presses": down_presses,
-                "focus_origin": "menu-actor",
+                "focus_origin": "observed",
             },
             *[
                 {
@@ -426,6 +425,13 @@ class FeatureOracleCase(unittest.TestCase):
                 }
                 for number in range(1, down_presses + 1)
             ],
+            {
+                "event": "context-menu-focus",
+                "target": target,
+                "accessible_name": label,
+                "focused_labels": [label],
+                "down_presses": down_presses,
+            },
             {
                 "event": "qmp-key",
                 "request": f"{request_prefix}-activate",

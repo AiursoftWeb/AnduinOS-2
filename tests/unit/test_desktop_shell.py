@@ -92,6 +92,12 @@ class DesktopShellOracleTests(FeatureOracleCase):
             }
         )
         initial = _validate_panel_pin_initial_events(initial_output)
+        with self.assertRaisesRegex(TestFailure, "intended menu focus"):
+            _validate_panel_pin_initial_events(
+                initial_output.replace(
+                    json.dumps(["添加到任务栏"]), json.dumps(["固定到开始菜单"])
+                )
+            )
         with self.assertRaisesRegex(TestFailure, "unstable ArcMenu"):
             _validate_panel_pin_initial_events(
                 initial_output.replace('"stable_observations": 4', '"stable_observations": 1')
