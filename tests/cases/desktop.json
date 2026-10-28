@@ -246,6 +246,7 @@
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
+        "panel.autohide-drag-recovery",
         "panel.pin-application",
         "panel.remove-menu-localized",
         "shell.appindicator-roundtrip"

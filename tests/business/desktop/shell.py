@@ -4,6 +4,186 @@ from .context import *  # noqa: F403
 
 
 class ShellChecks:
+    def _exercise_panel_autohide_drag_recovery(
+        self, vm: QemuVm, base: PromotedBase, artifacts: Path,
+    ) -> None:
+        """A rejected reveal while dragging must not disable subsequent reveals."""
+        from assertions.notifications import PROMPT_PROBE, _wait_shell_prompt
+
+        assert vm.serial is not None and vm.qmp is not None
+        console, qmp = vm.serial, vm.qmp
+        remote = "/tmp/anduinos-panel-autohide"
+        settings_path = "/org/gnome/shell/extensions/dash-to-panel/"
+        preferences = {
+            "intellihide-use-pointer": "true",
+            "intellihide-use-pressure": "false",
+            "intellihide-hide-from-windows": "false",
+            "intellihide": "true",
+        }
+        original = {}
+        sequence = 0
+        failed = False
+
+        def desktop(command):
+            return console.run(_desktop_command(self.username, ("bash", "-c", command)))
+
+        def user_values():
+            # get_user_value distinguishes an explicit value from a schema or
+            # system default; restoring an unset key must leave it unset.
+            script = (
+                "import json; from gi.repository import Gio; "
+                "source=Gio.SettingsSchemaSource.new_from_directory("
+                "'/usr/share/gnome-shell/extensions/dash-to-panel@jderose9.github.com/schemas',"
+                "Gio.SettingsSchemaSource.get_default(),False); "
+                "settings=Gio.Settings.new_full(source.lookup('org.gnome.shell.extensions.dash-to-panel',False),None,None); "
+                f"values={{key: settings.get_user_value(key) for key in {list(preferences)!r}}}; "
+                "print(json.dumps({key: value.print_(True) if value is not None else None for key,value in values.items()}))"
+            )
+            return json.loads(desktop("python3 -c " + shlex.quote(script)).stdout.strip())
+
+        def button(down):
+            qmp.execute("input-send-event", {"device": "video0", "events": [
+                {"type": "btn", "data": {"down": down, "button": "left"}},
+            ]})
+
+        def observe(predicate, label, stable=0.0, timeout=15):
+            nonlocal sequence
+            deadline, since, last = time.monotonic() + timeout, None, None
+            while time.monotonic() < deadline:
+                result = console.run(f"cat {remote}.json", check=False)
+                try:
+                    report = json.loads(result.stdout.strip())
+                except ValueError:
+                    report = {}
+                if report.get("error"):
+                    raise TestFailure(f"Panel observer failed: {report['error']}")
+                if report.get("sequence", 0) > sequence:
+                    sequence = report["sequence"]
+                    last = report.get("current")
+                    (artifacts / "panel-autohide.json").write_text(json.dumps(report, indent=2) + "\n")
+                    if isinstance(last, dict) and predicate(last):
+                        since = since if since is not None else time.monotonic()
+                        if time.monotonic() - since >= stable:
+                            with (artifacts / "panel-autohide-phases.jsonl").open("a") as stream:
+                                stream.write(json.dumps({"phase": label, "sequence": sequence, **last}) + "\n")
+                            return last
+                    else:
+                        since = None
+                with console.capture_output():
+                    time.sleep(0.1)
+            raise TestFailure(f"Panel auto-hide did not reach {label}: {last}")
+
+        try:
+            console.run(f"test ! -e {remote}.json && test ! -e {remote}.stop")
+            console.upload(self.framework_root / "fixtures/panel_autohide.mjs", remote + ".mjs", 0o644)
+            console.upload(self.framework_root / "fixtures/shell_prompt.py", PROMPT_PROBE, 0o644)
+            for _ in range(3):
+                qmp.send_key("esc")
+                qmp.send_key("alt-f2", hold_ms=150)
+                if _wait_shell_prompt(console, artifacts, "run-dialog", timeout=5,
+                                      check=False, user=self.username,
+                                      evidence_name="panel-autohide-ui.jsonl"):
+                    break
+            else:
+                raise TestFailure("Panel auto-hide Run dialog never became ready")
+
+            def prompt(kind, text=""):
+                _wait_shell_prompt(console, artifacts, kind, text, user=self.username,
+                                   evidence_name="panel-autohide-ui.jsonl")
+
+            qmp.type_text("lg", interval=0.15)
+            prompt("run-dialog", "lg")
+            qmp.send_key("ret")
+            prompt("looking-glass")
+            expression = f'import("file://{remote}.mjs")'
+            qmp.type_text(expression, interval=0.05)
+            prompt("looking-glass", expression)
+            qmp.send_key("ret")
+            initial = observe(lambda state: state.get("ready") is True and
+                              not state["overview"] and not state["locked"], "desktop ready")
+            width, height = qmp.framebuffer_size()
+            if initial["monitor"] != [0, 0, width, height] or not initial["bottom"]:
+                raise TestFailure(f"Expected the ISO's single bottom taskbar: {initial}")
+            original = user_values()
+            for key, value in preferences.items():
+                desktop(f"dconf write {settings_path + key} {value}")
+            (artifacts / "panel-autohide-original-settings.json").write_text(json.dumps(original, indent=2) + "\n")
+            button(False)
+            qmp.move_pointer_absolute(0.8, 0.4)
+
+            def state_at(state, edge, down, visible):
+                x, y = state["pointer"]
+                expected_y = height - 1 if edge else round((height - 1) * 0.4)
+                return (state["ready"] and state["enabled"] and not state["overview"] and
+                        not state["locked"] and not state["fullscreen"] and
+                        abs(x - (width - 1) * 0.8) <= 2 and abs(y - expected_y) <= 2 and
+                        state["leftDown"] is down and state["onscreen"] is visible)
+
+            def expect(edge, down, visible, label):
+                return observe(lambda state: state_at(state, edge, down, visible), label, stable=0.6)
+
+            expect(False, False, False, "ordinary hide")
+            qmp.move_pointer_absolute(0.8, 1.0)
+            expect(True, False, True, "ordinary reveal")
+            vm.screenshot("panel-autohide-ordinary-reveal")
+            qmp.move_pointer_absolute(0.8, 0.4)
+            expect(False, False, False, "ordinary hide after reveal")
+            vm.screenshot("panel-autohide-hidden")
+            def held_hidden(state):
+                if state_at(state, True, True, True):
+                    raise TestFailure("Panel revealed while the left button was held at the edge")
+                return state_at(state, True, True, False)
+
+            for round_number in range(1, 4):
+                button(True)
+                qmp.move_pointer_absolute(0.8, 1.0)
+                observe(held_hidden, f"round {round_number}: drag stays hidden", stable=0.6)
+                button(False)
+                qmp.move_pointer_absolute(0.8, 0.4)
+                expect(False, False, False, f"round {round_number}: released away")
+                qmp.move_pointer_absolute(0.8, 1.0)
+                expect(True, False, True, f"round {round_number}: reveal recovered")
+                vm.screenshot(f"panel-autohide-round-{round_number}-revealed")
+                qmp.move_pointer_absolute(0.8, 0.4)
+                expect(False, False, False, f"round {round_number}: hide recovered")
+        except BaseException:
+            failed = True
+            try:
+                vm.screenshot("panel-autohide-failure")
+                journal = console.run("journalctl -b _COMM=gnome-shell --no-pager -n 500", check=False)
+                (artifacts / "panel-autohide-failure-journal.txt").write_text(journal.stdout)
+            except Exception:
+                pass
+            raise
+        finally:
+            errors = []
+            try:
+                button(False)
+            except Exception as error:
+                errors.append(f"Release mouse: {error}")
+            for key, value in original.items():
+                try:
+                    path = settings_path + key
+                    desktop(f"dconf write {path} {shlex.quote(value)}" if value else f"dconf reset {path}")
+                except Exception as error:
+                    errors.append(str(error))
+            try:
+                if original and user_values() != original:
+                    raise TestFailure("Panel auto-hide preferences were not restored")
+            except Exception as error:
+                errors.append(str(error))
+            try:
+                console.run(f"touch {remote}.stop")
+                result = console.run(f"cat {remote}.json", check=False)
+                (artifacts / "panel-autohide-final.json").write_text(result.stdout)
+            except Exception as error:
+                errors.append(f"Stop observer: {error}")
+            (artifacts / "panel-autohide-cleanup.json").write_text(json.dumps({
+                "restored": original, "errors": errors,
+            }, indent=2) + "\n")
+            if errors and not failed:
+                raise TestFailure(f"Panel auto-hide cleanup failed: {errors}")
+
     def _exercise_start_button_logo(
         self,
         vm: QemuVm,

@@ -215,6 +215,7 @@ class MatrixTests(unittest.TestCase):
         self.assertIn("tty.tty6-branding", shell_suite.checks)
         self.assertEqual(
             (
+                "panel.autohide-drag-recovery",
                 "panel.pin-application",
                 "panel.remove-menu-localized",
                 "shell.appindicator-roundtrip",
