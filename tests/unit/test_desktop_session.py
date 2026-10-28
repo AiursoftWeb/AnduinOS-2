@@ -513,6 +513,18 @@ class DesktopSessionOracleTests(FeatureOracleCase):
         )
         event = _validate_settings_about_events(passing)
         self.assertEqual("AnduinOS 2.0.1", event["operating_system"])
+        # GTK can paint the same logo without exposing an image node.
+        # Asset fallback still requires real AnduinOS identity and dimensions.
+        visual = passing.replace('"coordinate_space": "window"',
+                                 '"coordinate_space": "asset"')
+        visual = visual.replace('"logo_name": ""', '"logo_name": null')
+        visual = visual.replace('"logo_role": "image"', '"logo_role": null')
+        self.assertEqual("asset", _validate_settings_about_events(visual)["coordinate_space"])
+        with self.assertRaises(TestFailure):
+            _validate_settings_about_events(visual.replace("AnduinOS 2.0.1", "Ubuntu 26.10"))
+        with self.assertRaises(TestFailure):
+            _validate_settings_about_events(visual.replace("[100, 80, 400, 82]", "[0, 0, 0, 0]"))
+
         with self.assertRaisesRegex(TestFailure, "identify AnduinOS"):
             _validate_settings_about_events(
                 passing.replace("AnduinOS 2.0.1", "Ubuntu 26.10")

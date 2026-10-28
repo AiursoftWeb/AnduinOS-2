@@ -213,7 +213,7 @@ ALIASES = {
     "mission_center": ("Get Mission Center", "获取 Mission Center"),
     "users_panel": ("Users", "用户"),
     "about_page": ("About", "关于"),
-    "operating_system": ("Operating System", "操作系统"),
+    "operating_system": ("Operating System", "操作系统", "OS Name", "操作系统名称"),
     "system_logo": ("System Logo", "系统徽标", "系统标志", "系统 Logo"),
     "unlock": ("Unlock…", "Unlock", "解锁…", "解锁"),
     "add_user": ("Add User", "添加用户"),
