@@ -126,6 +126,12 @@ state, while installation and recovery pass only after their guest-visible
 effects are verified. If instrumentation bypasses a menu entry, an independent
 case must exercise that entry's user-visible behavior.
 
+`panel.autohide-drag-recovery` in `shell-panel-taskbar` checks ordinary
+hide/reveal, then three left-button drags to the bottom edge and subsequent
+recovery on AMD64 and ARM64. QMP supplies real input; a read-only Looking Glass
+observer records pointer/button state and transformed panel bounds. The check
+restores the original preference overrides and releases the mouse even on failure.
+
 `live.offline-no-notifications` checks every offline installation's first Live
 desktop before opening the installer. QEMU disconnects its NIC before boot.
 The check inventories retained startup notifications and observes new Shell

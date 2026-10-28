@@ -84,6 +84,7 @@ class FeatureSuiteRunner(
         "shortcut.super-u": "_exercise_super_u",
         "shortcut.super-shift-s": "_exercise_screenshot_shortcut",
         "branding.start-button-logo": "_exercise_start_button_logo",
+        "panel.autohide-drag-recovery": "_exercise_panel_autohide_drag_recovery",
         "panel.pin-application": "_exercise_panel_pin",
         "panel.remove-menu-localized": "_exercise_panel_remove",
         "shell.appindicator-roundtrip": "_exercise_appindicator_roundtrip",
