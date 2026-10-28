@@ -75,6 +75,7 @@ FORBIDDEN_IMAGE_PACKAGES = (
     "apport",
     "popularity-contest",
     "ubuntu-report",
+    "ubuntu-insights",
     "whoopsie",
     # Ubuntu extensions superseded by AnduinOS packages.
     "gnome-shell-ubuntu-extensions",
