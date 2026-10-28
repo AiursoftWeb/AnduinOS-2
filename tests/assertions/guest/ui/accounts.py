@@ -223,9 +223,10 @@ def select_gdm_user(account: str, full_name: str, evidence: Path) -> None:
     # GNOME Shell intentionally does not expose GDM's password entry as an
     # editable AT-SPI object.  Prove the user tile transitioned to its password
     # page instead: the selected account and display name remain, and exactly
-    # one Cancel button appears.  GNOME 50 keeps the selected account label in
-    # its accessible cache even though only the full name is painted.  The
-    # hidden entry owns keyboard focus, just like the Polkit prompt above.
+    # one return control appears (Cancel in GNOME 50, Back in GNOME 51).
+    # GNOME 50 keeps the selected account label in its accessible cache even
+    # though only the full name is painted. The hidden entry owns keyboard
+    # focus, just like the Polkit prompt above.
     prompt_cancel_count = 0
     account_label_present = False
     display_name_present = False
@@ -242,7 +243,8 @@ def select_gdm_user(account: str, full_name: str, evidence: Path) -> None:
             prompt_cancel_count = sum(
                 1
                 for item in nodes
-                if role(item) == "button" and matches(item, aliases("cancel"))
+                if role(item) == "button"
+                and matches(item, (*aliases("cancel"), "Back", "返回"))
             )
             account_label_present = any(
                 name(item).casefold() == account.casefold() for item in nodes
