@@ -87,6 +87,9 @@ def _visible_shell_result(value: str) -> list:
         for item in visible_nodes()
         if owning_application(item) == "gnome-shell"
         and name(item).casefold() == folded
+        # ArcMenu exposes the result title as a label. A same-named taskbar
+        # launcher is a button and remains visible after the menu closes.
+        and role(item) == "label"
     ]
 
 
