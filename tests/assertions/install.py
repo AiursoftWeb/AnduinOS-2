@@ -1381,8 +1381,8 @@ def _assert_ssh_units(
 systemctl is-enabled ssh.socket | grep -qx enabled
 systemctl is-active ssh.socket | grep -qx active
 ss -H -ltn 'sport = :22' | grep -q .
-sshd -T | grep -qx 'passwordauthentication yes'
-sshd -T | grep -qx 'permitrootlogin no'
+sshd -T | grep -iqx 'passwordauthentication yes'
+sshd -T | grep -iqx 'permitrootlogin no'
 """
     else:
         expected = r"""
@@ -1394,7 +1394,7 @@ sshd -T | grep -qx 'permitrootlogin no'
         console,
         "set -e\n"
         + expected
-        + "sshd -T | grep -E '^(passwordauthentication|permitrootlogin) '",
+        + "sshd -T | grep -iE '^(passwordauthentication|permitrootlogin) '",
         evidence / "installed-ssh.txt",
     )
 
