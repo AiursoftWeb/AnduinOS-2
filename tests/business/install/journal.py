@@ -5,6 +5,26 @@ from assertions.journal import is_pci_of_root_diagnostic, render_pci_firmware_sc
 
 
 class JournalChecks:
+    # Known upstream blocker, investigated 2026-10-28: GeoClue can deadlock
+    # during startup with Stonking GLib 2.90.0-1 (both ISO architectures).
+    # https://gitlab.gnome.org/GNOME/glib/-/issues/4078
+    # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/5418
+    # The main thread owns VFS singleton initialization and waits for GIO's
+    # module lock; proxy initialization holds that lock and waits for VFS.
+    # GLib e73abdb88ff8 introduced the asynchronous network-monitor path.
+    # Diagnose in an isolated guest: collect journalctl -b -u geoclue.service,
+    # systemctl show geoclue.service (MainPID/SubState/Result), package versions,
+    # and all-thread debugger stacks while startup is stuck. A timeout alone
+    # does not establish this cause. Retain the journal artifacts from both
+    # boot/idle and desktop actions; location requests can activate the service.
+    # Decision: keep this failure blocking; do not disable GeoClue/proxies,
+    # extend timeouts, or whitelist its errors. The upstream MR was unmerged
+    # on the investigation date; no local workaround has been deployed.
+    # TODO: validate the final upstream fix on AMD64/ARM64 (repeated startup,
+    # location requests, network reachability and proxies), preserve Resolute,
+    # and adopt Ubuntu's fixed package when available. Remove any temporary
+    # backport only after verifying upgrades to the official package. Delete
+    # this note once the fix is shipped and the original failure is retested.
     def _capture_journal_cursors(self, vm: QemuVm) -> dict[str, str]:
         assert vm.serial is not None
         command = (
