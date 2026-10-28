@@ -94,7 +94,9 @@ class AccessChecks:
             time.sleep(0.3)
         else:
             raise TestFailure("Secure Shell row never received focus")
-        vm.qmp.send_key("spc")
+        # Enter activates the row on both GTK generations; Space can be
+        # intercepted by the Settings search field on GTK 4.24.
+        vm.qmp.send_key("ret")
         time.sleep(1)
         for _ in range(12):
             probe = run_driver("secure-shell-probe")
