@@ -194,9 +194,14 @@ def _validate_settings_about_events(output: str) -> dict[str, object]:
         raise TestFailure("GNOME Settings did not visibly identify AnduinOS")
     if (
         value.get("page") != "about"
-        or value.get("coordinate_space") != "window"
-        or not isinstance(value.get("logo_name"), str)
-        or value.get("logo_role") not in {"image", "icon"}
+        or not (
+            (value.get("coordinate_space") == "window"
+             and isinstance(value.get("logo_name"), str)
+             and value.get("logo_role") in {"image", "icon"})
+            or (value.get("coordinate_space") == "asset"
+                and value.get("logo_name") is None
+                and value.get("logo_role") is None)
+        )
         or not isinstance(bounds, list)
         or len(bounds) != 4
         or any(
