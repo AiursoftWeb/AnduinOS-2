@@ -82,6 +82,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
             {
                 "gdm-autologin-keyring-locked",
                 "gnome50-keyboard-null-variant",
+                "gnome51-keyboard-unset-xkb-options",
                 "gnome50-gdm-media-keys-null-table",
                 "gnome50-autologin-media-keys-proxy-race",
                 "gnome50-sharing-closed-dbus",
