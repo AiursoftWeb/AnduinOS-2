@@ -101,15 +101,6 @@ included, built, or maintained by AnduinOS.
 Code and documentation contributions may be submitted as pull requests to
 this repository.
 
-## Support the project
-
-AnduinOS is funded by user donations. If you find the project useful, you can
-support its development through Ko-fi.
-
-<a href="https://ko-fi.com/anduinxue/goal?g=0" target="_blank" title="Support AnduinOS on Ko-fi">
-  <img height="36" src="https://storage.ko-fi.com/cdn/kofi3.png?v=3" alt="Support AnduinOS on Ko-fi">
-</a>
-
 ## License
 
 This project is licensed under the GNU General Public License. See
