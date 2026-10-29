@@ -40,6 +40,19 @@
       "reason": "GNOME 50 emits this diagnostic on otherwise healthy input-source startup. Separate checks require gsd-keyboard to remain alive and the configured Rime source to be readable."
     },
     {
+      "id": "gnome51-keyboard-unset-xkb-options",
+      "component_regex": "(^|/)gsd-keyboard($|[|/])",
+      "message_regex": "^g_variant_unref: assertion 'value != NULL' failed$",
+      "conditions": {
+        "rime": true
+      },
+      "max_occurrences": 1,
+      "package": "gnome-settings-daemon",
+      "version_glob": "51.0-1ubuntu1",
+      "owner": "GNOME Settings Daemon",
+      "reason": "In plugins/keyboard/gsd-keyboard-manager.c, maybe_create_initial_settings() unconditionally unrefs the nullable xkb-options user value. An isolated unset/explicit-empty comparison and debugger stack reproduce this in 51.0-1ubuntu1; the installed desktop still switches to Rime, commits Chinese text and switches back. Keep service/input-source health checks and action-scoped journal checks: GNOME Shell errors are separate blockers. This is a known upstream diagnostic, not a repaired daemon. Recheck this exact-version rule when Ubuntu updates the package; do not extend it to all GNOME 51 versions. Source: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/-/blob/51.0/plugins/keyboard/gsd-keyboard-manager.c"
+    },
+    {
       "id": "gnome50-gdm-media-keys-null-table",
       "component_regex": "^gsd-media-keys\\|user@(?!1000\\.)[0-9]+\\.service\\|org\\.gnome\\.SettingsDaemon\\.MediaKeys\\.service(?:\\|/usr/libexec/gsd-media-keys)?$",
       "message_regex": "^g_hash_table_size: assertion 'hash_table != NULL' failed$",
