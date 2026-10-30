@@ -14,9 +14,68 @@ if dpkg-query -W -f='${db:Status-Abbrev}' anduinos-btrfs-snapshots-manager 2>/de
     consumers+=(anduinos-btrfs-snapshots-manager)
 fi
 packages=("linux-image-$kernel" "${consumers[@]}")
+# The ISO may contain a newer Ubuntu kernel than the selected mirror has
+# synchronized. Try that source first, then three bounded archive fallbacks.
+# This is payload preparation, not the fault under test: never change installed
+# packages, the selected system sources, or version requirements to make it pass.
+apt_limits=(-o Acquire::Retries=0 -o Acquire::http::Timeout=15
+            -o Acquire::https::Timeout=15)
+download_kernel() {
+    local specification="$1" mirror
+    if timeout 60 apt-get "${apt_limits[@]}" download "$specification"; then
+        return 0
+    fi
+
+    . /etc/os-release
+    local suite="${UBUNTU_CODENAME:?Ubuntu suite is required for archive fallback}"
+    local archive=ubuntu
+    local official=https://archive.ubuntu.com/ubuntu/
+    if [ "$(dpkg --print-architecture)" = arm64 ]; then
+        archive=ubuntu-ports
+        official=https://ports.ubuntu.com/ubuntu-ports/
+    fi
+    local mirrors=("$official" "https://mirrors.bfsu.edu.cn/$archive/"
+                   "https://mirrors.ustc.edu.cn/$archive/")
+    local lists="$work/apt-lists" sources="$work/kernel.sources"
+    mkdir -p "$lists/partial"
+    local options=("${apt_limits[@]}"
+                   -o "Dir::Etc::sourcelist=$sources"
+                   -o Dir::Etc::sourceparts=-
+                   -o "Dir::State::lists=$lists"
+                   -o APT::Update::Error-Mode=any)
+    for mirror in "${mirrors[@]}"; do
+        printf 'Preparing kernel payload from %s\n' "$mirror"
+        # A private index prevents mixing a stale mirror's metadata with the
+        # next candidate. APT still verifies Ubuntu signatures and DEB hashes.
+        rm -rf "$lists"
+        mkdir -p "$lists/partial"
+        cat > "$sources" <<EOF
+Types: deb
+URIs: $mirror
+Suites: $suite $suite-updates $suite-security $suite-backports
+Components: main
+Signed-By: /usr/share/keyrings/ubuntu-archive-keyring.gpg
+EOF
+        if timeout 60 apt-get "${options[@]}" update &&
+           timeout 60 apt-get "${options[@]}" download "$specification"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
 for package in "${packages[@]}"; do
     version=$(dpkg-query -W -f='${Version}' "$package")
-    apt-get download "$package=$version"
+    if [[ "$package" == linux-image-* ]]; then
+        download_kernel "$package=$version" && continue
+    elif timeout 60 apt-get "${apt_limits[@]}" download "$package=$version"; then
+        continue
+    fi
+    # AnduinOS payloads remain on their configured AnduinOS repository; Ubuntu
+    # mirrors cannot supply them. No unpack/configure action has occurred yet.
+    printf 'Payload preparation failed: %s=%s; fault injection not started.\n' \
+        "$package" "$version" >&2
+    exit 1
 done
 
 # Reinstall real payloads and configure the consumers before the kernel.
