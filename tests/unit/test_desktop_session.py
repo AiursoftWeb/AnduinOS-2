@@ -468,6 +468,21 @@ class DesktopSessionOracleTests(FeatureOracleCase):
             }
         )
         _validate_localization_zh_cn_events(passing)
+        current = json.loads(passing)
+        current["settings_labels"] = ["关于", "操作系统名称"]
+        _validate_localization_zh_cn_events(json.dumps(current))
+        for labels in (
+            ["关于", "Operating System"],
+            ["关于", "Operating System Name"],
+            ["关于", "操作系统类型"],
+            ["关于", "操作系统名称 suffix"],
+            ["操作系统名称"],
+        ):
+            current["settings_labels"] = labels
+            with self.subTest(labels=labels), self.assertRaisesRegex(
+                TestFailure, "settings_labels"
+            ):
+                _validate_localization_zh_cn_events(json.dumps(current))
         for field, missing in (
             ("settings_labels", "操作系统"),
             ("desktop_labels", "回收站"),

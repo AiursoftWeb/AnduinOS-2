@@ -253,7 +253,7 @@ def _validate_localization_zh_cn_events(output: str) -> None:
         event="localization-zh-cn",
     )
     expected = {
-        "settings_labels": {"关于", "操作系统"},
+        "settings_labels": {"关于"},
         "desktop_labels": {"主目录", "回收站"},
         "arcmenu_labels": {"已固定", "所有应用程序"},
     }
@@ -264,6 +264,14 @@ def _validate_localization_zh_cn_events(output: str) -> None:
                 f"Simplified Chinese localization is incomplete for {field}: "
                 f"{observed!r}"
             )
+
+    # Keep the host oracle aligned with the actual old/new Chinese row labels.
+    # A Chinese page title alone must not hide an untranslated OS information row.
+    if not {"操作系统", "操作系统名称"} & set(value["settings_labels"]):
+        raise TestFailure(
+            "Simplified Chinese localization is incomplete for settings_labels: "
+            f"{value['settings_labels']!r}"
+        )
 
 
 def _validate_swapcontrol_events(output: str) -> dict[str, object]:
