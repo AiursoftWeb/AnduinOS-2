@@ -353,12 +353,15 @@ def exercise_localization_zh_cn(evidence: Path) -> None:
     # labels instead of accepting the English aliases used by the branding test.
     exercise_settings_about_branding(evidence)
     settings_names = sorted({name(item) for item in visible_nodes() if name(item)})
-    settings_required = {"关于", "操作系统"}
-    if not settings_required <= set(settings_names):
+    # GNOME 51 names the row “操作系统名称”; older Settings uses “操作系统”.
+    # Accept either exact Chinese label, never an English or substring match.
+    os_labels = {"操作系统", "操作系统名称"} & set(settings_names)
+    settings_required = {"关于"}
+    if not settings_required <= set(settings_names) or not os_labels:
         dump_accessibility(evidence / "localization-settings-failed.txt")
         raise UiFailure(
             "GNOME Settings About is not localized to Simplified Chinese: "
-            f"missing={sorted(settings_required - set(settings_names))!r}"
+            f"labels={settings_names!r}"
         )
     subprocess.run(
         ("pkill", "-f", "(^|/)gnome-control-center( |$)"),
@@ -392,7 +395,7 @@ def exercise_localization_zh_cn(evidence: Path) -> None:
     dump_accessibility(evidence / "localization-zh-cn.txt")
     event(
         "localization-zh-cn",
-        settings_labels=sorted(settings_required),
+        settings_labels=sorted(settings_required | os_labels),
         desktop_labels=desktop_labels,
         arcmenu_labels=menu_labels,
     )
