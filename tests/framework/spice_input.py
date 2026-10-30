@@ -328,7 +328,7 @@ class SpiceInputClient:
         self.close()
 
 
-class SpiceCursorObserver(SpiceInputClient):
+class _SpiceCursorSession(SpiceInputClient):
     """Observe the hardware cursor separately from the guest framebuffer.
 
     A QMP screendump and some Shell screenshots omit the hardware cursor
@@ -468,3 +468,159 @@ class SpiceCursorObserver(SpiceInputClient):
              self._position[1] - self._hotspot[1]),
         )
         view.convert("RGB").save(destination)
+
+
+class SpiceCursorObserver:
+    """Bound display-client work with a host timeout outside its GLib loop.
+
+    SPICE may probe host audio for agent volume synchronization even when
+    audio channels are disabled. A blocked native callback also blocks GLib's
+    timers. Like the existing external display viewer, isolate this client so
+    a bad host backend cannot hang the entire acceptance matrix.
+    """
+
+    def __init__(self, socket_path: Path, artifacts: Path, timeout: float = 10.0):
+        self.socket_path = socket_path
+        self.artifacts = artifacts
+        self.timeout = timeout
+        self._process = None
+        self._log = None
+
+    def __enter__(self):
+        import os
+        import subprocess
+        import sys
+        from .process_lifecycle import parent_death_preexec
+
+        environment = dict(os.environ)
+        environment["PYTHONPATH"] = os.pathsep.join(
+            filter(None, (str(Path(__file__).resolve().parents[1]),
+                          environment.get("PYTHONPATH", "")))
+        )
+        self._log = (self.artifacts / "gdm-cursor-channel.log").open("ab")
+        try:
+            self._process = subprocess.Popen(
+                (sys.executable, "-u", "-m", "framework.spice_input",
+                 str(self.socket_path), str(self.timeout)),
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=self._log,
+                env=environment,
+                preexec_fn=parent_death_preexec(),
+            )
+            self._receive("ready", timeout=2 * self.timeout + 2)
+            return self
+        except BaseException:
+            self.close()
+            raise
+
+    def _send(self, operation: str, **values) -> None:
+        import json
+
+        self._process.stdin.write(
+            (json.dumps({"operation": operation, **values}) + "\n").encode()
+        )
+        self._process.stdin.flush()
+
+    def _receive(self, expected: str, *, timeout: float | None = None) -> None:
+        import json
+        import os
+        import select
+
+        # Read at most one bounded response. A pipe readline can otherwise
+        # wait forever after receiving only a partial line from a broken child.
+        deadline = time.monotonic() + (timeout or self.timeout + 2)
+        data = bytearray()
+        fd = self._process.stdout.fileno()
+        while b"\n" not in data:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not select.select([fd], [], [], remaining)[0]:
+                raise ProtocolError("SPICE cursor worker timed out; see gdm-cursor-channel.log")
+            part = os.read(fd, 1)
+            if not part or len(data) >= 8192:
+                raise ProtocolError("SPICE cursor worker closed or returned an invalid response")
+            data.extend(part)
+        response = json.loads(data)
+        if "error" in response:
+            raise ProtocolError(response["error"])
+        if response.get("status") != expected:
+            raise ProtocolError(f"Unexpected cursor worker response: {response!r}")
+
+    def _run_for(self, seconds: float) -> None:
+        self._send("settle", seconds=seconds)
+        self._receive("done")
+
+    def observe_move(self, move, x: int, y: int) -> None:
+        self._send("move", x=x, y=y)
+        self._receive("move-ready")
+        move()
+        self._receive("done")
+
+    def save_view(self, framebuffer: Path, destination: Path) -> None:
+        self._send("save", framebuffer=str(framebuffer), destination=str(destination))
+        self._receive("done")
+
+    def close(self) -> None:
+        import subprocess
+
+        process = self._process
+        if process is not None:
+            try:
+                if process.poll() is None:
+                    process.stdin.close()
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        process.terminate()
+                        try:
+                            process.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            process.kill()
+                            process.wait(timeout=2)
+            finally:
+                process.stdout.close()
+                if not process.stdin.closed:
+                    process.stdin.close()
+        if self._log is not None:
+            self._log.close()
+        self._process = None
+
+    def __exit__(self, _kind, _value, _traceback):
+        self.close()
+
+
+def _cursor_worker(socket_path: Path, timeout: float) -> None:
+    """Private line protocol: the parent owns QMP and the wall-clock deadline."""
+
+    import json
+    import sys
+
+    def respond(**values):
+        print(json.dumps(values), flush=True)
+
+    with _SpiceCursorSession(socket_path, timeout) as cursor:
+        respond(status="ready")
+        for line in sys.stdin:
+            try:
+                request = json.loads(line)
+                operation = request["operation"]
+                if operation == "settle":
+                    cursor._run_for(request["seconds"])
+                elif operation == "move":
+                    cursor.observe_move(
+                        lambda: respond(status="move-ready"),
+                        request["x"], request["y"],
+                    )
+                elif operation == "save":
+                    cursor.save_view(Path(request["framebuffer"]), Path(request["destination"]))
+                else:
+                    raise ProtocolError(f"Unknown cursor operation: {operation}")
+                respond(status="done")
+            except Exception as error:
+                respond(error=f"{type(error).__name__}: {error}")
+
+
+if __name__ == "__main__":
+    import sys
+
+    _cursor_worker(Path(sys.argv[1]), float(sys.argv[2]))

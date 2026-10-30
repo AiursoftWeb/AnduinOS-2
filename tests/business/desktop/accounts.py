@@ -288,7 +288,7 @@ class AccountChecks:
         # Observe the same separate hardware plane a SPICE viewer receives.
         # Do not unlock GDM, impersonate MediaKeys, or substitute a stock arrow.
         # The requested QMP coordinates alone are never evidence of movement.
-        with SpiceCursorObserver(vm.spice_socket) as cursor:
+        with SpiceCursorObserver(vm.spice_socket, artifacts) as cursor:
             initial = vm.screenshot("gdm-cursor-framebuffer-initial")
             with Image.open(initial) as frame:
                 width, height = frame.size
