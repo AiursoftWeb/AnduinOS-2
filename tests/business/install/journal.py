@@ -1,7 +1,12 @@
 """Action-scoped, idle-boot journal, and passive Plymouth behavior."""
 
 from .context import *  # noqa: F403
-from assertions.journal import is_pci_of_root_diagnostic, render_pci_firmware_script
+from assertions.journal import (
+    is_pci_of_root_diagnostic,
+    is_tdx_host_diagnostic,
+    render_pci_firmware_script,
+    render_tdx_host_script,
+)
 
 
 class JournalChecks:
@@ -233,6 +238,11 @@ printf 'gsd-keyboard-pid=%s\n' "$keyboard_pid"
 printf 'gsd-media-keys-pid=%s\n' "$media_keys_pid"
 printf 'gsd-media-keys-service=active\n'
 printf 'gnome-keyring-pid=%s\n' "$keyring_pid"
+# A running process alone does not prove that applications can use the keyring.
+# This read-only request must succeed even when autologin leaves it locked.
+gdbus call --session --dest org.freedesktop.secrets \
+    --object-path /org/freedesktop/secrets \
+    --method org.freedesktop.Secret.Service.ReadAlias login
 printf 'ding-pid=%s\n' "$ding_pid"
 printf 'input-sources=%s\n' "$sources"
 """
@@ -262,6 +272,15 @@ printf 'input-sources=%s\n' "$sources"
             acpi_pci_without_dt = (
                 json.loads(firmware.stdout).get("acpi_pci_without_dt") is True
             )
+        tdx_host_unavailable = False
+        if any(is_tdx_host_diagnostic(entry) for entry in entries):
+            capabilities = vm.serial.run(render_tdx_host_script(), timeout=60)
+            (artifacts / "installed-tdx-capabilities.json").write_text(
+                capabilities.stdout + "\n", encoding="utf-8"
+            )
+            tdx_host_unavailable = (
+                json.loads(capabilities.stdout).get("tdx_host_unavailable") is True
+            )
         verdict = policy.classify(
             entries,
             scenario,
@@ -269,6 +288,7 @@ printf 'input-sources=%s\n' "$sources"
             failed_system_units=system_units.stdout.splitlines(),
             failed_user_units=user_units.stdout.splitlines(),
             acpi_pci_without_dt=acpi_pci_without_dt,
+            tdx_host_unavailable=tdx_host_unavailable,
         )
         report = render_verdict(verdict)
         (artifacts / "installed-journal-verdict.json").write_text(

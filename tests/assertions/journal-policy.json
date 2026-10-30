@@ -27,6 +27,19 @@
       "reason": "Automatic login supplies no account password to PAM, so a password-protected login keyring remains locked. The test separately proves that the keyring daemon and desktop session are healthy."
     },
     {
+      "id": "gnome51-autologin-keyring-no-password",
+      "component_regex": "^gdm-autologin(?:\\]|\\||$)",
+      "message_regex": "^gkr-pam: couldn't unlock the login keyring\\.?$",
+      "conditions": {
+        "automatic_login": true
+      },
+      "max_occurrences": 1,
+      "package": "libpam-gnome-keyring",
+      "version_glob": "51.1-1",
+      "owner": "GNOME Keyring",
+      "reason": "GNOME Keyring 51.1 pam_sm_open_session sends a passwordless unlock request during automatic login; the control server cannot parse its missing password and returns FAILED, producing this generic message. Dual-architecture real sessions verified password-login unlock, locked autologin, wrong-password rejection and successful graphical unlock followed by Secret Service store/read/delete. The functional gate still requires a live keyring daemon and responsive Secret Service. Recheck this exact-version rule on the next libpam-gnome-keyring update. Source: https://download.gnome.org/sources/gnome-keyring/51/gnome-keyring-51.1.tar.xz (pam/gkr-pam-module.c and daemon/control/gkd-control-server.c)."
+    },
+    {
       "id": "gnome50-keyboard-null-variant",
       "component_regex": "(^|/)gsd-keyboard($|[|/])",
       "message_regex": "^g_variant_unref: assertion 'value != NULL' failed$",
