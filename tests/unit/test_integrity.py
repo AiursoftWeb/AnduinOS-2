@@ -36,63 +36,19 @@ class AcceptanceWiringTests(unittest.TestCase):
             self.assertIn("cursors = self._journal_cursors(vm)", body)
             self.assertIn("self._assert_scoped_journal(", body)
 
-    def test_gdm_cursor_probe_restores_the_locked_security_policy(self):
-        source = _source_tree(ROOT / "business/desktop")
-        exercise = source.split("def _exercise_gdm_cursor(", 1)[1].split(
-            "def _backup_gdm_screenshot_policy(",
-            1,
-        )[0]
-        policy = source.split("def _set_gdm_screenshot_policy(", 1)[1].split(
-            "def _capture_gdm_cursor_frame(",
-            1,
-        )[0]
-        self.assertIn("finally:", exercise)
-        self.assertIn("capture_enabled=False", exercise)
-        self.assertIn('cmp -s \\"$backup/settings\\" \\"$settings\\"', policy)
-        self.assertIn('cmp -s \\"$backup/locks\\" \\"$locks\\"', policy)
-        self.assertIn("restored-lockdown=true", policy)
+    def test_gdm_cursor_keeps_the_locked_security_policy(self):
+        body = inspect.getsource(FeatureSuiteRunner._exercise_gdm_cursor)
+        self.assertIn("SpiceCursorObserver", body)
+        self.assertIn("observe_move", body)
+        self.assertIn("assert_pointer_motion", body)
+        self.assertIn('unchanged != policy', body)
+        self.assertNotIn("capture_enabled", body)
+        self.assertNotIn("systemctl", body)
 
     def test_gdm_contract_reads_the_real_greeter_dconf_profile(self):
-        source = _source_tree(ROOT / "business/desktop")
-        helper = source.split("def _gdm_gsettings_get(", 1)[1].split(
-            "def _capture_gdm_cursor_frame(",
-            1,
-        )[0]
+        helper = inspect.getsource(FeatureSuiteRunner._gdm_gsettings_get)
         self.assertIn('"DCONF_PROFILE=gdm"', helper)
         self.assertIn('"gsettings"', helper)
-        self.assertIn("_gdm_gsettings_get(", source)
-
-    def test_gdm_cursor_uses_shell_capture_with_the_cursor_plane(self):
-        body = inspect.getsource(FeatureSuiteRunner._capture_gdm_cursor_frame)
-        self.assertIn("gdm_screenshot_client.py", body)
-        self.assertIn("_retrieve_file", body)
-        self.assertNotIn("vm.screenshot", body)
-
-    def test_gdm_screenshot_client_fails_closed_without_trusted_name_or_capture(self):
-        fixture = runpy.run_path("tests/fixtures/gdm_screenshot_client.py")
-        with self.assertRaisesRegex(RuntimeError, "trusted screenshot sender"):
-            fixture["_require_primary_owner"](2)
-        with self.assertRaisesRegex(RuntimeError, "capture failed"):
-            fixture["_require_screenshot_reply"](
-                False, "/tmp/frame.png", "/tmp/frame.png"
-            )
-        with self.assertRaisesRegex(RuntimeError, "unexpected screenshot path"):
-            fixture["_require_screenshot_reply"](
-                True, "/tmp/wrong.png", "/tmp/frame.png"
-            )
-
-    def test_gdm_screenshot_client_uses_and_releases_shell_allowlisted_name(self):
-        fixture = Path("tests/fixtures/gdm_screenshot_client.py").read_text(
-            encoding="utf-8"
-        )
-        runner = _source_tree(ROOT / "business/desktop")
-        self.assertIn('TRUSTED_NAME = "org.gnome.SettingsDaemon.MediaKeys"', fixture)
-        self.assertIn("DBUS_REQUEST_NAME_FLAGS_DO_NOT_QUEUE", fixture)
-        self.assertIn('"RequestName"', fixture)
-        self.assertIn('"ReleaseName"', fixture)
-        self.assertIn("finally:", fixture)
-        self.assertIn("org.gnome.SettingsDaemon.MediaKeys.target", runner)
-        self.assertIn("media-keys-restored=active", runner)
 
     def test_firefox_theme_fixture_disables_first_run_ui_and_forces_atspi(self):
         source = _source_tree(ROOT / "business/desktop")

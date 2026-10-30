@@ -1,6 +1,7 @@
 """Account creation, GDM, password, branding, and greeter behavior."""
 
 from .context import *  # noqa: F403
+from framework.spice_input import SpiceCursorObserver
 
 
 class AccountChecks:
@@ -278,37 +279,43 @@ class AccountChecks:
     ) -> None:
         assert vm.qmp is not None and vm.serial is not None
         gdm = self._gdm_user(vm)
-        remote = "/run/anduinos-feature-accounts/evidence"
-        vm.serial.upload(
-            self.gdm_screenshot_client,
-            f"{remote}/gdm_screenshot_client.py",
-            0o755,
+        policy = self._gdm_gsettings_get(
+            vm, gdm, "org.gnome.desktop.lockdown", "disable-save-to-disk"
         )
-        policy_evidence = [self._backup_gdm_screenshot_policy(vm, gdm, remote)]
-        try:
-            gdm, opened = self._set_gdm_screenshot_policy(
-                vm, remote, capture_enabled=True
-            )
-            policy_evidence.append(opened)
-            policy_evidence.append(self._suspend_gdm_media_keys(vm, gdm))
-            vm.qmp.move_pointer_absolute(0.25, 0.5)
-            time.sleep(1)
-            before = self._capture_gdm_cursor_frame(
-                vm, gdm, remote, artifacts, "gdm-cursor-left"
-            )
-            vm.qmp.move_pointer_absolute(0.75, 0.5)
-            time.sleep(1)
-            after = self._capture_gdm_cursor_frame(
-                vm, gdm, remote, artifacts, "gdm-cursor-right"
-            )
-        finally:
-            _, restored = self._set_gdm_screenshot_policy(
-                vm, remote, capture_enabled=False
-            )
-            policy_evidence.append(restored)
-            (artifacts / "gdm-screenshot-lockdown.txt").write_text(
-                "\n".join(policy_evidence) + "\n", encoding="utf-8"
-            )
+        if policy != "true":
+            raise TestFailure("GDM screenshot lockdown is unexpectedly disabled")
+
+        # Observe the same separate hardware plane a SPICE viewer receives.
+        # Do not unlock GDM, impersonate MediaKeys, or substitute a stock arrow.
+        # The requested QMP coordinates alone are never evidence of movement.
+        with SpiceCursorObserver(vm.spice_socket) as cursor:
+            initial = vm.screenshot("gdm-cursor-framebuffer-initial")
+            with Image.open(initial) as frame:
+                width, height = frame.size
+            # Wake the initially hidden cursor before measuring two fresh moves.
+            vm.qmp.move_pointer_absolute(0.5, 0.5)
+            cursor._run_for(1.0)
+            views = []
+            for label, fraction in (("left", 0.25), ("right", 0.75)):
+                cursor.observe_move(
+                    lambda: vm.qmp.move_pointer_absolute(fraction, 0.5),
+                    round(fraction * (width - 1)),
+                    round(0.5 * (height - 1)),
+                )
+                raw = vm.screenshot(f"gdm-cursor-{label}-framebuffer")
+                view = artifacts / f"gdm-cursor-{label}.png"
+                cursor.save_view(raw, view)
+                views.append(view)
+            before, after = views
+
+        unchanged = self._gdm_gsettings_get(
+            vm, gdm, "org.gnome.desktop.lockdown", "disable-save-to-disk"
+        )
+        (artifacts / "gdm-screenshot-lockdown.txt").write_text(
+            f"before={policy}\nafter={unchanged}\n", encoding="utf-8"
+        )
+        if unchanged != policy:
+            raise TestFailure("GDM screenshot lockdown changed during cursor capture")
         assert_pointer_motion(before, after, artifacts / "gdm-cursor-motion.json")
 
         # End with the original account usable.  This also proves that adding
@@ -327,129 +334,6 @@ class AccountChecks:
             login + "\n", encoding="utf-8"
         )
         vm.screenshot("account-original-session-restored")
-
-    def _backup_gdm_screenshot_policy(
-        self,
-        vm: QemuVm,
-        gdm: str,
-        remote: str,
-    ) -> str:
-        """Save the locked GDM policy before the overlay-only visual probe."""
-
-        assert vm.serial is not None
-        backup = f"{remote}/gdm-screenshot-policy"
-        system_settings = "/usr/share/gdm/dconf/00-upstream-settings"
-        system_locks = "/usr/share/gdm/dconf/locks/00-upstream-settings-locks"
-        original = self._gdm_gsettings_get(
-            vm,
-            gdm,
-            "org.gnome.desktop.lockdown",
-            "disable-save-to-disk",
-        )
-        if original != "true":
-            raise TestFailure(
-                "GDM did not start with its expected save-to-disk lockdown: "
-                f"observed {original!r} through DCONF_PROFILE=gdm"
-            )
-        result = vm.serial.run(
-            "set -euo pipefail; "
-            f"backup={shlex.quote(backup)}; "
-            f"settings={shlex.quote(system_settings)}; "
-            f"locks={shlex.quote(system_locks)}; "
-            "install -d -m 0700 \"$backup\"; "
-            "grep -Fxq 'file-db:/var/lib/gdm3/greeter-dconf-defaults' "
-            "/usr/share/dconf/profile/gdm; "
-            "grep -Fxq '/org/gnome/desktop/lockdown/disable-save-to-disk' \"$locks\"; "
-            "grep -Eq '^disable-save-to-disk=true$' \"$settings\"; "
-            "cp --preserve=all \"$settings\" \"$backup/settings\"; "
-            "cp --preserve=all \"$locks\" \"$backup/locks\"; "
-            "printf 'original-lockdown=true\\n'; "
-            "sha256sum \"$backup/settings\" \"$backup/locks\"",
-            timeout=30,
-        )
-        return result.stdout
-
-    def _set_gdm_screenshot_policy(
-        self,
-        vm: QemuVm,
-        remote: str,
-        *,
-        capture_enabled: bool,
-    ) -> tuple[str, str]:
-        """Open or restore the one locked key, restarting the real greeter."""
-
-        assert vm.serial is not None
-        backup = f"{remote}/gdm-screenshot-policy"
-        settings = "/usr/share/gdm/dconf/00-upstream-settings"
-        locks = "/usr/share/gdm/dconf/locks/00-upstream-settings-locks"
-        if capture_enabled:
-            result = vm.serial.run(
-                "set -euo pipefail; "
-                f"settings={shlex.quote(settings)}; locks={shlex.quote(locks)}; "
-                "sed -i "
-                "'\\|^/org/gnome/desktop/lockdown/disable-save-to-disk$|d' "
-                "\"$locks\"; "
-                "sed -i "
-                "'s/^disable-save-to-disk=true$/disable-save-to-disk=false/' "
-                "\"$settings\"; "
-                "grep -Eq '^disable-save-to-disk=false$' \"$settings\"; "
-                "! grep -Fxq "
-                "'/org/gnome/desktop/lockdown/disable-save-to-disk' \"$locks\"; "
-                "systemctl restart gdm.service; "
-                "printf 'temporary-policy-files=prepared\\n'",
-                timeout=60,
-            ).stdout
-            expected = "false"
-        else:
-            result = vm.serial.run(
-                "set -euo pipefail; "
-                f"backup={shlex.quote(backup)}; "
-                f"settings={shlex.quote(settings)}; locks={shlex.quote(locks)}; "
-                "cp --preserve=all --force \"$backup/settings\" \"$settings\"; "
-                "cp --preserve=all --force \"$backup/locks\" \"$locks\"; "
-                "cmp -s \"$backup/settings\" \"$settings\"; "
-                "cmp -s \"$backup/locks\" \"$locks\"; "
-                "systemctl restart gdm.service; "
-                "printf 'policy-files-restored=yes\\n'",
-                timeout=60,
-            ).stdout
-            expected = "true"
-        gdm = self._gdm_user(vm)
-        observed = self._gdm_gsettings_get(
-            vm,
-            gdm,
-            "org.gnome.desktop.lockdown",
-            "disable-save-to-disk",
-        )
-        if observed != expected:
-            state = "temporary false" if capture_enabled else "restored true"
-            raise TestFailure(
-                f"GDM screenshot lockdown was not {state}: observed {observed!r}"
-            )
-        label = "temporary-lockdown=false" if capture_enabled else "restored-lockdown=true"
-        if not capture_enabled:
-            media_keys = vm.serial.run(
-                _desktop_command(
-                    gdm,
-                    (
-                        "bash",
-                        "-lc",
-                        "service=org.gnome.SettingsDaemon.MediaKeys.service; "
-                        "deadline=$((SECONDS + 30)); "
-                        "until systemctl --user is-active --quiet \"$service\"; do "
-                        "if (( SECONDS >= deadline )); then "
-                        "systemctl --user status \"$service\" --no-pager; exit 1; "
-                        "fi; sleep 1; done; printf active",
-                    ),
-                ),
-                timeout=45,
-            ).stdout.strip()
-            if media_keys != "active":
-                raise TestFailure(
-                    "GDM media-keys service was not restored after the visual probe"
-                )
-            result = _join_contract_outputs(result, "media-keys-restored=active")
-        return gdm, _join_contract_outputs(result, label)
 
     def _gdm_gsettings_get(
         self,
@@ -476,78 +360,6 @@ class AccountChecks:
             timeout=30,
         ).stdout.strip()
 
-    def _capture_gdm_cursor_frame(
-        self,
-        vm: QemuVm,
-        gdm: str,
-        remote: str,
-        artifacts: Path,
-        label: str,
-    ) -> Path:
-        """Capture the compositor cursor plane from the real GDM session."""
-
-        assert vm.serial is not None
-        guest_path = f"{remote}/{label}.png"
-        vm.serial.run(f"rm -f {shlex.quote(guest_path)}", timeout=30)
-        result = vm.serial.run(
-            _desktop_command(
-                gdm,
-                (
-                    "python3",
-                    f"{remote}/gdm_screenshot_client.py",
-                    "--output",
-                    guest_path,
-                ),
-            ),
-            timeout=60,
-            check=False,
-        )
-        (artifacts / f"{label}-capture.txt").write_text(
-            result.stdout + "\n", encoding="utf-8"
-        )
-        if result.returncode != 0:
-            raise TestFailure(
-                "GDM Shell could not capture its compositor cursor plane with "
-                f"include_cursor=true:\n{result.stdout[-4000:]}"
-            )
-        vm.serial.run(f"test -s {shlex.quote(guest_path)}", timeout=30)
-        destination = artifacts / f"{label}.png"
-        _retrieve_file(vm.serial, guest_path, destination)
-        if not destination.is_file() or destination.stat().st_size == 0:
-            raise TestFailure("GDM cursor screenshot was not retrieved")
-        return destination
-
-    def _suspend_gdm_media_keys(self, vm: QemuVm, gdm: str) -> str:
-        """Release Shell's trusted sender name for the one-shot test client."""
-
-        assert vm.serial is not None
-        script = (
-            "set -e; "
-            "service=org.gnome.SettingsDaemon.MediaKeys.service; "
-            "target=org.gnome.SettingsDaemon.MediaKeys.target; "
-            "test \"$(systemctl --user is-active \"$service\")\" = active; "
-            "systemctl --user stop \"$target\"; "
-            "deadline=$((SECONDS + 15)); "
-            "while systemctl --user is-active --quiet \"$service\"; do "
-            "if (( SECONDS >= deadline )); then exit 1; fi; sleep 1; done; "
-            "owner=$(gdbus call --session --dest org.freedesktop.DBus "
-            "--object-path /org/freedesktop/DBus "
-            "--method org.freedesktop.DBus.NameHasOwner "
-            "org.gnome.SettingsDaemon.MediaKeys); "
-            "test \"$owner\" = '(false,)'; "
-            "printf 'media-keys-trusted-name=released\\n'"
-        )
-        result = vm.serial.run(
-            _desktop_command(gdm, ("bash", "-lc", script)),
-            timeout=45,
-            check=False,
-        )
-        if result.returncode != 0:
-            raise TestFailure(
-                "Could not release the GDM media-keys sender name for the "
-                "one-shot screenshot client:\n" + result.stdout[-4000:]
-            )
-        return result.stdout
     def _prepare_account_fixture(self, vm: QemuVm) -> str:
         assert vm.serial is not None
         remote = "/run/anduinos-feature-accounts"

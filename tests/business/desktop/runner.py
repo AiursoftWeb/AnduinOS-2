@@ -117,9 +117,6 @@ class FeatureSuiteRunner(
         self.check_callback = check_callback
         self.framework_root = Path(__file__).parents[2]
         self.driver = GuestUiDriver(self.framework_root / "assertions/guest")
-        self.gdm_screenshot_client = (
-            self.framework_root / "fixtures/gdm_screenshot_client.py"
-        )
         self.btrfs_rollback_oracle = (
             self.framework_root / "assertions/guest/btrfs_rollback_oracle.py"
         )
