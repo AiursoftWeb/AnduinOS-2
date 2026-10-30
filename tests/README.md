@@ -86,6 +86,29 @@ an explicit GUI rejection with all previous EFI files preserved. Neither suite
 installs repair packages into Live or repairs the target outside the GUI. Fault,
 repair-result and final desktop screenshots accompany signature and boot evidence.
 
+## ISO acceptance boundary
+
+Each `make test` run judges the supplied ISO against the common matrix in
+`cases/install.json`. It must not assume that the ISO is based on Resolute or
+Stonking, use the build host or `args.sh` as guest evidence, or select different
+pass criteria by Ubuntu codename. Architecture selects the applicable firmware,
+hardware and explicitly declared cases; it does not relax their assertions.
+
+Release coverage includes all four combinations: Resolute/AMD64,
+Resolute/ARM64, Stonking/AMD64 and Stonking/ARM64. This is an outer choice of
+which ISOs to build and test, not four suite-specific acceptance policies.
+Record each ISO's source revision, hash, package manifest, test scope and results
+separately. A targeted regression or a unit-test pass does not establish a full
+ISO release verdict or prove that the other combinations passed.
+
+When a check needs a codename, package version, kernel capability or software
+source, obtain it from the actual ISO or running guest. Adapting a command to
+that observed environment must preserve the same user-visible requirement.
+Known diagnostics require narrow component, version/capability, scenario and
+occurrence evidence, with independent functional checks; a suite name alone
+never exempts an error. Diagnostic and ordinary ISOs use the same criteria,
+and a diagnostic image's results cannot certify the original image.
+
 ## Architecture coverage
 
 Every UEFI installation case runs on AMD64 and ARM64, including Wi-Fi credential
