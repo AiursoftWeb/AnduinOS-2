@@ -87,6 +87,8 @@ class SpiceInputClient:
         self._glib = GLib
         self._spice = Spice
         session = Spice.Session.new()
+        # Headless input/cursor observers never play or record host audio.
+        session.set_property("enable-audio", False)
         session.set_property("unix-path", str(self.socket_path))
         loop = GLib.MainLoop()
 
