@@ -81,6 +81,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
         self.assertEqual(
             {
                 "gdm-autologin-keyring-locked",
+                "gnome51-autologin-keyring-no-password",
                 "gnome50-keyboard-null-variant",
                 "gnome51-keyboard-unset-xkb-options",
                 "gnome50-gdm-media-keys-null-table",
@@ -101,6 +102,7 @@ class JournalPolicyShapeTests(unittest.TestCase):
                 "gnome-settings-daemon",
                 "gnome-shell",
                 "gnome-shell-extension-desktop-icons-ng-anduinos",
+                "libpam-gnome-keyring",
                 "mutter-common",
                 "polkitd",
                 "spice-vdagent",
@@ -189,6 +191,56 @@ class JournalClassificationTests(unittest.TestCase):
             "does not apply",
             verdict.blockers[0].reason,
         )
+
+    def test_gnome51_keyring_diagnostic_is_exact_and_autologin_only(self):
+        message = "gkr-pam: couldn't unlock the login keyring."
+        item = entry(message, "gdm-autologin]", priority=3)
+        versions = dict(VERSIONS, **{
+            "gdm3": "51.0-0ubuntu1.1", "libpam-gnome-keyring": "51.1-1",
+        })
+        accepted = self.policy.classify((item,), scenario(), versions)
+        self.assertTrue(accepted.passed)
+        self.assertEqual(
+            "gnome51-autologin-keyring-no-password",
+            accepted.known_diagnostics[0].rule_id,
+        )
+        for test_scenario, test_versions, items in (
+            (scenario(automatic_login=False), versions, (item,)),
+            (scenario(), dict(versions, **{"libpam-gnome-keyring": "51.1-2"}), (item,)),
+            (scenario(), versions, (entry(message, "gdm-password]", priority=3),)),
+            (scenario(), versions, (item, entry(message, "gdm-autologin]", priority=3, cursor="second"))),
+        ):
+            with self.subTest(items=items, versions=test_versions):
+                self.assertFalse(self.policy.classify(items, test_scenario, test_versions).passed)
+
+    def test_tdx_optional_host_message_requires_guest_capability_evidence(self):
+        item = entry(
+            "virt/tdx: TDX not supported by the host platform",
+            "kernel",
+            priority=3,
+        )
+        self.assertFalse(self.policy.classify((item,), scenario(), VERSIONS).passed)
+        verdict = self.policy.classify(
+            (item,), scenario(), VERSIONS, tdx_host_unavailable=True
+        )
+        self.assertTrue(verdict.passed)
+        self.assertEqual("tdx-host-capability-absent", verdict.known_diagnostics[0].rule_id)
+
+    def test_tdx_classification_rejects_other_errors_and_repetition(self):
+        message = "virt/tdx: TDX not supported by the host platform"
+        for items in (
+            (entry("virt/tdx: XSAVE is required for TDX", "kernel", priority=3),),
+            (entry(message, "unrelated-daemon", priority=3),),
+            (entry(message + " (initialization failed)", "kernel", priority=3),),
+            (entry(message, "kernel", priority=3, cursor="first"),
+             entry(message, "kernel", priority=3, cursor="second")),
+        ):
+            with self.subTest(items=items):
+                verdict = self.policy.classify(
+                    items, scenario(), VERSIONS, tdx_host_unavailable=True
+                )
+                self.assertFalse(verdict.passed)
+                self.assertTrue(verdict.blockers)
 
     def test_polkit_exited_subject_is_limited_to_panel_pin_session_recreation(self):
         subject = entry(
