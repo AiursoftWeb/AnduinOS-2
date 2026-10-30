@@ -1,6 +1,7 @@
 """Desktop suite scheduling over immutable installed-system overlays."""
 
 from dataclasses import replace
+from framework.model import Network
 
 from .context import *  # noqa: F403
 from .accounts import AccountChecks
@@ -8,9 +9,11 @@ from .applications import PublicApplicationChecks
 from .input import InputChecks
 from .lifecycle import LifecycleChecks
 from .home_recovery import HomeRecoveryChecks
+from .recovery import RecoveryChecks
 from .session import SessionChecks
 from .shell import ShellChecks
 from .theme import ThemeChecks
+from .voice import VoiceChecks
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,7 @@ class FeatureSuiteResult:
 
 
 class FeatureSuiteRunner(
+    RecoveryChecks,
     AccountChecks,
     PublicApplicationChecks,
     InputChecks,
@@ -32,16 +36,21 @@ class FeatureSuiteRunner(
     SessionChecks,
     ShellChecks,
     ThemeChecks,
+    VoiceChecks,
 ):
     """Run a declared suite without ever mutating its verified base image."""
 
     IMPLEMENTATION_METHODS = {
+        "storage.recovery-kernel-rollback": "_exercise_recovery_kernel_rollback",
+        "voice.install-login-calibration-cache": "_exercise_voice_typing",
         "input.super-space-rime": "_exercise_rime_input",
         "system.kernel-theme-upgrade": "_exercise_kernel_theme_upgrade",
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
         "storage.btrfs-home-rollback": "_exercise_btrfs_home_rollback",
         "storage.rescue-center-offline-restore": "_exercise_rescue_center_offline_restore",
+        "boot.rescue-repair": "_exercise_rescue_boot_repair",
+        "boot.rescue-reject-source": "_exercise_rescue_boot_reject_source",
         "storage.factory-reset-preserve-home": "_exercise_factory_reset_preserve_home",
         "storage.factory-reset-erase-home": "_exercise_factory_reset_erase_home",
         "storage.factory-reset-power-loss": "_exercise_factory_reset_power_loss",
@@ -54,6 +63,7 @@ class FeatureSuiteRunner(
         "theme.cursor-gdm": "_exercise_gdm_cursor",
         "localization.zh-cn-contract": "_exercise_localization_zh_cn",
         "localization.english-fallback": "_exercise_locale_fallback",
+        "appearance.unlock-theme": "_exercise_unlock_theme",
         "appearance.theme-menu-localized": "_exercise_theme_selector",
         "appearance.theme-gtk": "_exercise_gtk_theme",
         "appearance.theme-qt": "_exercise_qt_theme",
@@ -74,6 +84,7 @@ class FeatureSuiteRunner(
         "shortcut.super-u": "_exercise_super_u",
         "shortcut.super-shift-s": "_exercise_screenshot_shortcut",
         "branding.start-button-logo": "_exercise_start_button_logo",
+        "panel.autohide-drag-recovery": "_exercise_panel_autohide_drag_recovery",
         "panel.pin-application": "_exercise_panel_pin",
         "panel.remove-menu-localized": "_exercise_panel_remove",
         "shell.appindicator-roundtrip": "_exercise_appindicator_roundtrip",
@@ -106,9 +117,6 @@ class FeatureSuiteRunner(
         self.check_callback = check_callback
         self.framework_root = Path(__file__).parents[2]
         self.driver = GuestUiDriver(self.framework_root / "assertions/guest")
-        self.gdm_screenshot_client = (
-            self.framework_root / "fixtures/gdm_screenshot_client.py"
-        )
         self.btrfs_rollback_oracle = (
             self.framework_root / "assertions/guest/btrfs_rollback_oracle.py"
         )
@@ -299,13 +307,20 @@ class FeatureSuiteRunner(
     ) -> None:
         self.phase_callback(base.scenario.id, suite.id, "Booting verified installation base")
         if {
+            "storage.recovery-kernel-rollback",
             "storage.factory-reset-repeat",
             "storage.btrfs-home-rollback",
             "storage.rescue-center-offline-restore",
+            "boot.rescue-repair",
+            "boot.rescue-reject-source",
         }.intersection(suite.checks):
             # Block guest Internet access in QEMU throughout both recoveries;
             # explicit localhost SSH forwarding remains available for evidence.
             vm.config = replace(vm.config, restrict_network=True)
+        if suite.id == "recovery-kernel-rollback":
+            # The offline install base has its virtual cable unplugged. Allow
+            # host-forwarded SSH while restrict_network still blocks Internet.
+            vm.config = replace(vm.config, network=Network.ONLINE)
         vm.start(attach_iso=False, phase="feature")
         assert vm.qmp is not None and vm.serial is not None
         vm.serial.timeout = self.options.command_timeout_seconds
@@ -345,6 +360,10 @@ class FeatureSuiteRunner(
                 vm,
                 vm.config.artifacts,
             )
+        if suite.id == "recovery-kernel-rollback":
+            # Recovery records a successful graphical boot at the greeter.
+            # This suite exercises boot/recovery, not desktop login controls.
+            return
         self.phase_callback(base.scenario.id, suite.id, "Logging into GNOME through GDM")
         _login_gdm(vm, self.username, self.password, timeout=120)
         if _graphical_user(vm.serial) != self.username:

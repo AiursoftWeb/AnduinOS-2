@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 import shlex
 import shutil
@@ -184,7 +185,8 @@ def _validate_rootfs_boot_stack(path: Path, architecture: Architecture) -> None:
         result = subprocess.run(
             ["unsquashfs", "-no-progress", "-processors", "2", "-d", str(target), str(squash),
              "var/lib/dpkg/status", "usr/lib/anduinos-grub", "var/lib/anduinos-grub",
-             "var/lib/shim-signed/mok", "var/lib/anduinos-secureboot"],
+             "var/lib/shim-signed/mok", "var/lib/anduinos-secureboot",
+             "usr/lib/anduinos-recovery-env", "var/lib/anduinos-recovery-env"],
             capture_output=True, text=True, timeout=120,
         )
         if result.returncode or not (target / "var/lib/dpkg/status").is_file():
@@ -201,7 +203,7 @@ def _validate_rootfs_boot_stack(path: Path, architecture: Architecture) -> None:
             name, arch, status = line.split("\t")
             if status == "installed":
                 installed[name] = arch
-        for name in ("anduinos-grub", "anduinos-shim-signed"):
+        for name in ("anduinos-grub", "anduinos-shim-signed", "anduinos-recovery-env"):
             if installed.get(name) != architecture.value:
                 raise ConfigurationError(f"ISO rootfs lacks native {name}")
         if any(name in {"grub-common", "grub2-common", "grub-pc", "grub-pc-bin", "shim-signed"}
@@ -214,10 +216,19 @@ def _validate_rootfs_boot_stack(path: Path, architecture: Architecture) -> None:
                                    capture_output=True, text=True, timeout=30)
         if "No signature table present" not in signature.stdout + signature.stderr:
             raise ConfigurationError("ISO GRUB template must be unsigned and readable")
-        for store in ("var/lib/shim-signed/mok", "var/lib/anduinos-secureboot", "var/lib/anduinos-grub"):
+        recovery = target / "usr/lib/anduinos-recovery-env"
+        manifest = json.loads((recovery / "manifest.json").read_text())
+        if (manifest.get("schema") != 1 or manifest.get("architecture") != architecture.value
+                or set(manifest.get("files", {})) != {"vmlinuz", "initrd.img"}):
+            raise ConfigurationError("ISO recovery payload manifest is invalid")
+        for name, checksum in manifest["files"].items():
+            if _sha256(recovery / name) != checksum:
+                raise ConfigurationError(f"ISO recovery payload is damaged: {name}")
+        for store in ("var/lib/shim-signed/mok", "var/lib/anduinos-secureboot", "var/lib/anduinos-grub",
+                      "var/lib/anduinos-recovery-env"):
             directory = target / store
             if directory.is_symlink() or (directory.exists() and any(directory.iterdir())):
-                raise ConfigurationError(f"ISO contains a machine signing identity or cache: {store}")
+                raise ConfigurationError(f"ISO contains machine-specific state: {store}")
 
 
 def _pe_machine(path: Path) -> int:

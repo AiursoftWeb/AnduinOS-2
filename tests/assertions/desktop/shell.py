@@ -758,11 +758,10 @@ def _validate_context_menu_keyboard(
         event="context-menu-plan",
         target=target,
         accessible_name=localized,
-        focus_origin="menu-actor",
+        focus_origin="observed",
     )
     items = plan.get("items")
     target_index = plan.get("target_index")
-    down_presses = plan.get("down_presses")
     if (
         not isinstance(items, list)
         or not items
@@ -770,9 +769,24 @@ def _validate_context_menu_keyboard(
         or isinstance(target_index, bool)
         or not 0 <= target_index < len(items)
         or items[target_index] != localized
-        or down_presses != target_index + 1
     ):
         raise TestFailure(f"{context} reported an invalid live menu order")
+
+    focus_index, focus = _one_event(
+        events,
+        context=context,
+        event="context-menu-focus",
+        target=target,
+        accessible_name=localized,
+    )
+    down_presses = focus.get("down_presses")
+    if (
+        not isinstance(down_presses, int)
+        or isinstance(down_presses, bool)
+        or not 0 <= down_presses <= len(items) + 2
+        or localized not in (focus.get("focused_labels") or [])
+    ):
+        raise TestFailure(f"{context} did not observe the intended menu focus")
 
     previous = plan_index
     for number in range(1, down_presses + 1):
@@ -802,7 +816,7 @@ def _validate_context_menu_keyboard(
         method="qmp-keyboard",
         down_presses=down_presses,
     )
-    if not previous < return_index < activated_index:
+    if not previous < focus_index < return_index < activated_index:
         raise TestFailure(f"{context} did not activate the planned menu item")
     return plan_index, activated_index
 

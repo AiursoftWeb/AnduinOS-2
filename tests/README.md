@@ -64,6 +64,51 @@ removed. Both key and password SSH waits continuously drain the guest UART so
 firmware output cannot block boot; recovery health and old-key removal checks
 remain required.
 
+The offline Secure Boot Btrfs and offline non-Secure-Boot ext4 cases also
+remove only the verified AnduinOS NVRAM entry after checking normal registration.
+Before removal, they require the four direct `EFI/BOOT` files to match the vendor
+chain and reject the shim fallback registrar. Firmware trust variables and all
+other boot entries must remain unchanged. The ISO is detached and the existing
+VARS file is retained for default firmware boot, including MokManager when
+required. First target boot must use a non-vendor entry and report a valid,
+deployed GRUB. Other installation cases retain normal vendor-entry coverage.
+The injection and recovery probes are saved as case artifacts.
+
+The `rescue-boot-repair` and `rescue-boot-reject-source` desktop suites use
+separate overlays of the online Secure Boot Btrfs installation on both architectures,
+with external network access blocked throughout rescue. The first corrupts the
+derived signed GRUB and removes the vendor ESP GRUB, then drives the ISO's Rescue
+Center with real pointer input. Independent readback verifies the target certificate,
+PE architecture, configuration and unchanged fallback files before a normal boot
+without the ISO. The actual vendor boot entry, Secure Boot and six healthy Driver
+Center rows must pass. The second corrupts the pristine package payload and requires
+an explicit GUI rejection with all previous EFI files preserved. Neither suite
+installs repair packages into Live or repairs the target outside the GUI. Fault,
+repair-result and final desktop screenshots accompany signature and boot evidence.
+
+## ISO acceptance boundary
+
+Each `make test` run judges the supplied ISO against the common matrix in
+`cases/install.json`. It must not assume that the ISO is based on Resolute or
+Stonking, use the build host or `args.sh` as guest evidence, or select different
+pass criteria by Ubuntu codename. Architecture selects the applicable firmware,
+hardware and explicitly declared cases; it does not relax their assertions.
+
+Release coverage includes all four combinations: Resolute/AMD64,
+Resolute/ARM64, Stonking/AMD64 and Stonking/ARM64. This is an outer choice of
+which ISOs to build and test, not four suite-specific acceptance policies.
+Record each ISO's source revision, hash, package manifest, test scope and results
+separately. A targeted regression or a unit-test pass does not establish a full
+ISO release verdict or prove that the other combinations passed.
+
+When a check needs a codename, package version, kernel capability or software
+source, obtain it from the actual ISO or running guest. Adapting a command to
+that observed environment must preserve the same user-visible requirement.
+Known diagnostics require narrow component, version/capability, scenario and
+occurrence evidence, with independent functional checks; a suite name alone
+never exempts an error. Diagnostic and ordinary ISOs use the same criteria,
+and a diagnostic image's results cannot certify the original image.
+
 ## Architecture coverage
 
 Every UEFI installation case runs on AMD64 and ARM64, including Wi-Fi credential
@@ -103,6 +148,12 @@ its control channels are ready; GRUB input is acknowledged by observed menu
 state, while installation and recovery pass only after their guest-visible
 effects are verified. If instrumentation bypasses a menu entry, an independent
 case must exercise that entry's user-visible behavior.
+
+`panel.autohide-drag-recovery` in `shell-panel-taskbar` checks ordinary
+hide/reveal, then three left-button drags to the bottom edge and subsequent
+recovery on AMD64 and ARM64. QMP supplies real input; a read-only Looking Glass
+observer records pointer/button state and transformed panel bounds. The check
+restores the original preference overrides and releases the mouse even on failure.
 
 `live.offline-no-notifications` checks every offline installation's first Live
 desktop before opening the installer. QEMU disconnects its NIC before boot.
@@ -177,6 +228,8 @@ The power-loss overlay adds serial observation and a temporary confirmation mask
 root/package state stays unchanged, both histories are browsable and login works.
 It requires Home-only support in the ISO; older packages fail, never skip.
 
+`recovery-kernel-rollback` runs on both architectures as part of default `make test`, using the offline Btrfs installation. It creates A, boots it successfully, corrupts all installed kernels and initrds, and creates B. The normal boot must fail. With no Live ISO attached, it enters the dedicated recovery environment through GRUB, selects the row marked as the last successful boot, confirms rollback, and restarts. Independent checks require A's original kernel/initrd hashes, preserved newer Home data, B still containing the fault, and two successful graphical boots. Screenshots cover the fault, recovery list, confirmation, result, and restored system. This case currently uses Secure Boot disabled; it does not claim recovery payload authentication.
+
 `rescue-center-offline-restore` takes a system snapshot, uninstalls GNOME Shell, proves the installed desktop cannot start, then boots the tested Live ISO and drives the real Rescue Center UI with host QMP pointer clicks. It selects the damaged installation and baseline, keeps the default safety snapshot enabled, restores offline, removes the Live ISO, and requires a healthy graphical boot, restored package state, preserved newer Home data, and an archived transaction.
 
 Wi-Fi lab setup waits for NetworkManager to answer before configuring radios;
@@ -195,6 +248,17 @@ not depend on the editor's visual line count. The separate optical-media
 case executes the real To Go menu entry and requires its rejection warning.
 Persistence is credited only when the running guest retains the sentinel
 across boots, not from GRUB text inspection alone.
+
+`unlock-theme` runs on a fresh installed-system overlay using the account's
+existing extension preferences. It requires default unlock-theme enablement,
+then locks and authenticates with real keyboard input in Fluent dark and light
+modes. A read-only Looking Glass observer records the actual application and
+custom stylesheets: the unlock extension and readability layer must own the
+locked screen, then relinquish ownership to desktop User Themes after unlock.
+The Shell PID must stay unchanged. Missing enablement is a failure, never repaired
+by the test. The observer neither changes styles nor reads password contents;
+per-mode screenshots and structured state evidence are retained. This is a
+loading/ownership and authentication check, not a pixel-perfect visual verdict.
 
 ## Firmware regression coverage
 
@@ -294,3 +358,15 @@ Preview reclaimable allocation without changing files:
 ```bash
 python3 tests/run.py clean-disks --dry-run
 ```
+
+The `voice-typing` installed-system suite runs on both architectures using
+`uefi-nosb-online-btrfs-ssh-toggle`. It installs the optional Voice Typing package
+through Control Panel and its real authorization dialog, logs out and back in
+through GDM, then sends Super+H through QMP. The native daemon must calibrate on
+its first start, reach listening with the Shell overlay, and persist a valid
+selection. A second invocation and another login after changing the recognition
+language must reach listening without calibration or rewriting that cache.
+D-Bus transitions, cache snapshots, package versions, keyboard requests and
+screenshots are retained. A PipeWire virtual microphone supplies silence in the
+VM; this check covers installation, activation and caching, not physical audio
+hardware or transcription accuracy. Package/download errors fail the check.

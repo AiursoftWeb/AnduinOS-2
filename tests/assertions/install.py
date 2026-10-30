@@ -7,7 +7,7 @@ import shlex
 from pathlib import Path
 
 from framework.errors import TestFailure
-from framework.model import Architecture, Firmware, Network, Scenario, SshPolicy
+from framework.model import Architecture, Filesystem, Firmware, Network, Scenario, SshPolicy, StorageMode
 from framework.serial import SerialConsole
 
 
@@ -75,6 +75,7 @@ FORBIDDEN_IMAGE_PACKAGES = (
     "apport",
     "popularity-contest",
     "ubuntu-report",
+    "ubuntu-insights",
     "whoopsie",
     # Ubuntu extensions superseded by AnduinOS packages.
     "gnome-shell-ubuntu-extensions",
@@ -870,6 +871,61 @@ def assert_factory_recovery_contract(
 ) -> None:
     script = _snapshots_manager_contract_script(scenario.snapshots_manager)
     _record(console, script, evidence / "installed-snapshots-manager.txt")
+    supported = scenario.filesystem is Filesystem.BTRFS and scenario.storage_mode is StorageMode.AUTOMATIC
+    _record(console, _recovery_volume_contract_script(supported), evidence / "installed-recovery-volume.txt")
+
+
+def _recovery_volume_contract_script(supported: bool) -> str:
+    if not supported:
+        return r"""
+set -euo pipefail
+! dpkg-query -W -f='${db:Status-Abbrev}' anduinos-recovery-env 2>/dev/null | grep -q '^ii '
+test ! -e /var/lib/anduinos-recovery-env/volume.json
+! grep -q 'menuentry.*--id anduinos-recovery-env' /boot/grub/grub.cfg
+printf 'recovery-volume=not-provisioned\n'
+"""
+    return r"""
+set -euo pipefail
+dpkg-query -W -f='${db:Status-Abbrev} ${Package} ${Version}\n' anduinos-recovery-env | grep '^ii '
+apt-mark showmanual | grep -Fx anduinos-recovery-env
+python3 - <<'RECOVERY'
+import hashlib, json, subprocess, tempfile
+from pathlib import Path
+def output(*args):
+    return subprocess.check_output(args, text=True).strip()
+binding = json.loads(Path('/var/lib/anduinos-recovery-env/volume.json').read_text())
+assert binding['schema'] == 1
+assert binding['root_uuid'] == output('findmnt', '-n', '-o', 'UUID', '/')
+devices = output('blkid', '-c', '/dev/null', '-t', 'UUID=' + binding['volume_uuid'], '-o', 'device').splitlines()
+assert len(devices) == 1, devices
+device = devices[0]
+assert output('blkid', '-s', 'LABEL', '-o', 'value', device) == 'AOS_RECOVERY'
+assert output('blkid', '-s', 'TYPE', '-o', 'value', device) == 'ext4'
+assert int(output('blockdev', '--getsize64', device)) == 256 * 1024 * 1024
+assert subprocess.run(['findmnt', '-n', '-S', device], capture_output=True).returncode == 1
+assert binding['volume_uuid'] not in Path('/etc/fstab').read_text()
+grub = Path('/boot/grub/grub.cfg').read_text()
+assert grub.count('menuentry \'AnduinOS Recovery Environment\'') == 1
+assert binding['volume_uuid'] in grub and binding['root_uuid'] in grub
+payload = Path('/usr/lib/anduinos-recovery-env')
+with tempfile.TemporaryDirectory(prefix='acceptance-recovery-') as directory:
+    subprocess.run(['mount', '-t', 'ext4', '-o', 'ro,noload,nodev,nosuid,noexec', device, directory], check=True)
+    try:
+        deployed = Path(directory) / 'anduinos-recovery-env'
+        assert json.loads((deployed / 'owner.json').read_text()) == binding
+        manifest = json.loads((payload / 'manifest.json').read_text())
+        assert json.loads((deployed / 'current/manifest.json').read_text()) == manifest
+        assert manifest['architecture'] == output('dpkg', '--print-architecture')
+        for name, expected in manifest['files'].items():
+            for path in (payload / name, deployed / 'current' / name):
+                with path.open('rb') as stream:
+                    assert hashlib.file_digest(stream, 'sha256').hexdigest() == expected, path
+    finally:
+        subprocess.run(['umount', directory], check=True)
+print(json.dumps(binding, sort_keys=True))
+print('recovery-volume=256MiB,unmounted,payload-verified,menu-present')
+RECOVERY
+"""
 
 
 def _snapshots_manager_contract_script(supported: bool) -> str:
@@ -987,13 +1043,15 @@ def _assert_optional_software(
     username: str,
     evidence: Path,
 ) -> None:
+    # Reading dconf does not require a private session bus. Stonking uses
+    # dbus-broker and does not install the dbus-daemon-only dbus-run-session.
     rime = f"""
 set -euo pipefail
 """
     if scenario.rime:
         rime += f"""
 dpkg-query -W -f='${{db:Status-Abbrev}} ${{Package}} ${{Version}}\\n' anduinos-rime | grep '^ii '
-sources=$(runuser -u {username} -- env HOME=/home/{username} dbus-run-session -- \\
+sources=$(runuser -u {username} -- env HOME=/home/{username} \\
     gsettings get org.gnome.desktop.input-sources sources)
 printf 'input-sources=%s\\n' "$sources"
 printf '%s' "$sources" | grep -q "'ibus', 'rime'"
@@ -1001,7 +1059,7 @@ printf '%s' "$sources" | grep -q "'ibus', 'rime'"
     else:
         rime += f"""
 ! dpkg-query -W -f='${{db:Status-Abbrev}}' anduinos-rime 2>/dev/null | grep -q '^ii '
-sources=$(runuser -u {username} -- env HOME=/home/{username} dbus-run-session -- \\
+sources=$(runuser -u {username} -- env HOME=/home/{username} \\
     gsettings get org.gnome.desktop.input-sources sources)
 printf 'input-sources=%s\\n' "$sources"
 ! printf '%s' "$sources" | grep -q "'ibus', 'rime'"
@@ -1324,8 +1382,8 @@ def _assert_ssh_units(
 systemctl is-enabled ssh.socket | grep -qx enabled
 systemctl is-active ssh.socket | grep -qx active
 ss -H -ltn 'sport = :22' | grep -q .
-sshd -T | grep -qx 'passwordauthentication yes'
-sshd -T | grep -qx 'permitrootlogin no'
+sshd -T | grep -iqx 'passwordauthentication yes'
+sshd -T | grep -iqx 'permitrootlogin no'
 """
     else:
         expected = r"""
@@ -1337,7 +1395,7 @@ sshd -T | grep -qx 'permitrootlogin no'
         console,
         "set -e\n"
         + expected
-        + "sshd -T | grep -E '^(passwordauthentication|permitrootlogin) '",
+        + "sshd -T | grep -iE '^(passwordauthentication|permitrootlogin) '",
         evidence / "installed-ssh.txt",
     )
 

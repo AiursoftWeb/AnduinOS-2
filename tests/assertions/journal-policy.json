@@ -27,6 +27,19 @@
       "reason": "Automatic login supplies no account password to PAM, so a password-protected login keyring remains locked. The test separately proves that the keyring daemon and desktop session are healthy."
     },
     {
+      "id": "gnome51-autologin-keyring-no-password",
+      "component_regex": "^gdm-autologin(?:\\]|\\||$)",
+      "message_regex": "^gkr-pam: couldn't unlock the login keyring\\.?$",
+      "conditions": {
+        "automatic_login": true
+      },
+      "max_occurrences": 1,
+      "package": "libpam-gnome-keyring",
+      "version_glob": "51.1-1",
+      "owner": "GNOME Keyring",
+      "reason": "GNOME Keyring 51.1 pam_sm_open_session sends a passwordless unlock request during automatic login; the control server cannot parse its missing password and returns FAILED, producing this generic message. Dual-architecture real sessions verified password-login unlock, locked autologin, wrong-password rejection and successful graphical unlock followed by Secret Service store/read/delete. The functional gate still requires a live keyring daemon and responsive Secret Service. Recheck this exact-version rule on the next libpam-gnome-keyring update. Source: https://download.gnome.org/sources/gnome-keyring/51/gnome-keyring-51.1.tar.xz (pam/gkr-pam-module.c and daemon/control/gkd-control-server.c)."
+    },
+    {
       "id": "gnome50-keyboard-null-variant",
       "component_regex": "(^|/)gsd-keyboard($|[|/])",
       "message_regex": "^g_variant_unref: assertion 'value != NULL' failed$",
@@ -38,6 +51,19 @@
       "version_glob": "50.*",
       "owner": "GNOME Settings Daemon",
       "reason": "GNOME 50 emits this diagnostic on otherwise healthy input-source startup. Separate checks require gsd-keyboard to remain alive and the configured Rime source to be readable."
+    },
+    {
+      "id": "gnome51-keyboard-unset-xkb-options",
+      "component_regex": "(^|/)gsd-keyboard($|[|/])",
+      "message_regex": "^g_variant_unref: assertion 'value != NULL' failed$",
+      "conditions": {
+        "rime": true
+      },
+      "max_occurrences": 1,
+      "package": "gnome-settings-daemon",
+      "version_glob": "51.0-1ubuntu1",
+      "owner": "GNOME Settings Daemon",
+      "reason": "In plugins/keyboard/gsd-keyboard-manager.c, maybe_create_initial_settings() unconditionally unrefs the nullable xkb-options user value. An isolated unset/explicit-empty comparison and debugger stack reproduce this in 51.0-1ubuntu1; the installed desktop still switches to Rime, commits Chinese text and switches back. Keep service/input-source health checks and action-scoped journal checks: GNOME Shell errors are separate blockers. This is a known upstream diagnostic, not a repaired daemon. Recheck this exact-version rule when Ubuntu updates the package; do not extend it to all GNOME 51 versions. Source: https://gitlab.gnome.org/GNOME/gnome-settings-daemon/-/blob/51.0/plugins/keyboard/gsd-keyboard-manager.c"
     },
     {
       "id": "gnome50-gdm-media-keys-null-table",

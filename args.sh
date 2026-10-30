@@ -121,7 +121,7 @@ export TARGET_NAME="anduinos"
 export TARGET_BUSINESS_NAME="AnduinOS"
 
 # Version number. Must be in the format of x.y.z
-export TARGET_BUILD_VERSION="2.0.4"
+export TARGET_BUILD_VERSION="2.0.5"
 
 # Target CPU architecture.
 #   amd64 — Intel / AMD 64-bit

@@ -1,10 +1,35 @@
 """Action-scoped, idle-boot journal, and passive Plymouth behavior."""
 
 from .context import *  # noqa: F403
-from assertions.journal import is_pci_of_root_diagnostic, render_pci_firmware_script
+from assertions.journal import (
+    is_pci_of_root_diagnostic,
+    is_tdx_host_diagnostic,
+    render_pci_firmware_script,
+    render_tdx_host_script,
+)
 
 
 class JournalChecks:
+    # Known upstream blocker, investigated 2026-10-28: GeoClue can deadlock
+    # during startup with Stonking GLib 2.90.0-1 (both ISO architectures).
+    # https://gitlab.gnome.org/GNOME/glib/-/issues/4078
+    # https://gitlab.gnome.org/GNOME/glib/-/merge_requests/5418
+    # The main thread owns VFS singleton initialization and waits for GIO's
+    # module lock; proxy initialization holds that lock and waits for VFS.
+    # GLib e73abdb88ff8 introduced the asynchronous network-monitor path.
+    # Diagnose in an isolated guest: collect journalctl -b -u geoclue.service,
+    # systemctl show geoclue.service (MainPID/SubState/Result), package versions,
+    # and all-thread debugger stacks while startup is stuck. A timeout alone
+    # does not establish this cause. Retain the journal artifacts from both
+    # boot/idle and desktop actions; location requests can activate the service.
+    # Decision: keep this failure blocking; do not disable GeoClue/proxies,
+    # extend timeouts, or whitelist its errors. The upstream MR was unmerged
+    # on the investigation date; no local workaround has been deployed.
+    # TODO: validate the final upstream fix on AMD64/ARM64 (repeated startup,
+    # location requests, network reachability and proxies), preserve Resolute,
+    # and adopt Ubuntu's fixed package when available. Remove any temporary
+    # backport only after verifying upgrades to the official package. Delete
+    # this note once the fix is shipped and the original failure is retested.
     def _capture_journal_cursors(self, vm: QemuVm) -> dict[str, str]:
         assert vm.serial is not None
         command = (
@@ -213,6 +238,11 @@ printf 'gsd-keyboard-pid=%s\n' "$keyboard_pid"
 printf 'gsd-media-keys-pid=%s\n' "$media_keys_pid"
 printf 'gsd-media-keys-service=active\n'
 printf 'gnome-keyring-pid=%s\n' "$keyring_pid"
+# A running process alone does not prove that applications can use the keyring.
+# This read-only request must succeed even when autologin leaves it locked.
+gdbus call --session --dest org.freedesktop.secrets \
+    --object-path /org/freedesktop/secrets \
+    --method org.freedesktop.Secret.Service.ReadAlias login
 printf 'ding-pid=%s\n' "$ding_pid"
 printf 'input-sources=%s\n' "$sources"
 """
@@ -242,6 +272,15 @@ printf 'input-sources=%s\n' "$sources"
             acpi_pci_without_dt = (
                 json.loads(firmware.stdout).get("acpi_pci_without_dt") is True
             )
+        tdx_host_unavailable = False
+        if any(is_tdx_host_diagnostic(entry) for entry in entries):
+            capabilities = vm.serial.run(render_tdx_host_script(), timeout=60)
+            (artifacts / "installed-tdx-capabilities.json").write_text(
+                capabilities.stdout + "\n", encoding="utf-8"
+            )
+            tdx_host_unavailable = (
+                json.loads(capabilities.stdout).get("tdx_host_unavailable") is True
+            )
         verdict = policy.classify(
             entries,
             scenario,
@@ -249,6 +288,7 @@ printf 'input-sources=%s\n' "$sources"
             failed_system_units=system_units.stdout.splitlines(),
             failed_user_units=user_units.stdout.splitlines(),
             acpi_pci_without_dt=acpi_pci_without_dt,
+            tdx_host_unavailable=tdx_host_unavailable,
         )
         report = render_verdict(verdict)
         (artifacts / "installed-journal-verdict.json").write_text(

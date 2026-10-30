@@ -2,6 +2,20 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "voice-typing",
+      "source_cases": {
+        "amd64": "uefi-nosb-online-btrfs-ssh-toggle",
+        "arm64": "uefi-nosb-online-btrfs-ssh-toggle"
+      },
+      "checks": [
+        "voice.install-login-calibration-cache"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
+    },
+    {
       "id": "input-and-appearance",
       "source_cases": {
         "amd64": "uefi-sb-online-btrfs",
@@ -77,6 +91,34 @@
       "observation_modes": ["controlled"]
     },
     {
+      "id": "rescue-boot-reject-source",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": [
+        "boot.rescue-reject-source"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
+    },
+    {
+      "id": "rescue-boot-repair",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": [
+        "boot.rescue-repair"
+      ],
+      "isolation": "overlay",
+      "observation_modes": [
+        "controlled"
+      ]
+    },
+    {
       "id": "factory-reset-preserve-home",
       "source_cases": {
         "amd64": "uefi-nosb-online-btrfs-ssh-enabled",
@@ -140,6 +182,16 @@
       "observation_modes": ["passive", "controlled"]
     },
     {
+      "id": "unlock-theme",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": ["appearance.unlock-theme"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "desktop-theme",
       "source_cases": {
         "amd64": "uefi-sb-online-btrfs",
@@ -194,6 +246,7 @@
         "arm64": "uefi-sb-online-btrfs"
       },
       "checks": [
+        "panel.autohide-drag-recovery",
         "panel.pin-application",
         "panel.remove-menu-localized",
         "shell.appindicator-roundtrip"
@@ -269,6 +322,16 @@
       "observation_modes": [
         "controlled"
       ]
+    },
+    {
+      "id": "recovery-kernel-rollback",
+      "source_cases": {
+        "amd64": "uefi-nosb-offline-btrfs",
+        "arm64": "uefi-nosb-offline-btrfs"
+      },
+      "checks": ["storage.recovery-kernel-rollback"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
     }
   ]
 }

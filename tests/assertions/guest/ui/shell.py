@@ -206,26 +206,44 @@ def activate_shell_context_action(key: str, request: str) -> str:
             f"ancestor_levels={levels!r}"
         )
 
-    # PopupMenuManager gives the menu actor focus. Its first Down moves focus
-    # to the first visible item, and PopupMenuItem then wraps physical arrow
-    # navigation. Derive the number of presses from the live accessible menu
-    # order, then activate with Return; no private extension API or coordinates.
-    down_presses = target_index + 1
     event(
         "context-menu-plan",
         target=key,
         accessible_name=localized,
         items=items,
         target_index=target_index,
-        down_presses=down_presses,
-        focus_origin="menu-actor",
+        focus_origin="observed",
     )
-    for index in range(down_presses):
-        event(
-            "qmp-key",
-            request=f"{request}-down-{index + 1}",
-            key="down",
-        )
+
+    def focused_labels() -> tuple[str, ...]:
+        for item in visible_nodes():
+            if (owning_application(item) == "gnome-shell"
+                    and role(item) == "menu item"
+                    and has_state(item, Atspi.StateType.FOCUSED)):
+                return tuple(name(child) for child in walk(item, maximum=80)
+                             if name(child))
+        return ()
+
+    # Menu focus and arrow dispatch differ across Shell generations. Observe
+    # each real transition instead of queueing a guessed number of key presses.
+    down_presses = 0
+    labels = focused_labels()
+    while localized not in labels:
+        if down_presses >= len(items) + 2:
+            raise UiFailure(f"Context menu never focused {localized!r}: {labels!r}")
+        before = labels
+        down_presses += 1
+        event("qmp-key", request=f"{request}-down-{down_presses}", key="down")
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            labels = focused_labels()
+            if labels != before:
+                break
+            time.sleep(0.1)
+        else:
+            raise UiFailure(f"Context menu focus did not move: {labels!r}")
+    event("context-menu-focus", target=key, accessible_name=localized,
+          focused_labels=list(labels), down_presses=down_presses)
     event("qmp-key", request=f"{request}-activate", key="ret")
     _wait_shell_named(key, False)
     event(
@@ -382,7 +400,7 @@ def exercise_panel_pin(evidence: Path) -> None:
     activated = activate_shell_context_action("taskbar_pin", "panel-pin-action")
     if activated != localized:
         raise UiFailure("Taskbar action identity changed before activation")
-    _close_arcmenu("panel-pin-close")
+    _close_arcmenu("panel-pin-close", search_result=PANEL_FIXTURE_NAME)
     launcher = _wait_taskbar_fixture(True)
     dump_accessibility(evidence / "fixture-pinned-to-taskbar.txt")
     event(

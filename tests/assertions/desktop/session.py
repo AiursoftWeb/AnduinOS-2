@@ -194,9 +194,14 @@ def _validate_settings_about_events(output: str) -> dict[str, object]:
         raise TestFailure("GNOME Settings did not visibly identify AnduinOS")
     if (
         value.get("page") != "about"
-        or value.get("coordinate_space") != "window"
-        or not isinstance(value.get("logo_name"), str)
-        or value.get("logo_role") not in {"image", "icon"}
+        or not (
+            (value.get("coordinate_space") == "window"
+             and isinstance(value.get("logo_name"), str)
+             and value.get("logo_role") in {"image", "icon"})
+            or (value.get("coordinate_space") == "asset"
+                and value.get("logo_name") is None
+                and value.get("logo_role") is None)
+        )
         or not isinstance(bounds, list)
         or len(bounds) != 4
         or any(
@@ -248,7 +253,7 @@ def _validate_localization_zh_cn_events(output: str) -> None:
         event="localization-zh-cn",
     )
     expected = {
-        "settings_labels": {"关于", "操作系统"},
+        "settings_labels": {"关于"},
         "desktop_labels": {"主目录", "回收站"},
         "arcmenu_labels": {"已固定", "所有应用程序"},
     }
@@ -259,6 +264,14 @@ def _validate_localization_zh_cn_events(output: str) -> None:
                 f"Simplified Chinese localization is incomplete for {field}: "
                 f"{observed!r}"
             )
+
+    # Keep the host oracle aligned with the actual old/new Chinese row labels.
+    # A Chinese page title alone must not hide an untranslated OS information row.
+    if not {"操作系统", "操作系统名称"} & set(value["settings_labels"]):
+        raise TestFailure(
+            "Simplified Chinese localization is incomplete for settings_labels: "
+            f"{value['settings_labels']!r}"
+        )
 
 
 def _validate_swapcontrol_events(output: str) -> dict[str, object]:
@@ -683,6 +696,26 @@ def _validate_screenshot_shortcut_events(output: str) -> dict[str, object]:
     if not open_key < interface < capture_key < created:
         raise TestFailure("Super+Shift+S capture events are out of order")
     return result
+
+
+def _validate_unlock_theme(snapshot: object, *, locked: bool, theme: str, pid: int) -> None:
+    """Require actual theme loading and mode ownership, not just preferences."""
+    if not isinstance(snapshot, dict) or snapshot.get("pid") != pid or snapshot.get("greeter") is not False:
+        raise TestFailure("Unlock theme observer lost the original user Shell")
+    if snapshot.get("locked") is not locked or snapshot.get("selected") != theme:
+        raise TestFailure("Unlock theme mode or selected theme does not match")
+    if snapshot.get("unlockEnabled") is not True:
+        raise TestFailure("Default account did not enable the unlock theme")
+    application = snapshot.get("application")
+    if not isinstance(application, str) or not application.endswith(f"/{theme}/gnome-shell/gnome-shell.css"):
+        raise TestFailure("Fluent application stylesheet is not loaded")
+    stylesheets = snapshot.get("stylesheets")
+    if not isinstance(stylesheets, list) or any(not isinstance(path, str) for path in stylesheets):
+        raise TestFailure("Unlock theme stylesheet inventory is missing")
+    readability = any(path.endswith("/unlock-theme@anduinos.com/readability.css") for path in stylesheets)
+    if (snapshot.get("unlockActive") is not locked or
+            snapshot.get("desktopActive") is not (not locked) or readability is not locked):
+        raise TestFailure("Unlock/desktop theme ownership did not transfer correctly")
 
 
 __all__ = tuple(name for name in globals() if name.startswith("_"))

@@ -267,13 +267,16 @@ def exercise_settings_about_branding(evidence: Path) -> None:
         candidates = named_images
         if len(candidates) != 1 and len(geometric_images) == 1:
             candidates = [geometric_images[0][0]]
-        if has_about and has_os_label and os_names and len(candidates) == 1:
-            logo = candidates[0]
-            logo_bounds = logo.get_extents(Atspi.CoordType.WINDOW)
+        if has_about and has_os_label and os_names:
             operating_system = max(os_names, key=len)
+            if len(candidates) == 1:
+                logo = candidates[0]
+                logo_bounds = logo.get_extents(Atspi.CoordType.WINDOW)
+            # GTK may paint GtkPicture without publishing an AT-SPI image.
+            # The host must still match the actual screenshot to our asset.
             break
         time.sleep(0.25)
-    if logo is None or logo_bounds is None:
+    if not operating_system:
         dump_accessibility(evidence / "settings-about-missing.txt")
         application_output = (
             application_log.read_text(encoding="utf-8", errors="replace")
@@ -304,9 +307,14 @@ def exercise_settings_about_branding(evidence: Path) -> None:
         if markers != ["ANDUINOS", "anduinos"]:
             raise UiFailure(f"About asset does not identify AnduinOS: {asset}")
         template = evidence / f"settings-about-{variant}-logo.png"
-        pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
-            str(asset), logo_bounds.width, logo_bounds.height, True
-        )
+        if logo_bounds is not None:
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file_at_scale(
+                str(asset), logo_bounds.width, logo_bounds.height, True
+            )
+        else:
+            # GtkPicture uses the SVG's intrinsic size in the tested layout.
+            # These are asset dimensions, never fabricated AT-SPI coordinates.
+            pixbuf = GdkPixbuf.Pixbuf.new_from_file(str(asset))
         if not pixbuf.savev(str(template), "png", [], []):
             raise UiFailure(f"Could not render GNOME Settings About asset: {asset}")
         assets.append(
@@ -324,15 +332,14 @@ def exercise_settings_about_branding(evidence: Path) -> None:
         application=application,
         page="about",
         operating_system=operating_system,
-        logo_name=name(logo),
-        logo_role=role(logo),
-        coordinate_space="window",
-        bounds=[
-            logo_bounds.x,
-            logo_bounds.y,
-            logo_bounds.width,
-            logo_bounds.height,
-        ],
+        logo_name=name(logo) if logo is not None else None,
+        logo_role=role(logo) if logo is not None else None,
+        coordinate_space="window" if logo_bounds is not None else "asset",
+        bounds=(
+            [logo_bounds.x, logo_bounds.y, logo_bounds.width, logo_bounds.height]
+            if logo_bounds is not None
+            else [0, 0, pixbuf.get_width(), pixbuf.get_height()]
+        ),
         assets=assets,
     )
 
@@ -346,12 +353,15 @@ def exercise_localization_zh_cn(evidence: Path) -> None:
     # labels instead of accepting the English aliases used by the branding test.
     exercise_settings_about_branding(evidence)
     settings_names = sorted({name(item) for item in visible_nodes() if name(item)})
-    settings_required = {"关于", "操作系统"}
-    if not settings_required <= set(settings_names):
+    # GNOME 51 names the row “操作系统名称”; older Settings uses “操作系统”.
+    # Accept either exact Chinese label, never an English or substring match.
+    os_labels = {"操作系统", "操作系统名称"} & set(settings_names)
+    settings_required = {"关于"}
+    if not settings_required <= set(settings_names) or not os_labels:
         dump_accessibility(evidence / "localization-settings-failed.txt")
         raise UiFailure(
             "GNOME Settings About is not localized to Simplified Chinese: "
-            f"missing={sorted(settings_required - set(settings_names))!r}"
+            f"labels={settings_names!r}"
         )
     subprocess.run(
         ("pkill", "-f", "(^|/)gnome-control-center( |$)"),
@@ -385,7 +395,7 @@ def exercise_localization_zh_cn(evidence: Path) -> None:
     dump_accessibility(evidence / "localization-zh-cn.txt")
     event(
         "localization-zh-cn",
-        settings_labels=sorted(settings_required),
+        settings_labels=sorted(settings_required | os_labels),
         desktop_labels=desktop_labels,
         arcmenu_labels=menu_labels,
     )

@@ -4,6 +4,117 @@ from .context import *  # noqa: F403
 
 
 class ThemeChecks:
+    def _exercise_unlock_theme(
+        self, vm: QemuVm, base: PromotedBase, artifacts: Path,
+    ) -> None:
+        """Observe default enablement and real Fluent ownership across locking."""
+        from assertions.notifications import PROMPT_PROBE, _wait_shell_prompt
+
+        assert vm.serial is not None and vm.qmp is not None
+        console, qmp = vm.serial, vm.qmp
+        remote = "/tmp/anduinos-unlock-theme"
+        report_path, stop_path = remote + ".json", remote + ".stop"
+
+        def desktop(command):
+            return console.run(_desktop_command(self.username, ("bash", "-c", command)))
+
+        def observe(predicate, label, timeout=30):
+            deadline = time.monotonic() + timeout
+            last = None
+            while time.monotonic() < deadline:
+                result = console.run(f"cat {report_path}", check=False)
+                try:
+                    report = json.loads(result.stdout.strip())
+                except (TypeError, ValueError):
+                    report = None
+                if isinstance(report, dict):
+                    (artifacts / "unlock-theme.json").write_text(
+                        json.dumps(report, indent=2) + "\n", encoding="utf-8")
+                    if report.get("error"):
+                        raise TestFailure(f"Unlock theme observer failed: {report['error']}")
+                    last = report.get("current")
+                    if isinstance(last, dict) and predicate(last):
+                        return last
+                with console.capture_output():
+                    time.sleep(0.2)
+            raise TestFailure(f"Unlock theme did not reach {label}: {last}")
+
+        def matches(snapshot, locked, name, pid):
+            try:
+                _validate_unlock_theme(snapshot, locked=locked, theme=name, pid=pid)
+                return True
+            except TestFailure:
+                return False
+
+        try:
+            console.run(f"test ! -e {report_path}; test ! -e {stop_path}")
+            console.upload(self.framework_root / "fixtures/unlock_theme.mjs", remote + ".mjs", 0o644)
+            console.upload(self.framework_root / "fixtures/shell_prompt.py", PROMPT_PROBE, 0o644)
+            for _ in range(3):
+                qmp.send_key("esc")
+                qmp.send_key("alt-f2", hold_ms=150)
+                if _wait_shell_prompt(console, artifacts, "run-dialog", timeout=5,
+                                      check=False, user=self.username,
+                                      evidence_name="unlock-theme-ui.jsonl"):
+                    break
+            else:
+                raise TestFailure("Unlock theme Run dialog never became ready")
+            def prompt(kind, text=""):
+                _wait_shell_prompt(console, artifacts, kind, text, user=self.username,
+                                   evidence_name="unlock-theme-ui.jsonl")
+            qmp.type_text("lg", interval=0.15)
+            prompt("run-dialog", "lg")
+            qmp.send_key("ret")
+            prompt("looking-glass")
+            expression = f'import("file://{remote}.mjs")'
+            qmp.type_text(expression, interval=0.05)
+            prompt("looking-glass", expression)
+            qmp.send_key("ret")
+            initial = observe(lambda state: state.get("locked") is False, "default desktop")
+            name, pid = initial.get("selected"), initial.get("pid")
+            if not isinstance(name, str) or re.fullmatch(r"Fluent(?:-[A-Za-z0-9]+)*", name) is None:
+                raise TestFailure(f"Default account has no Fluent Shell theme: {name}")
+            # Never enable the extension here: an omitted default must fail.
+            _validate_unlock_theme(initial, locked=False, theme=name, pid=pid)
+            for schema, key, value in (
+                ("org.gnome.desktop.lockdown", "disable-lock-screen", "false"),
+                ("org.gnome.desktop.screensaver", "lock-enabled", "true"),
+            ):
+                desktop(f"gsettings set {schema} {key} {value}")
+            for variant in ("dark", "light"):
+                self._select_desktop_theme(vm, artifacts, variant, f"unlock-{variant}")
+                selected = desktop("gsettings get org.gnome.shell.extensions.user-theme name").stdout.strip().strip("'")
+                observe(lambda state: matches(state, False, selected, pid), f"{variant} desktop")
+                desktop("gdbus call --session --dest org.gnome.ScreenSaver "
+                        "--object-path /org/gnome/ScreenSaver --method org.gnome.ScreenSaver.Lock")
+                observe(lambda state: matches(state, True, selected, pid), f"{variant} Fluent lock")
+                qmp.send_key("shift", hold_ms=50)
+                qmp.send_key("ret")
+                observe(lambda state: state.get("locked") is True and
+                        state.get("passwordFocused") is True, "password input")
+                vm.screenshot(f"unlock-theme-{variant}-locked")
+                # Physical input goes only to the observed password entry; the
+                # observer never reads or records its contents.
+                qmp.type_text(self.password, interval=0.08)
+                qmp.send_key("ret")
+                observe(lambda state: matches(state, False, selected, pid), f"{variant} desktop restored")
+                vm.screenshot(f"unlock-theme-{variant}-restored")
+        except BaseException:
+            try:
+                vm.screenshot("unlock-theme-failure")
+            except Exception:
+                pass
+            raise
+        finally:
+            # The suite owns a disposable overlay. Preserve evidence before
+            # stopping its observer; do not unlock or fix a failing product.
+            try:
+                console.run(f"touch {stop_path}", check=False)
+                result = console.run(f"cat {report_path}", check=False)
+                (artifacts / "unlock-theme-final.txt").write_text(result.stdout, encoding="utf-8")
+            except Exception as error:
+                (artifacts / "unlock-theme-cleanup.txt").write_text(str(error), encoding="utf-8")
+
     def _exercise_gtk_theme(
         self,
         vm: QemuVm,

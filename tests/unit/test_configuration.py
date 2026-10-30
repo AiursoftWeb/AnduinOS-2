@@ -215,6 +215,7 @@ class MatrixTests(unittest.TestCase):
         self.assertIn("tty.tty6-branding", shell_suite.checks)
         self.assertEqual(
             (
+                "panel.autohide-drag-recovery",
                 "panel.pin-application",
                 "panel.remove-menu-localized",
                 "shell.appindicator-roundtrip",
@@ -232,17 +233,21 @@ class MatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             (
+                "voice-typing",
                 "input-and-appearance",
                 "system-lifecycle",
                 "file-integration",
                 "btrfs-rollback",
                 "btrfs-home-rollback",
                 "rescue-center-offline-restore",
+                "rescue-boot-reject-source",
+                "rescue-boot-repair",
                 "factory-reset-preserve-home",
                 "factory-reset-erase-home",
                 "factory-reset-repeat",
                 "factory-reset-power-loss",
                 "accounts-gdm",
+                "unlock-theme",
                 "desktop-theme",
                 "shell-shortcuts",
                 "shell-start-menu",
@@ -252,6 +257,7 @@ class MatrixTests(unittest.TestCase):
                 "public-ecosystem",
                 "public-ghex",
                 "public-spotify",
+                "recovery-kernel-rollback",
             ),
             tuple(item.id for item in suites),
         )
@@ -276,6 +282,7 @@ class MatrixTests(unittest.TestCase):
                 "uefi-sb-online-btrfs",
                 "uefi-nosb-online-btrfs-ssh-enabled",
                 "uefi-nosb-online-btrfs-ssh-toggle",
+                "uefi-nosb-offline-btrfs",
             },
         )
         with self.assertRaisesRegex(ConfigurationError, "no installation base"):

@@ -1,5 +1,6 @@
 """Command dispatch for the in-guest AT-SPI driver."""
 
+from .voice import exercise_voice_install, exercise_voice_activation
 from .accounts import *  # noqa: F403
 from .applications import *  # noqa: F403
 from .core import *  # noqa: F403
@@ -16,6 +17,8 @@ def main() -> int:
     parser.add_argument(
         "mode",
         choices=(
+            "voice-install",
+            "voice-activation",
             "install",
             "secure-shell-prepare",
             "secure-shell-row",
@@ -43,6 +46,7 @@ def main() -> int:
             "home-restore-arm",
             "factory-reset-arm",
             "rescue-center-offline-restore",
+            "rescue-center-boot",
             "accounts-create",
             "accounts-change-password",
             "gdm-select-user",
@@ -87,7 +91,11 @@ def main() -> int:
     args = parser.parse_args()
     args.evidence.mkdir(parents=True, exist_ok=True)
     try:
-        if args.mode == "secure-boot-green":
+        if args.mode == "voice-install":
+            exercise_voice_install(args.evidence)
+        elif args.mode == "voice-activation":
+            exercise_voice_activation(args.evidence, args.expected)
+        elif args.mode == "secure-boot-green":
             verify_secure_boot_green(args.evidence)
         elif args.mode == "install":
             if args.config is None:
@@ -142,6 +150,10 @@ def main() -> int:
                                  home_only=args.mode == "home-restore-arm")
         elif args.mode == "factory-reset-arm":
             arm_factory_reset(args.erase_home, args.evidence)
+        elif args.mode == "rescue-center-boot":
+            if not args.system_name or args.expected not in {"diagnosis", "Boot repair finished", "Boot repair failed"}:
+                raise UiFailure("Boot rescue requires system name and expected outcome")
+            repair_offline_boot(args.system_name, args.expected, args.evidence)
         elif args.mode == "rescue-center-offline-restore":
             if not args.expected or not args.system_name:
                 raise UiFailure(

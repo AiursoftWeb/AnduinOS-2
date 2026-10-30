@@ -57,6 +57,7 @@ apt install -y \
     anduinos-hyperfluent-grub-theme \
     anduinos-installer-beta \
     anduinos-btrfs-snapshots-manager \
+    anduinos-recovery-env \
     open-vm-tools-desktop \
     build-essential- \
     --install-recommends

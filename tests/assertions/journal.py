@@ -199,6 +199,7 @@ class JournalPolicy:
         failed_user_units: Iterable[str] = (),
         action_scope: str = "",
         acpi_pci_without_dt: bool = False,
+        tdx_host_unavailable: bool = False,
     ) -> JournalVerdict:
         merged = merge_journal_entries(entries)
         blockers: list[JournalFinding] = []
@@ -235,6 +236,24 @@ class JournalPolicy:
                         "Linux PCI: optional Device Tree node creation was skipped. "
                         "Guest evidence confirms one ACPI PCI root, no Device Tree, "
                         "and bound storage, network and display controllers.",
+                        entry,
+                        rule_id,
+                    ))
+                    continue
+            # Optional TDX host initialization logs pr_err before returning
+            # -ENODEV on CPUs without TDX_HOST_PLATFORM. The Linux fix posted at
+            # https://lists.openwall.net/linux-kernel/2026/07/29/845 removes only
+            # that message. Require collected guest capability/config evidence;
+            # other TDX errors and repeated messages must remain blockers.
+            if tdx_host_unavailable and is_tdx_host_diagnostic(entry):
+                rule_id = "tdx-host-capability-absent"
+                counts[rule_id] = counts.get(rule_id, 0) + 1
+                if counts[rule_id] == 1:
+                    known.append(JournalFinding(
+                        "known-diagnostic",
+                        "Linux optional TDX host initialization was skipped. "
+                        "Guest evidence confirms the investigated kernel, built-in "
+                        "TDX host support and no CPU advertising TDX_HOST_PLATFORM.",
                         entry,
                         rule_id,
                     ))
@@ -313,6 +332,45 @@ def is_pci_of_root_diagnostic(entry: JournalEntry) -> bool:
         and entry.message ==
         "PCI: OF: of_root node is NULL, cannot create PCI host bridge node"
     )
+
+
+def is_tdx_host_diagnostic(entry: JournalEntry) -> bool:
+    return (
+        entry.priority == 3
+        and entry.identifiers == ("kernel",)
+        and entry.message == "virt/tdx: TDX not supported by the host platform"
+    )
+
+
+def render_tdx_host_script() -> str:
+    """Retain evidence for the optional-feature diagnostic, scoped to this kernel."""
+    program = r"""
+import json
+import platform
+from pathlib import Path
+
+release = platform.release()
+config_path = Path('/boot') / ('config-' + release)
+config = config_path.read_text() if config_path.is_file() else ''
+cpu_flags = [line.split(':', 1)[1].split()
+             for line in Path('/proc/cpuinfo').read_text().splitlines()
+             if line.startswith('flags') and ':' in line]
+cmdline = Path('/proc/cmdline').read_text().split()
+explicit_tdx = any(item.split('=', 1)[0] in {'tdx', 'kvm_intel.tdx'} for item in cmdline)
+eligible = (
+    platform.machine() == 'x86_64'
+    and release == '7.3.0-10-generic'
+    and 'CONFIG_INTEL_TDX_HOST=y' in config.splitlines()
+    and bool(cpu_flags)
+    and all('tdx_host_platform' not in flags for flags in cpu_flags)
+    and not explicit_tdx
+)
+print(json.dumps({'machine': platform.machine(), 'kernel_release': release,
+                  'tdx_host_builtin': 'CONFIG_INTEL_TDX_HOST=y' in config.splitlines(),
+                  'cpu_flags': cpu_flags, 'cmdline': cmdline,
+                  'tdx_host_unavailable': eligible}, indent=2))
+""".strip()
+    return f"python3 -c {shlex.quote(program)}"
 
 
 def render_pci_firmware_script() -> str:

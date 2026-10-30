@@ -24,8 +24,8 @@ def _revert_checkpoint_probe_command() -> str:
     )
 
 
-def _validate_rescue_pointer_trace(path: Path) -> None:
-    required = {
+def _validate_rescue_pointer_trace(path: Path, *, required=None) -> None:
+    required = required or {
         "rescue-select-installation",
         "rescue-open-snapshots",
         "rescue-select-snapshot",
@@ -49,6 +49,142 @@ def _validate_rescue_pointer_trace(path: Path) -> None:
 
 
 class LifecycleChecks:
+    def _exercise_rescue_boot_repair(self, vm, base, artifacts):
+        self._exercise_rescue_boot(vm, base, artifacts, damage="cache")
+
+    def _exercise_rescue_boot_reject_source(self, vm, base, artifacts):
+        self._exercise_rescue_boot(vm, base, artifacts, damage="source")
+
+    def _exercise_rescue_boot(self, vm, base, artifacts, *, damage):
+        """Exercise the ISO's actual boot repair, including independent readback."""
+        assert vm.serial is not None and vm.qmp is not None
+        remote = "/usr/local/lib/anduinos-rescue-acceptance"
+        oracle = self.framework_root / "assertions/guest/rescue_boot.py"
+        vm.serial.run(f"install -d -m 0755 {remote}; install -d -m 0777 {remote}/evidence")
+        key = self._prepare_power_control(vm, artifacts, remote)
+        self.driver.upload(vm.serial, remote)
+        vm.serial.upload(oracle, f"{remote}/rescue_boot.py", 0o644)
+        system_name = vm.serial.run(
+            ". /etc/os-release; printf '%s\\n' \"$PRETTY_NAME\""
+        ).stdout.strip().splitlines()[-1]
+        # Persist only a read-only verification command for the final normal boot.
+        vm.serial.run(
+            f"printf '%s ALL=(root) NOPASSWD: /usr/bin/python3 {remote}/rescue_boot.py boot {remote}/before.json\\n' "
+            f"{shlex.quote(self.username)} > /etc/sudoers.d/anduinos-rescue-acceptance; "
+            "chmod 0440 /etc/sudoers.d/anduinos-rescue-acceptance; "
+            "visudo -cf /etc/sudoers.d/anduinos-rescue-acceptance"
+        )
+        injected = vm.serial.run(
+            f"python3 {remote}/rescue_boot.py {damage} {remote}/before.json", timeout=180,
+        )
+        (artifacts / "rescue-boot-injection.txt").write_text(injected.stdout)
+        _retrieve_file(vm.serial, f"{remote}/before.json", artifacts / "rescue-boot-before.json")
+        vm.screenshot("rescue-boot-fault-injected")
+        _power_off(vm)
+
+        vm.start(attach_iso=True, phase="rescue-boot-live")
+        assert vm.qmp is not None and vm.serial is not None
+        boot_iso_with_debug_shell(
+            vm.qmp, vm.serial, base.architecture,
+            firmware_delay=self.options.firmware_delay_seconds,
+            spice_socket=vm.spice_socket, scratch_dir=artifacts,
+        )
+        vm.serial.timeout = self.options.command_timeout_seconds
+        vm.serial.wait_for_shell(self.options.boot_timeout_seconds)
+        preflight = vm.serial.run(
+            "set -e; test -s /run/anduinos-live/environment; "
+            "mokutil --sb-state | grep -Fx 'SecureBoot enabled'; "
+            "dpkg-query -W -f='${Package} ${Version} ${db:Status-Status}\\n' "
+            "anduinos-rescue-center anduinos-secureboot-toolkit; "
+            "test -x /usr/bin/anduinos-rescue-center"
+        )
+        (artifacts / "rescue-boot-live-packages.txt").write_text(preflight.stdout)
+        self._wait_for_graphical_identity(vm, "live", timeout=self.options.boot_timeout_seconds)
+        live_remote = "/run/anduinos-boot-rescue-acceptance"
+        vm.serial.run(f"install -d -m 0777 {live_remote}/evidence")
+        self.driver.upload(vm.serial, live_remote)
+        vm.serial.upload(oracle, f"{live_remote}/rescue_boot.py", 0o644)
+        vm.serial.upload(artifacts / "rescue-boot-before.json", f"{live_remote}/before.json", 0o644)
+        vm.serial.run(_desktop_command("live", (
+            "sh", "-c", "exec setsid --fork anduinos-rescue-center "
+            ">/tmp/anduinos-boot-rescue.log 2>&1",
+        )))
+        expected = "Boot repair finished" if damage == "cache" else "Boot repair failed"
+        trace = artifacts / "rescue-boot-pointer-requests.jsonl"
+        diagnosis = _run_with_qmp_key_requests(
+            vm, _desktop_command("live", (
+                "python3", f"{live_remote}/atspi_driver.py", "rescue-center-boot",
+                "--system-name", system_name, "--expected", "diagnosis",
+                "--evidence", f"{live_remote}/evidence",
+            ), managed=True), timeout=300, request_trace=trace,
+        )
+        (artifacts / "rescue-boot-diagnosis-events.jsonl").write_text(diagnosis.stdout)
+        vm.screenshot("rescue-boot-live-diagnosis")
+        if diagnosis.returncode:
+            raise TestFailure("Live boot diagnosis GUI failed:\n" + diagnosis.stdout[-8000:])
+        result = _run_with_qmp_key_requests(
+            vm, _desktop_command("live", (
+                "python3", f"{live_remote}/atspi_driver.py", "rescue-center-boot",
+                "--system-name", system_name, "--expected", expected,
+                "--evidence", f"{live_remote}/evidence",
+            ), managed=True), timeout=1200, request_trace=trace,
+        )
+        (artifacts / "rescue-boot-ui-events.jsonl").write_text(result.stdout)
+        _retrieve_tree(vm.serial, live_remote, artifacts / "rescue-boot-live-evidence")
+        vm.screenshot("rescue-boot-gui-result")
+        if result.returncode:
+            raise TestFailure("Live boot repair GUI failed:\n" + result.stdout[-8000:])
+        _validate_rescue_pointer_trace(trace, required={
+            "rescue-select-installation", "rescue-open-boot",
+            "rescue-rebuild-boot", "rescue-confirm-boot",
+        })
+        verified = vm.serial.run(
+            f"python3 {live_remote}/rescue_boot.py live {live_remote}/before.json", timeout=180,
+        )
+        (artifacts / "rescue-boot-independent-readback.txt").write_text(verified.stdout)
+        _power_off(vm)
+        if damage == "source":
+            return
+
+        # Keep the same firmware variables, remove ISO, and let normal BootOrder
+        # select the disk. No file picker, BootNext, GRUB injection or repair here.
+        vm.start(attach_iso=False, phase="rescue-boot-repaired")
+        booted = self._ssh_eventually(
+            vm, key,
+            f"sudo -n /usr/bin/python3 {remote}/rescue_boot.py boot {remote}/before.json",
+            timeout=self.options.boot_timeout_seconds,
+        )
+        (artifacts / "rescue-boot-vendor-startup.txt").write_text(booted)
+        self._login_gdm_over_ssh(vm, key, timeout=120)
+        desktop_environment = (
+            'export XDG_RUNTIME_DIR=/run/user/$(id -u); '
+            'export DBUS_SESSION_BUS_ADDRESS=unix:path=$XDG_RUNTIME_DIR/bus; '
+            'export WAYLAND_DISPLAY=$(find "$XDG_RUNTIME_DIR" -maxdepth 1 '
+            '-type s -name "wayland-[0-9]*" -printf "%f\\n" | head -n1); '
+        )
+        desktop_service = (
+            'systemd-run --user --collect --quiet '
+            '--setenv=XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR" '
+            '--setenv=DBUS_SESSION_BUS_ADDRESS="$DBUS_SESSION_BUS_ADDRESS" '
+            '--setenv=WAYLAND_DISPLAY="$WAYLAND_DISPLAY" '
+        )
+        # Keep the real window in its own desktop service, so completion of
+        # the read-only driver does not close it before the host screenshot.
+        self._ssh(vm, key, desktop_environment + desktop_service +
+                  'anduinos-driver-center --page secure-boot')
+        ui = self._ssh(vm, key, desktop_environment + desktop_service + '--wait --pipe ' +
+            f'python3 {remote}/atspi_driver.py secure-boot-green --evidence {remote}/evidence',
+            timeout=180, check=False)
+        (artifacts / "rescue-boot-health-ui.jsonl").write_text(ui)
+        tree = self._ssh(vm, key, f"cat {remote}/evidence/secure-boot-accessibility.txt")
+        (artifacts / "rescue-boot-health-accessibility.txt").write_text(tree)
+        vm.screenshot("rescue-boot-six-green")
+        if not any(line.startswith('{"event": "secure-boot-green"') for line in ui.splitlines()):
+            raise TestFailure("Repaired boot did not show six healthy rows:\n" + ui[-8000:])
+        self._ssh(vm, key, "sudo -n /usr/local/sbin/anduinos-acceptance-poweroff")
+        self._wait_for_power_transition(vm, key, artifacts, "rescue-boot-poweroff", timeout=150)
+        vm.stop()
+
     def _exercise_rescue_center_offline_restore(
         self,
         vm: QemuVm,
