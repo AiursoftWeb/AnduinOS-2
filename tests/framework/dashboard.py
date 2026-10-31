@@ -356,9 +356,10 @@ class AcceptanceDashboard:
                     checks_passed = sum(check.state == "passed" for check in checks)
                     checks_failed = sum(check.state == "failed" for check in checks)
                     checks_blocked = sum(check.state == "blocked" for check in checks)
+                    checks_pending = sum(check.state == "pending" for check in checks)
                     self._write_output(
                         f"Checks: {checks_passed}/{len(checks)} passed, "
-                        f"{checks_failed} failed, {checks_blocked} blocked\n"
+                        f"{checks_failed} failed, {checks_blocked} blocked, {checks_pending} not started\n"
                     )
                 self._write_output(f"Artifacts: {self.artifacts}\n")
             self._flush_output()
