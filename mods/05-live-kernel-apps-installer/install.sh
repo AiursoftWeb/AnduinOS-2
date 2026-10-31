@@ -34,6 +34,8 @@ print_ok "Installing AnduinOS Live components, desktop, and installer..."
 # The GRUB theme remains standalone and removable. Disk Snapshots Manager is
 # included in the Live image; the installer retains it on Btrfs and purges it
 # from ext4 targets. Neither becomes a desktop metapackage dependency here.
+# Let anduinos-gnome-extensions select DING for the target suite (GTK 3 on
+# Resolute, GTK 4 on Stonking); do not override that policy in the ISO builder.
 apt install -y \
     anduinos-live-layers \
     anduinos-desktop \
@@ -50,7 +52,6 @@ apt install -y \
     firefox-anduinos \
     gnome-shell-extension-appindicator-anduinos \
     gnome-shell-extension-dash-to-panel-anduinos \
-    gnome-shell-extension-desktop-icons-ng-gtk-3-anduinos \
     plymouth-anduinos \
     alsa-ucm-conf-anduinos \
     firmware-sof-anduinos \
