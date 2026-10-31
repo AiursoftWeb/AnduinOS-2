@@ -409,44 +409,50 @@ def observe_installed_region_zh_cn(evidence: Path) -> None:
     exercised later by the desktop feature suites after first-boot setup.
     """
 
-    shell_nodes = visible_application_nodes("gnome-shell")
-    markers = sorted(
-        {
-            (role(item), name(item))
-            for item in shell_nodes
-            if (role(item), name(item))
-            in {("menu", "系统"), ("toggle button", "显示应用")}
-        }
-    )
-    shell_expected = [("menu", "系统"), ("toggle button", "显示应用")]
-    setup_expected = [
-        ("button", "开始设置"),
-        ("frame", "AnduinOS 设置"),
-        ("label", "欢迎回家。"),
-    ]
-    setup_markers: list[tuple[str, str]] = []
-    if markers == [("menu", "系统")]:
-        # OOBE can cover the dock on first login, hiding Show Applications.
-        # In that state, verify Chinese in the actual foreground setup window
-        # instead of requiring a shell control that is not visible.
-        for frame in visible_nodes():
-            if (role(frame), name(frame)) != ("frame", "AnduinOS 设置"):
-                continue
-            observed = {
+    deadline = time.monotonic() + 120
+    while True:
+        shell_nodes = visible_application_nodes("gnome-shell")
+        markers = sorted(
+            {
                 (role(item), name(item))
-                for item in walk(frame)
-                if showing(item)
+                for item in shell_nodes
+                if (role(item), name(item))
+                in {("menu", "系统"), ("toggle button", "显示应用")}
             }
-            setup_markers = sorted(observed.intersection(set(setup_expected)))
-            if setup_markers == setup_expected:
-                break
-    if markers != shell_expected and not (
-        markers == [("menu", "系统")] and setup_markers == setup_expected
-    ):
-        raise UiFailure(
-            "GNOME Shell is not visibly localized to Simplified Chinese; "
-            f"markers={markers!r}, setup_markers={setup_markers!r}"
         )
+        shell_expected = [("menu", "系统"), ("toggle button", "显示应用")]
+        setup_expected = [
+            ("button", "开始设置"),
+            ("frame", "AnduinOS 设置"),
+            ("label", "欢迎回家。"),
+        ]
+        setup_markers: list[tuple[str, str]] = []
+        if markers == [("menu", "系统")]:
+            # OOBE can cover the dock on first login, hiding Show Applications.
+            # In that state, verify Chinese in the actual foreground setup window
+            # instead of requiring a shell control that is not visible.
+            for frame in visible_nodes():
+                if (role(frame), name(frame)) != ("frame", "AnduinOS 设置"):
+                    continue
+                observed = {
+                    (role(item), name(item))
+                    for item in walk(frame)
+                    if showing(item)
+                }
+                setup_markers = sorted(observed.intersection(set(setup_expected)))
+                if setup_markers == setup_expected:
+                    break
+        if markers == shell_expected or (
+            markers == [("menu", "系统")] and setup_markers == setup_expected
+        ):
+            break
+        if time.monotonic() >= deadline:
+            dump_accessibility(evidence / "installed-region-zh-cn-failed.txt")
+            raise UiFailure(
+                "GNOME Shell is not visibly localized to Simplified Chinese; "
+                f"markers={markers!r}, setup_markers={setup_markers!r}"
+            )
+        time.sleep(0.25)
     (evidence / "installed-region-zh-cn.txt").write_text(
         "\n".join(
             f"{item_role}\t{item_name}"
