@@ -50,6 +50,27 @@ def sample_dashboard():
 
 
 class DashboardLayoutTests(unittest.TestCase):
+    def test_closed_summary_accounts_for_checks_not_started_after_failure(self):
+        output = io.StringIO()
+        dashboard = AcceptanceDashboard(
+            ("case",), iso=Path("image.iso"), architecture="amd64",
+            artifacts=Path("test-results"), stream=output, live=False,
+            suites={"case": {"installation": ("ok", "bad", "blocked", "queued")}},
+        )
+        for check, state in (("ok", "passed"), ("bad", "failed"), ("blocked", "blocked")):
+            dashboard.suite_check("case", "installation", check, state)
+        dashboard.complete_suite("case", "installation", "failed", 1, "Stopped early")
+        dashboard.close()
+
+        self.assertIn(
+            "Checks: 1/4 passed, 1 failed, 1 blocked, 1 not started",
+            output.getvalue(),
+        )
+        self.assertEqual("failed", dashboard.case_result("case")["status"])
+        self.assertEqual(
+            "pending", dashboard.cases["case"].suites["installation"].checks["queued"].state,
+        )
+
     def test_usb_case_uses_the_same_three_panel_layout(self):
         dashboard = AcceptanceDashboard(
             ('iso-media', 'bios-online-btrfs'),
