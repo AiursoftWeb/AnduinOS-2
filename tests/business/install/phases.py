@@ -64,6 +64,11 @@ class InstallationPhases:
             vm.screenshot(
                 "live-persistent-first" if persistent else "live-desktop"
             )
+        with self._check(scenario, "live.system-release"):
+            assert_system_release(
+                vm.serial, artifacts, version=self.inspection.version,
+                codename=self.inspection.codename, phase="live",
+            )
         with self._check(scenario, "live.identity-contract"):
             self.status(
                 scenario.id,
@@ -452,6 +457,11 @@ fi
                 self.defaults.username,
                 self.defaults.hostname.casefold(),
                 artifacts,
+            )
+        with self._check(scenario, "installed.system-release"):
+            assert_system_release(
+                vm.serial, artifacts, version=self.inspection.version,
+                codename=self.inspection.codename, phase="installed",
             )
         self._assert_installed_release_contracts(vm, scenario, artifacts)
         with self._check(scenario, "factory-recovery-baselines"):

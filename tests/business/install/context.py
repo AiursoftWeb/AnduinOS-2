@@ -39,6 +39,7 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
     checks = [
         "regional.grub-contract",
         "live-boot",
+        "live.system-release",
         "live.identity-contract",
         (
             "live.persistent-overlay"
@@ -68,6 +69,7 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
     checks.extend(
         (
             "installed-contracts",
+            "installed.system-release",
             "factory-recovery-baselines",
             _passwordless_sudo_check_id(scenario),
             _automatic_login_check_id(scenario),
