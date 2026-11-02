@@ -64,6 +64,24 @@ elif mode == 'marker':
 elif mode == 'damage':
     before = marker(sys.argv[2])
     files = json.loads(STATE.read_text())
+    # systemd tmpfiles can create these empty child subvolumes on a healthy
+    # system. Keep them in the broken root so the independent recovery image
+    # must list snapshots, restore A and clean up the old root with this layout.
+    # Never hide unexpected data by replacing a nonempty directory/subvolume.
+    children = ['/var/lib/machines', '/var/lib/portables']
+    for name in children:
+        path = Path(name)
+        if path.exists():
+            assert path.is_dir() and not path.is_symlink(), name
+            assert not any(path.iterdir()), name
+            existing = subprocess.run(['btrfs', 'subvolume', 'show', name],
+                                      stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            if existing.returncode == 0:
+                continue
+            path.rmdir()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(['btrfs', 'subvolume', 'create', name],
+                       check=True, stdout=subprocess.DEVNULL)
     DAMAGE.write_text('Must disappear after recovery A\n')
     HOME.write_text('Personal data survives recovery\n')
     # Corrupt every installed kernel and initrd, including older alternatives.
@@ -74,7 +92,8 @@ elif mode == 'damage':
     identifier = snapshot('Acceptance B - broken kernel')
     assert marker(sys.argv[2]) == before
     subprocess.run(['sync'], check=True)
-    print(json.dumps({'snapshot_b': identifier, 'marker': before, 'damaged_files': list(files)}))
+    print(json.dumps({'snapshot_b': identifier, 'marker': before, 'damaged_files': list(files),
+                      'empty_system_subvolumes': children}))
 elif mode == 'verify':
     files = json.loads(STATE.read_text())
     assert not DAMAGE.exists()
