@@ -250,8 +250,12 @@ class SerialConsole:
                 return
             if self._socket is None:
                 raise ProtocolError("Serial socket is not connected")
+            # Scheduling can cross the deadline after the loop condition.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             ready, _, _ = select.select(
-                [self._socket], [], [], min(0.5, deadline - time.monotonic())
+                [self._socket], [], [], min(0.5, remaining)
             )
             if not ready:
                 continue
@@ -631,8 +635,12 @@ class SerialConsole:
                 result = bytes(self._buffer)
                 self._buffer.clear()
                 return result
+            # Scheduling can cross the deadline after the loop condition.
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
             ready, _, _ = select.select(
-                [self._socket], [], [], min(0.5, deadline - time.monotonic())
+                [self._socket], [], [], min(0.5, remaining)
             )
             if not ready:
                 continue
