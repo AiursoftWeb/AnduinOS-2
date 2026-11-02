@@ -27,6 +27,8 @@ class IsoInspection:
     boot_report: str
     live_entries: tuple["LiveGrubEntry", ...]
     persistent_entry: "PersistentLiveGrubEntry"
+    version: str
+    codename: str
 
     def live_entry(self, name: str) -> "LiveGrubEntry":
         matches = [entry for entry in self.live_entries if entry.name == name]
@@ -70,6 +72,7 @@ def inspect_iso(path: Path, expected_architecture: Architecture) -> IsoInspectio
             f"ISO architecture is {architecture.value}, requested "
             f"{expected_architecture.value}"
         )
+    version, codename = _read_release(resolved, architecture)
     report = _boot_report(resolved)
     _validate_efi_payload(resolved, architecture)
     _validate_rootfs_boot_stack(resolved, architecture)
@@ -99,6 +102,8 @@ def inspect_iso(path: Path, expected_architecture: Architecture) -> IsoInspectio
         boot_report=report,
         live_entries=live_entries,
         persistent_entry=persistent_entry,
+        version=version,
+        codename=codename,
     )
 
 
@@ -119,6 +124,27 @@ def _read_architecture(path: Path) -> Architecture:
     if match is None:
         raise ConfigurationError("ISO does not declare a supported architecture")
     return Architecture(match.group(1))
+
+
+def _read_release(path: Path, architecture: Architecture) -> tuple[str, str]:
+    with tempfile.TemporaryDirectory(prefix="anduinos-release-inspect-") as directory:
+        destination = Path(directory) / "info"
+        _extract(path, "/.disk/info", destination)
+        return _parse_release(destination.read_text(encoding="utf-8"), architecture)
+
+
+def _parse_release(content: str, architecture: Architecture) -> tuple[str, str]:
+    """Read the supplied media's contract; never infer it from host or suite."""
+
+    match = re.fullmatch(
+        r"AnduinOS (?P<version>[0-9]+(?:\.[0-9]+)+(?:[-+~][A-Za-z0-9.+~:-]+)?) "
+        r"(?P<codename>[a-z][a-z0-9-]*) - Release "
+        r"(?P<arch>amd64|arm64) \([0-9]{8}\)",
+        content.strip(),
+    )
+    if match is None or match["arch"] != architecture.value:
+        raise ConfigurationError("ISO has missing, malformed or inconsistent /.disk/info")
+    return match["version"], match["codename"]
 
 
 def _validate_efi_payload(path: Path, architecture: Architecture) -> None:

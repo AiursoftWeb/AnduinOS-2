@@ -27,6 +27,7 @@ from assertions.install import (
     assert_installed_region,
     assert_live_environment,
     assert_live_identity,
+    assert_system_release,
     assert_live_region,
     assert_no_image_junk,
     assert_passwordless_sudo_behavior,

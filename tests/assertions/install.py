@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import shlex
 from pathlib import Path
@@ -212,6 +213,59 @@ printf 'forbidden-package-count=0\\n'
         else "packages-installed-junk-absent"
     )
     _record(console, script, evidence / f"{identifier}.txt")
+
+
+def assert_system_release(
+    console: SerialConsole,
+    evidence: Path,
+    *,
+    version: str,
+    codename: str,
+    phase: str,
+) -> None:
+    """Compare Live and installed identity with the input ISO, not package versions."""
+
+    script = r"""
+python3 - <<'RELEASE'
+import json
+import shlex
+from pathlib import Path
+result = {}
+for name in ('/etc/os-release', '/usr/lib/os-release', '/etc/lsb-release'):
+    values = {}
+    for line in Path(name).read_text().splitlines():
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        key, value = line.split('=', 1)
+        words = shlex.split(value, comments=True)
+        values[key] = words[0] if len(words) == 1 else ''
+    result[name] = values
+print(json.dumps(result))
+RELEASE
+"""
+    result = console.run(script)
+    (evidence / f"{phase}-system-release.json").write_text(
+        result.stdout + "\n", encoding="utf-8"
+    )
+    validate_system_release(json.loads(result.stdout), version, codename)
+
+
+def validate_system_release(identity: dict, version: str, codename: str) -> None:
+    for path in ("/etc/os-release", "/usr/lib/os-release"):
+        expected = {
+            "ID": "anduinos",
+            "VERSION_ID": version,
+            "VERSION_CODENAME": codename,
+            "UBUNTU_CODENAME": codename,
+        }
+        for key, value in expected.items():
+            actual = identity.get(path, {}).get(key)
+            if actual != value:
+                raise TestFailure(f"{path}: {key}={actual!r}, ISO requires {value!r}")
+    for key, value in (("DISTRIB_RELEASE", version), ("DISTRIB_CODENAME", codename)):
+        actual = identity.get("/etc/lsb-release", {}).get(key)
+        if actual != value:
+            raise TestFailure(f"/etc/lsb-release: {key}={actual!r}, ISO requires {value!r}")
 
 
 def assert_live_environment(

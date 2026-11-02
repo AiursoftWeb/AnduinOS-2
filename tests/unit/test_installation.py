@@ -6,6 +6,50 @@ from contextlib import nullcontext
 from unit.support import *  # noqa: F403
 
 
+class SystemReleaseContractTests(unittest.TestCase):
+    def test_media_contract_is_independent_of_suite_and_architecture(self):
+        from framework.iso import _parse_release
+        for arch in Architecture:
+            for version, codename in (("2.0.6", "resolute"), ("2.1.0", "stonking"),
+                                      ("9.8.7", "future-suite")):
+                with self.subTest(arch=arch, codename=codename):
+                    content = f"AnduinOS {version} {codename} - Release {arch.value} (20261102)\n"
+                    self.assertEqual((version, codename), _parse_release(content, arch))
+
+    def test_missing_malformed_or_wrong_architecture_metadata_is_rejected(self):
+        from framework.iso import _parse_release
+        for content in ("", "AnduinOS", "AnduinOS 2.0.6 resolute - Release arm64 (20261102)",
+                        "AnduinOS 2.0.6 resolute - Release amd64 (20261102)\nextra"):
+            with self.subTest(content=content), self.assertRaises(ConfigurationError):
+                _parse_release(content, Architecture.AMD64)
+
+    def test_system_identity_must_match_media_in_every_file(self):
+        from assertions.install import validate_system_release
+        for version, codename in (("2.0.6", "resolute"), ("2.1.0", "stonking"),
+                                  ("9.8.7", "future-suite")):
+            identity = {
+                path: {"ID": "anduinos", "VERSION_ID": version,
+                       "VERSION_CODENAME": codename, "UBUNTU_CODENAME": codename}
+                for path in ("/etc/os-release", "/usr/lib/os-release")
+            }
+            identity["/etc/lsb-release"] = {
+                "DISTRIB_RELEASE": version, "DISTRIB_CODENAME": codename,
+            }
+            validate_system_release(identity, version, codename)
+            for path, values in identity.items():
+                for key in values:
+                    with self.subTest(version=version, path=path, key=key):
+                        broken = {name: dict(data) for name, data in identity.items()}
+                        broken[path][key] = "stale"
+                        with self.assertRaises(TestFailure):
+                            validate_system_release(broken, version, codename)
+            for path in identity:
+                broken = dict(identity)
+                del broken[path]
+                with self.subTest(missing=path), self.assertRaises(TestFailure):
+                    validate_system_release(broken, version, codename)
+
+
 class GrubRestorationDeadlineTests(unittest.TestCase):
     def test_durable_restoration_is_not_cut_off_by_short_serial_deadline(self):
         for relative in ("business/install/phases.py", "business/desktop/runner.py"):

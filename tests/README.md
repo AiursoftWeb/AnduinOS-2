@@ -11,6 +11,12 @@ The ISO media case runs three suites once per ISO; installation cases follow.
 Every assertion is a third-level check, including USB, install and desktop.
 The final summary uses the same tree; failed or unexecuted checks block release.
 
+The input ISO's `/.disk/info` supplies the expected OS version and Ubuntu
+codename. Both Live and installed systems must match it in `/etc/os-release`,
+`/usr/lib/os-release` and `/etc/lsb-release`. Missing or inconsistent metadata
+fails acceptance. The oracle does not infer release numbers from filenames,
+the build host, package versions or a hardcoded Resolute/Stonking mapping.
+
 Pass `ISO=/path/to/image.iso` and `ARCH=amd64|arm64` only when the newest image
 cannot be selected automatically. `TEST_ARGS=--no-tui` switches to persistent
 plain output without changing which tests run.
