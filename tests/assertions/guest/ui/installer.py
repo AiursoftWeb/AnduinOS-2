@@ -645,12 +645,28 @@ def install(config: dict[str, object], evidence: Path) -> None:
     # The NavigationPage still exposes its title through accessibility.
     wait_page("progress", timeout=30)
     show_installer_output()
-    wait_step_started("detect_boot_environment", timeout=60)
+    try:
+        wait_step_started("detect_boot_environment", timeout=60)
+    except UiFailure as error:
+        # Preflight or launcher failures can precede every step-status event.
+        # Preserve the real executor output instead of reporting only an idle
+        # first row and losing the original error.
+        dump_accessibility(evidence / "failure.txt")
+        output = save_executor_output()
+        raise UiFailure(
+            "Installer did not start its first step:\n" + output[-8000:]
+        ) from error
 
     deadline = time.monotonic() + float(config["install_timeout_seconds"])
     while time.monotonic() < deadline:
-        if find_optional("failed", 0.25) is not None:
+        if (
+            find_optional("failed", 0.25) is not None
+            or find_optional("incomplete", 0.25) is not None
+        ):
             dump_accessibility(evidence / "failure.txt")
+            # A completed system with an incomplete feature is also a release
+            # failure. Do not wait until the full installation timeout or
+            # silently count the partial-completion banner as success.
             # on_done() schedules the terminal ERROR line on the GTK main
             # context after exposing the failure banner. Give that append one
             # event-loop turn before saving the real output page.

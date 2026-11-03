@@ -29,6 +29,10 @@ class UiFailure(RuntimeError):
 
 
 ALIASES = {
+    "incomplete": (
+        "System installed, but some features could not be completed",
+        "系统已安装，但部分功能未能完成",
+    ),
     "next": ("Next", "下一步", "Continue Installation", "继续安装"),
     "skip": ("Skip", "跳过"),
     "firmware_complete": ("Firmware check complete", "固件检测完成"),
