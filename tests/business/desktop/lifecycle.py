@@ -84,9 +84,12 @@ class LifecycleChecks:
             status = vm.wait(timeout=self.options.boot_timeout_seconds * 2)
         if status != 0:
             raise TestFailure(f"Recovery QEMU exited abnormally: {status}")
+        assert vm.qmp is not None
+        reset = vm.qmp.wait_for_guest_reset()
         (artifacts / f"{phase}-product-restart.json").write_text(json.dumps({
             "protocol": protocol, "qemu_exit_status": status,
             "host_requested_reset": False, "iso_attached": False,
+            "qmp_shutdown": reset,
         }, indent=2) + "\n")
         vm.stop()
         vm.start(attach_iso=False, phase=phase)

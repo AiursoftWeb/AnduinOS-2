@@ -99,6 +99,26 @@ class QmpClient:
         )
         return str(result or "")
 
+    def wait_for_guest_reset(self) -> dict[str, object]:
+        """Require a guest reset, rather than treating any clean exit as reboot.
+
+        With -no-reboot, QEMU queues SHUTDOWN before closing the socket. The
+        caller may already have waited for process exit; unread event data is
+        still available and does not require another QMP command.
+        """
+        deadline = time.monotonic() + self.timeout
+        while True:
+            shutdown = next((event for event in self.events
+                             if event.get("event") == "SHUTDOWN"), None)
+            if shutdown is not None:
+                data = shutdown.get("data", {})
+                if not isinstance(data, dict) or data.get("reason") != "guest-reset" or data.get("guest") is not True:
+                    raise ProtocolError(f"Expected a product-owned guest reset, observed {shutdown!r}")
+                return shutdown
+            event = self._read_message(deadline)
+            if "event" in event:
+                self.events.append(event)
+
     def flush_block_device(self, node: str) -> None:
         """Synchronously flush a named block node through QEMU's block layer."""
 

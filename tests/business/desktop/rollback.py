@@ -16,8 +16,9 @@ class KernelRollbackChecks:
     def _exercise_kernel_rollback(self, vm, base, artifacts, variant):
         assert vm.serial is not None
         remote = "/usr/local/lib/anduinos-acceptance"
-        vm.serial.run(f"install -d -m 0755 {remote}; install -d -m 0777 {remote}/evidence")
-        key = self._prepare_power_control(vm, artifacts, remote)
+        staging = "/run/anduinos-feature-kernel"
+        vm.serial.run(f"install -d -m 0755 {remote} {staging}; install -d -m 0777 {remote}/evidence")
+        key = self._prepare_power_control(vm, artifacts, staging)
         helper = f"{remote}/rollback_kernel_workload.py"
         vm.serial.upload(self.framework_root / "assertions/guest/rollback_kernel_workload.py",
                          helper, 0o644)
