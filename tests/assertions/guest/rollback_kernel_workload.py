@@ -51,6 +51,16 @@ def create_snapshot(title):
                           "Disposable cross-kernel acceptance"))["id"]
 
 
+def root_identity():
+    fields = {}
+    for line in run("btrfs", "subvolume", "show", "/").splitlines():
+        name, separator, value = line.strip().partition(":")
+        if separator and name in ("UUID", "Parent UUID"):
+            fields[name] = value.strip()
+    require(set(fields) == {"UUID", "Parent UUID"}, "Incomplete running root identity")
+    return fields
+
+
 def select_default(kernel):
     """Select a real generated entry, preserving the ordinary GRUB boot path."""
     for name, target in (("vmlinuz", f"vmlinuz-{kernel}"),
@@ -150,6 +160,10 @@ def ready():
     state = json.loads(STATE.read_text())
     require(os.uname().release == state["alternate"], "Alternate Ubuntu kernel did not boot")
     require(MARKER.read_text() == HOME.read_text() == "B\n", "Baseline B is not intact")
+    # Recovery protects the original writable root by renaming it. A failed
+    # target must return that exact root, rather than clone the safety snapshot.
+    state["protected_root"] = root_identity()
+    STATE.write_text(json.dumps(state))
     if state["target_kernel"] != state["alternate"]:
         # The current root must not supply the target's modules. The real
         # snapshot retains them; scheduling must use only the current kernel.
@@ -178,10 +192,13 @@ def verify():
     require(HOME.read_text() == "B\n", "System rollback changed independent newer Home data")
     require(record["applying_boot_id"] != record["target_boot_id"], "Restore did not cross a boot boundary")
     selected = record["fallback_deployment_id"] if failed else state["target"]
-    parent = next(line.split(":", 1)[1].strip() for line in run("btrfs", "subvolume", "show", "/").splitlines()
-                  if line.strip().startswith("Parent UUID:"))
+    identity = root_identity()
     metadata = json.loads((STORE / "metadata" / (selected + ".json")).read_text())
-    require(parent == metadata["snapshot_uuid"], "Running root is not a child of the selected snapshot")
+    if failed:
+        require(identity == state["protected_root"], "Fallback did not return the protected original root")
+    else:
+        require(identity["Parent UUID"] == metadata["snapshot_uuid"],
+                "Running root is not a child of the selected snapshot")
     require(record["reset_home"] is False and record["home_only"] is False
             and record["purge_history"] is False, "Rollback changed its requested scope")
     if failed:
