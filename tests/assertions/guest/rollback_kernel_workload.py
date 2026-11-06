@@ -18,10 +18,18 @@ MARKER = Path("/etc/anduinos-acceptance-kernel-rollback")
 HOME = Path("/home/anduinos-acceptance-kernel-user-data")
 CLI = "anduinos-btrfs-snapshots-manager-cli"
 REQUIRED = "/mnt/anduinos-acceptance-required"
+LOG = Path("/home/anduinos-acceptance-kernel-commands.log")
 
 
 def run(*args):
-    return subprocess.check_output(args, text=True, timeout=1800).strip()
+    result = subprocess.run(args, text=True, capture_output=True, timeout=1800)
+    # Package hooks write diagnostics to stderr even on success. Keep those
+    # messages without mixing them into the JSON control response on stdout.
+    with LOG.open("a") as log:
+        log.write(json.dumps(args) + "\n" + result.stdout + result.stderr + "\n")
+    require(result.returncode == 0,
+            f"{args[0]} failed ({result.returncode}): " + (result.stdout + result.stderr)[-4000:])
+    return result.stdout.strip()
 
 
 def require(condition, message):
