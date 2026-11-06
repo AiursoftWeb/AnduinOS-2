@@ -92,6 +92,11 @@ def prepare(variant):
     MARKER.write_text("A\n")
     HOME.write_text("A\n")
     if variant == "failed-target":
+        # Observation only: preserve the failing boot's journal in the shared
+        # /var/log subvolume so fallback cannot pass on an arbitrary power cut.
+        Path("/var/log/journal").mkdir(parents=True, exist_ok=True)
+        run("systemd-tmpfiles", "--create", "--prefix=/var/log/journal")
+        run("journalctl", "--flush")
         Path(REQUIRED).mkdir()
         fstab.write_text(saved_fstab + "\n/dev/disk/by-label/ANDUINOS-ABSENT-ACCEPTANCE "
                          + REQUIRED + " ext4 defaults,x-systemd.device-timeout=5s 0 0\n")
