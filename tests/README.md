@@ -120,6 +120,8 @@ Three independent overlays of `uefi-sb-online-btrfs` run on both architectures:
   fstab. After its failed boot, restart as a user would; the product must
   automatically revert and reboot into protected B. Independent history,
   root UUID, kernel and failed-target mount-journal evidence are required.
+  This disposable guest synchronizes its persistent journal every second so
+  the simulated hard restart preserves the actual mount-failure records.
 - `btrfs-default-kernel-rollback`: create A after installing/selecting B but
   before rebooting the old running kernel. Recovery must choose A's default
   boot links rather than its recorded running-kernel metadata.

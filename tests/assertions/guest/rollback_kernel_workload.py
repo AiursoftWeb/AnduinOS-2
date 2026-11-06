@@ -104,8 +104,16 @@ def prepare(variant):
     if variant == "failed-target":
         # Observation only: preserve the failing boot's journal in the shared
         # /var/log subvolume so fallback cannot pass on an arbitrary power cut.
+        # The ordinary five-minute sync interval would lose the final mount
+        # failure when this test simulates a user's hard restart after a minute.
         Path("/var/log/journal").mkdir(parents=True, exist_ok=True)
         run("systemd-tmpfiles", "--create", "--prefix=/var/log/journal")
+        journal_config = Path("/etc/systemd/journald.conf.d")
+        journal_config.mkdir(parents=True, exist_ok=True)
+        (journal_config / "90-acceptance-fault.conf").write_text(
+            "[Journal]\nStorage=persistent\nSyncIntervalSec=1s\n"
+        )
+        run("systemctl", "restart", "systemd-journald.service")
         run("journalctl", "--flush")
         Path(REQUIRED).mkdir()
         fstab.write_text(saved_fstab + "\n/dev/disk/by-label/ANDUINOS-ABSENT-ACCEPTANCE "
@@ -207,7 +215,9 @@ def verify():
         require(record["target_boot_id"] != Path("/proc/sys/kernel/random/boot_id").read_text().strip(),
                 "Fallback did not reboot after replacing the target root")
         unit = run("systemd-escape", "--path", "--suffix=mount", REQUIRED)
-        journal = run("journalctl", "--boot=" + record["target_boot_id"],
+        # journalctl's boot selector uses compact sd-id128, whereas the
+        # recovery transaction stores the canonical UUID from /proc.
+        journal = run("journalctl", "--boot=" + record["target_boot_id"].replace("-", ""),
                       "--unit=" + unit, "--output=json", "--no-pager")
         entries = [json.loads(line) for line in journal.splitlines() if line.startswith("{")]
         require(any(item.get("JOB_RESULT") in ("failed", "dependency", "timeout")
