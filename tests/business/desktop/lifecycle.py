@@ -1798,7 +1798,9 @@ class LifecycleChecks:
                 invocation,
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
+                # A successful helper may return machine-readable JSON. SSH
+                # host-key notices belong to diagnostics, not that response.
+                stderr=subprocess.PIPE,
                 text=True,
                 check=False,
                 timeout=timeout,
@@ -1806,6 +1808,6 @@ class LifecycleChecks:
         if check and result.returncode != 0:
             raise TestFailure(
                 f"Feature SSH control failed with {result.returncode}:\n"
-                + result.stdout[-8000:]
+                + (result.stdout + result.stderr)[-8000:]
             )
         return result.stdout
