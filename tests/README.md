@@ -92,6 +92,51 @@ an explicit GUI rejection with all previous EFI files preserved. Neither suite
 installs repair packages into Live or repairs the target outside the GUI. Fault,
 repair-result and final desktop screenshots accompany signature and boot evidence.
 
+## Restarting snapshot recovery
+
+Desktop system/Home rollback and factory reset read the armed transaction's
+protocol. Protocol 3 must reset the guest after applying the restore, before
+the target userspace starts; protocol 2 retains its original single-boot
+behavior. With QEMU's `-no-reboot`, the runner waits for a clean product-owned
+exit before starting normal firmware again with the same disk and VARS file.
+It never uses a QMP reset to manufacture the expected recovery restart.
+
+The shared history oracle accepts legacy schemas 4–6/protocol 2 and schema
+7/protocol 3. A confirmed v7 record must contain distinct apply/target boot
+IDs and a target kernel matching the running kernel. Home retention, safety
+snapshots, history browsing and explicit history-cleanup consent remain checked.
+The factory power-loss scenario masks confirmation for one target boot through
+the real GRUB editor, then checks automatic revert and the additional fallback
+restart. The immutable target snapshot is never rewritten for instrumentation.
+
+Three independent overlays of `uefi-sb-online-btrfs` run on both architectures:
+
+- `btrfs-cross-kernel-rollback`: snapshot A, install and boot another actual
+  Ubuntu kernel B, hide A's modules in the current root, arm A through the
+  desktop GUI, and require A's own kernel/initrd after recovery. Newer Home
+  data must survive, the transaction must confirm, and an ordinary next reboot
+  must remain stable.
+- `btrfs-failed-target-rollback`: A additionally requires an absent disk in
+  fstab. After its failed boot, restart as a user would; the product must
+  automatically revert and reboot into protected B. Independent history,
+  root UUID, kernel and failed-target mount-journal evidence are required.
+- `btrfs-default-kernel-rollback`: create A after installing/selecting B but
+  before rebooting the old running kernel. Recovery must choose A's default
+  boot links rather than its recorded running-kernel metadata.
+
+Kernel ABIs come from the actual guest and its configured APT indexes; no
+suite-specific kernel versions or relaxed verdicts are used. A second signed
+Ubuntu kernel must be obtainable. Payload/network failures fail preparation,
+and are not evidence that rollback itself failed or passed. Existing GRUB
+entries select the alternate kernel; restore scheduling and recovery use the
+product GUI, one-shot entry, initramfs and confirmation service.
+
+These scenarios use the existing **unencrypted** installation base. They do not
+certify repeated LUKS unlocks, password changes, an old package's actual initrd,
+or a complete four-ISO release matrix. Legacy record acceptance is retained;
+real old-package upgrade compatibility and encrypted lifecycle qualification
+remain separate evidence until those journeys are in the executable matrix.
+
 ## ISO acceptance boundary
 
 Each `make test` run judges the supplied ISO against the common matrix in

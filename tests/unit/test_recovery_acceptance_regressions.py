@@ -79,6 +79,7 @@ class AcceptanceRegressionTests(unittest.TestCase):
                 runner.username, runner.password = "tester", "fixture-only"
                 runner.driver = Mock()
                 runner._prepare_power_control = Mock(return_value=Path("unused-key"))
+                runner._armed_recovery_protocol = Mock(return_value=2)
                 seen = []
                 def phase(case, suite, description):
                     dashboard.suite_phase(case, suite, description)
@@ -224,6 +225,7 @@ class AcceptanceRegressionTests(unittest.TestCase):
         runner.options = SimpleNamespace(boot_timeout_seconds=60)
         runner.driver = Mock()
         runner._prepare_power_control = Mock(return_value=Path("control-key"))
+        runner._armed_recovery_protocol = Mock(return_value=2)
         runner._wait_for_power_transition = Mock()
         runner._ssh_eventually = Mock(return_value="tester")
         runner._ssh = Mock(side_effect=lambda _vm, _key, command, **_: (
@@ -384,7 +386,8 @@ class HomeOutcomeTests(unittest.TestCase):
             (self.folder / name).write_text("baseline\n")
         self.store = root / "store"
         (self.store / "rollback-history").mkdir(parents=True)
-        self.record = {"schema_version": 5, "home_only": True, "reset_home": True,
+        self.record = {"schema_version": 5, "recovery_protocol_version": 2,
+            "home_only": True, "reset_home": True,
             "phase": "confirmed", "failure": None, "factory_home_snapshot_id": "target",
             "fallback_home_snapshot_id": "safety"}
         self.history = self.store / "rollback-history/record.json"

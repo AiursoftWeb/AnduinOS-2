@@ -67,10 +67,12 @@ class HomeRecoveryChecks:
         _retrieve_tree(vm.serial, remote, artifacts / "guest-home-evidence")
         if armed.returncode != 0:
             raise TestFailure("Home rollback GUI did not arm recovery:\n" + armed.stdout[-8000:])
+        protocol = self._armed_recovery_protocol(vm, artifacts)
         self._ssh(vm, key, "sudo -n /usr/local/sbin/anduinos-acceptance-reboot")
         self._wait_for_power_transition(vm, key, artifacts, "home-rollback-reboot", timeout=150)
         vm.stop()
         vm.start(attach_iso=False, phase="home-rollback-apply")
+        self._finish_recovery_restart(vm, artifacts, "home-rollback-target", protocol)
         self._ssh_eventually(vm, key, self._graphical_boot_ready_command(),
                              timeout=self.options.boot_timeout_seconds * 2)
         health = self._ssh(vm, key, "sudo -n /usr/local/sbin/anduinos-acceptance-package-health")

@@ -5,10 +5,10 @@ import tempfile
 from contextlib import nullcontext
 
 from .context import *  # noqa: F403
-from framework.grub import boot_iso_with_debug_shell
+from framework.grub import boot_iso_with_debug_shell, _GraphicalGrubMenuEditor
 
 
-def _revert_checkpoint_probe_command() -> str:
+def _revert_checkpoint_probe_command(protocol=2) -> str:
     history_probe = (
         "jq -e '.phase == \"reverted\" and "
         ".checkpoint == \"reverted-recorded\"' "
@@ -17,8 +17,12 @@ def _revert_checkpoint_probe_command() -> str:
     )
     return (
         "set -e; "
-        "sudo -n journalctl -b -t dracut-pre-mount -o cat --no-pager "
-        "| grep -Fx 'SNAPSHOTS-MANAGER-CHECKPOINT reverted-recorded'; "
+        # v3 reboots immediately after recording revert. That initrd never
+        # reaches journald; the durable history is the authoritative evidence.
+        + ("sudo -n journalctl -b -t dracut-pre-mount -o cat --no-pager "
+           "| grep -Fx 'SNAPSHOTS-MANAGER-CHECKPOINT reverted-recorded'; "
+           if protocol == 2 else "")
+        +
         "sudo -n sh -c " + shlex.quote(history_probe) + "; "
         "printf 'reverted-history=verified\\n'"
     )
@@ -49,6 +53,65 @@ def _validate_rescue_pointer_trace(path: Path, *, required=None) -> None:
 
 
 class LifecycleChecks:
+    def _armed_recovery_protocol(self, vm, artifacts):
+        """Read the armed transaction rather than guessing from the ISO suite."""
+        result = vm.serial.run(
+            "cat /.snapshots/anduinos-btrfs-snapshots-manager/"
+            "transactions/pending-rollback.json"
+        )
+        transaction = _json_object(result.stdout)
+        (artifacts / "armed-transaction.json").write_text(
+            json.dumps(transaction, indent=2) + "\n"
+        )
+        protocol = transaction.get("recovery_protocol_version")
+        schema = transaction.get("schema_version")
+        if (transaction.get("phase") != "armed"
+                or (schema, protocol) not in ((4, 2), (5, 2), (6, 2), (7, 3))):
+            raise TestFailure(f"Unsupported armed recovery protocol: {protocol!r}")
+        return protocol
+
+    def _finish_recovery_restart(self, vm, artifacts, phase, protocol):
+        """Observe the product reboot; never manufacture it with QMP reset.
+
+        QEMU's existing -no-reboot makes a guest reset exit cleanly. Restart
+        only after that exit, keeping the same disk, firmware trust and normal
+        GRUB selection. Protocol 2 continues into userspace without this reset.
+        """
+        if protocol == 2:
+            return
+        assert vm.serial is not None
+        with vm.serial.capture_output():
+            status = vm.wait(timeout=self.options.boot_timeout_seconds * 2)
+        if status != 0:
+            raise TestFailure(f"Recovery QEMU exited abnormally: {status}")
+        (artifacts / f"{phase}-product-restart.json").write_text(json.dumps({
+            "protocol": protocol, "qemu_exit_status": status,
+            "host_requested_reset": False, "iso_attached": False,
+        }, indent=2) + "\n")
+        vm.stop()
+        vm.start(attach_iso=False, phase=phase)
+
+    def _mask_confirmation_for_one_boot(self, vm, artifacts, kernel_line):
+        """Fault injection only: retain a target boot at its durable checkpoint."""
+        assert vm.serial is not None and vm.qmp is not None
+        tty = "ttyS0" if vm.config.architecture.value == "amd64" else "ttyAMA0"
+        with vm.serial.capture_output():
+            editor = _GraphicalGrubMenuEditor(vm.qmp, scratch_dir=artifacts)
+            try:
+                editor.wait_for_top_menu(timeout=60)
+                editor.open_editor()
+                for _ in range(kernel_line):
+                    editor.move_editor_cursor_down()
+                editor.move_editor_cursor_to_end()
+                editor.type_text_verified(
+                    f" console={tty},115200 "
+                    "systemd.mask=anduinos-btrfs-snapshots-manager-confirm.service"
+                )
+                vm.screenshot("target-confirmation-masked-once")
+                vm.qmp.send_key("f10", hold_ms=150)
+            finally:
+                editor.close()
+
     def _exercise_rescue_boot_repair(self, vm, base, artifacts):
         self._exercise_rescue_boot(vm, base, artifacts, damage="cache")
 
@@ -670,6 +733,8 @@ class LifecycleChecks:
                 + armed.stdout[-8000:]
             )
 
+        protocol = self._armed_recovery_protocol(vm, artifacts)
+
         # The UI has proved that the exact transaction is armed. Trigger an
         # ordinary systemd reboot through the pre-snapshot, least-privilege
         # control channel; do not boot a debug kernel or manipulate subvolumes.
@@ -697,6 +762,7 @@ class LifecycleChecks:
         )
         vm.stop()
         vm.start(attach_iso=False, phase="rollback-apply")
+        self._finish_recovery_restart(vm, artifacts, "rollback-target", protocol)
         self._ssh_eventually(
             vm,
             key,
@@ -1014,6 +1080,8 @@ class LifecycleChecks:
                 + armed.stdout[-8000:]
             )
 
+        protocol = self._armed_recovery_protocol(vm, artifacts)
+
         if interrupt_after_apply:
             # A normal product boot has no serial console. This fault-only
             # overlay exposes the durable checkpoint and suppresses userspace
@@ -1024,7 +1092,7 @@ class LifecycleChecks:
             fault_command = "python3 -c " + shlex.quote(fault_source)
             fault_arch = shlex.quote(vm.config.architecture.value)
             observation = vm.serial.run(
-                "set -e; " + fault_command + " prepare " + fault_arch
+                "set -e; " + fault_command + " prepare " + fault_arch + f" {protocol}"
                 + "; grub-script-check /boot/grub/grub.cfg", timeout=30)
             (artifacts / "power-loss-instrumentation.txt").write_text(observation.stdout)
 
@@ -1049,8 +1117,14 @@ class LifecycleChecks:
         )
         vm.stop()
         vm.start(attach_iso=False, phase=f"{suite_id}-apply")
+        self._finish_recovery_restart(vm, artifacts, f"{suite_id}-target", protocol)
 
         if interrupt_after_apply:
+            if protocol == 3:
+                self._mask_confirmation_for_one_boot(
+                    vm, artifacts,
+                    int(_last_value(observation.stdout, "target-editor-kernel-line")),
+                )
             assert vm.serial is not None
             vm.serial.wait_for_text(
                 "SNAPSHOTS-MANAGER-CHECKPOINT booted-unconfirmed-recorded",
@@ -1063,17 +1137,20 @@ class LifecycleChecks:
             )
             vm.stop()
             vm.start(attach_iso=False, phase=f"{suite_id}-revert")
+            self._finish_recovery_restart(vm, artifacts, f"{suite_id}-fallback", protocol)
             # The fallback boots its original GRUB entry, which does not have
             # the fault-only serial console argument. Read the exact checkpoint
             # from this boot's durable journal and transaction history instead.
             reverted = self._ssh_eventually(
-                vm, key, _revert_checkpoint_probe_command(),
+                vm, key, _revert_checkpoint_probe_command(protocol),
                 timeout=self.options.boot_timeout_seconds,
             )
             (artifacts / "power-loss-revert-evidence.txt").write_text(reverted)
             restored = self._ssh_eventually(
-                vm, key, "set -e; sudo -n " + fault_command + " restore " + fault_arch
-                + "; sudo -n grub-script-check /boot/grub/grub.cfg",
+                vm, key, "set -e; "
+                + ("sudo -n " + fault_command + " restore " + fault_arch + "; "
+                   if protocol == 2 else "")
+                + "sudo -n grub-script-check /boot/grub/grub.cfg",
                 timeout=self.options.boot_timeout_seconds)
             (artifacts / "power-loss-instrumentation-restored.txt").write_text(restored)
             # The mask was a boot argument, not a permanent unit override.

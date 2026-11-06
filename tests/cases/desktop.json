@@ -71,6 +71,36 @@
       "observation_modes": ["controlled"]
     },
     {
+      "id": "btrfs-cross-kernel-rollback",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": ["storage.btrfs-cross-kernel-rollback"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
+      "id": "btrfs-failed-target-rollback",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": ["storage.btrfs-failed-target-rollback"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
+      "id": "btrfs-default-kernel-rollback",
+      "source_cases": {
+        "amd64": "uefi-sb-online-btrfs",
+        "arm64": "uefi-sb-online-btrfs"
+      },
+      "checks": ["storage.btrfs-default-kernel-rollback"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "btrfs-home-rollback",
       "source_cases": {
         "amd64": "uefi-nosb-online-btrfs-ssh-toggle",
