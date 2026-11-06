@@ -1586,6 +1586,10 @@ class LifecycleChecks:
             # block during the recovery boot.  The dedicated service and key
             # are both captured by the pre-mutation snapshot and discarded
             # with the feature overlay.
+            # An installation with SSH disabled may not have generated host
+            # keys. This is the disposable control channel, not the product's
+            # SSH-enable assertion; initialize its keys before starting it.
+            "ssh-keygen -A\n"
             "systemctl enable --now ssh.service\n",
             timeout=60,
         )
