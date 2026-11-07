@@ -10,6 +10,7 @@ from .input import InputChecks
 from .lifecycle import LifecycleChecks
 from .home_recovery import HomeRecoveryChecks
 from .recovery import RecoveryChecks
+from .rollback import KernelRollbackChecks
 from .session import SessionChecks
 from .shell import ShellChecks
 from .theme import ThemeChecks
@@ -28,6 +29,7 @@ class FeatureSuiteResult:
 
 class FeatureSuiteRunner(
     RecoveryChecks,
+    KernelRollbackChecks,
     AccountChecks,
     PublicApplicationChecks,
     InputChecks,
@@ -47,6 +49,9 @@ class FeatureSuiteRunner(
         "system.kernel-theme-upgrade": "_exercise_kernel_theme_upgrade",
         "system.ordinary-reboot": "_exercise_ordinary_reboot",
         "storage.btrfs-docker-rollback": "_exercise_btrfs_rollback",
+        "storage.btrfs-cross-kernel-rollback": "_exercise_cross_kernel_rollback",
+        "storage.btrfs-failed-target-rollback": "_exercise_failed_target_rollback",
+        "storage.btrfs-default-kernel-rollback": "_exercise_default_kernel_rollback",
         "storage.btrfs-home-rollback": "_exercise_btrfs_home_rollback",
         "storage.rescue-center-offline-restore": "_exercise_rescue_center_offline_restore",
         "boot.rescue-repair": "_exercise_rescue_boot_repair",

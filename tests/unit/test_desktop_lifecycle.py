@@ -11,6 +11,34 @@ from assertions.guest.ui import core as ui_core
 
 
 class DesktopLifecycleOracleTests(FeatureOracleCase):
+    def test_restarted_restore_requires_a_distinct_boot_and_the_target_kernel(self):
+        oracle = runpy.run_path(str(ROOT / "assertions/guest/btrfs_rollback_oracle.py"))
+        validate = oracle["validate_restart"]
+        value = {
+            "schema_version": 7, "recovery_protocol_version": 3, "phase": "confirmed",
+            "applying_boot_id": "11111111-1111-4111-8111-111111111111",
+            "target_boot_id": "22222222-2222-4222-8222-222222222222",
+            "target_kernel_release": os.uname().release,
+        }
+        validate(value)
+        for mutation, error in (
+            ({"target_boot_id": value["applying_boot_id"]}, "apply kernel"),
+            ({"target_boot_id": None}, "target boot ID"),
+            ({"target_kernel_release": "wrong-kernel"}, "running kernel"),
+            ({"recovery_protocol_version": 2}, "disagree"),
+            ({"phase": "booted-unconfirmed"}, "not confirmed"),
+        ):
+            with self.subTest(mutation=mutation), self.assertRaisesRegex(RuntimeError, error):
+                validate(value | mutation)
+
+    def test_legacy_restore_records_retain_their_protocol_two_contract(self):
+        validate = runpy.run_path(str(ROOT / "assertions/guest/btrfs_rollback_oracle.py"))["validate_restart"]
+        for schema in (4, 5, 6):
+            value = {"schema_version": schema, "recovery_protocol_version": 2}
+            validate(value)
+            with self.subTest(schema=schema), self.assertRaisesRegex(RuntimeError, "disagree"):
+                validate(value | {"recovery_protocol_version": 3})
+
     def test_installed_region_waits_for_chinese_shell_registration(self):
         markers = (("menu", "系统"), ("toggle button", "显示应用"))
         with (
@@ -419,6 +447,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
                 (records / f"{index}.json").write_text(json.dumps({
                     "target_deployment_id": "factory", "created_at": str(index),
                     "phase": "confirmed", "failure": None, "reset_home": index == 1, "schema_version": 4,
+                    "recovery_protocol_version": 2,
                 }))
             workload = {"version": "test", "sha256": "checksum", "boot_id": "previous-boot",
                         "factory_root_id": "factory", "personal_snapshot_id": "personal",
@@ -453,6 +482,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             for index in range(2):
                 (records / f"{index}.json").write_text(json.dumps({
                     "schema_version": 5, "target_deployment_id": "factory", "created_at": str(index),
+                    "recovery_protocol_version": 2,
                     "phase": "confirmed", "failure": None, "reset_home": index == 1,
                     "home_only": False, "fallback_home_snapshot_id": "safety" if index else None,
                 }))
@@ -600,7 +630,7 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
         apply = source.index("booted-unconfirmed-recorded")
         cut = source.index("vm.stop()", apply)
         restart = source.index("vm.start", cut)
-        reverted = source.index("_revert_checkpoint_probe_command()", restart)
+        reverted = source.index("_revert_checkpoint_probe_command(protocol)", restart)
         self.assertLess(apply, cut)
         self.assertLess(cut, restart)
         self.assertLess(restart, reverted)

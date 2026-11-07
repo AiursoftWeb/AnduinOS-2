@@ -33,6 +33,28 @@ def require(condition: bool, message: str) -> None:
         raise OracleFailure(message)
 
 
+def validate_restart(transaction: dict[str, Any]) -> None:
+    """A confirmed v7 restore must have crossed a real kernel boot boundary.
+
+    Older records deliberately retain their protocol-2 semantics. Do not infer
+    the protocol from the package version: restored roots can contain older
+    packages, and the frozen confirmation engine owns this transaction.
+    """
+    schema = transaction.get("schema_version")
+    protocol = transaction.get("recovery_protocol_version")
+    require(schema in (4, 5, 6, 7), "unsupported rollback history schema")
+    require(protocol == (3 if schema == 7 else 2),
+            "rollback history schema and recovery protocol disagree")
+    if schema != 7:
+        return
+    applying = canonical_uuid(transaction.get("applying_boot_id"), "apply boot ID")
+    target = canonical_uuid(transaction.get("target_boot_id"), "target boot ID")
+    require(applying != target, "restored userspace ran in the apply kernel's boot")
+    require(transaction.get("phase") == "confirmed", "restarted restore is not confirmed")
+    require(transaction.get("target_kernel_release") == os.uname().release,
+            "running kernel differs from the restored target's default kernel")
+
+
 def canonical_uuid(value: Any, label: str) -> str:
     require(isinstance(value, str), f"{label} is not a string")
     try:
@@ -152,14 +174,14 @@ def validate(
     require(len(histories) == 1,
             f"expected one rollback history for {expected_target}, found {len(histories)}")
     transaction = histories[0]
-    require(transaction.get("schema_version") in (4, 5, 6),
+    require(transaction.get("schema_version") in (4, 5, 6, 7),
             f"rollback history schema is unsupported: {transaction.get('schema_version')!r}")
     require(transaction.get("reset_home") is False,
             "ordinary rollback must not reset Home")
-    if transaction["schema_version"] == 6:
+    if transaction["schema_version"] >= 6:
         require(transaction.get("purge_history") is False,
                 "ordinary rollback must not purge snapshot history")
-    if transaction["schema_version"] in (5, 6):
+    if transaction["schema_version"] >= 5:
         require(transaction.get("home_only") is False
                 and "fallback_home_snapshot_id" in transaction
                 and transaction["fallback_home_snapshot_id"] is None,
@@ -171,8 +193,7 @@ def validate(
             "ordinary rollback must not select a factory Home snapshot")
     require(transaction.get("phase") == "confirmed", "rollback history is not confirmed")
     require(transaction.get("failure") is None, "rollback history records a failure")
-    require(transaction.get("recovery_protocol_version") == 2,
-            "rollback recovery protocol is unsupported")
+    validate_restart(transaction)
     target = canonical_uuid(transaction.get("target_deployment_id"), "history target deployment")
     fallback = canonical_uuid(
         transaction.get("fallback_deployment_id"), "history fallback deployment"

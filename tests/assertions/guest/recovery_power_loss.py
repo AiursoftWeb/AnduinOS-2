@@ -1,6 +1,7 @@
 """Reversible observation/fault injection for the disposable recovery VM only."""
 
 import os
+import json
 from pathlib import Path
 import re
 import sys
@@ -31,7 +32,22 @@ def instrument(text, architecture, *, restore=False):
 
 
 def main():
-    mode, architecture = sys.argv[1:]
+    mode, architecture, *version = sys.argv[1:]
+    if version == ["3"]:
+        # v3 completes apply and reboots before userspace. Its target GRUB file
+        # comes from the immutable snapshot, not the current root. Read that
+        # entry so the host can add a one-boot mask in the actual menu editor;
+        # never modify the snapshot or leave a persistent unit mask behind.
+        pending = Path("/.snapshots/anduinos-btrfs-snapshots-manager/transactions/pending-rollback.json")
+        transaction = json.loads(pending.read_text())
+        identifier = transaction["target_deployment_id"]
+        config = pending.parents[1] / "deployments" / identifier / "root/boot/grub/grub.cfg"
+        lines = config.read_text().splitlines()
+        start = next(i for i, line in enumerate(lines) if line.startswith("menuentry "))
+        linux = next(i for i in range(start + 1, len(lines))
+                     if re.match(r"\s*linux\s", lines[i]))
+        print(f"target-editor-kernel-line={linux - start}")
+        return
     if mode not in ("prepare", "restore"):
         raise ValueError("Unknown instrumentation mode")
     config = Path("/boot/grub/grub.cfg")
