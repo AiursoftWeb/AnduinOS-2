@@ -297,6 +297,24 @@ def confirm_supported_disk_capacity(
     )
 
 
+def confirm_unencrypted_installation(evidence: Path) -> None:
+    """Follow the optional blank-password warning without changing the layout."""
+
+    # Older installers and layouts without encryption proceed straight to the
+    # account page. Observe the actual UI rather than assuming a package/suite
+    # version or automatically dismissing an unrelated modal dialog.
+    next_step = find_candidates(
+        aliases("user") + aliases("unencrypted_installation_warning"),
+        label="user page or unencrypted-installation confirmation",
+    )
+    if matches(next_step, aliases("unencrypted_installation_warning")):
+        dump_accessibility(evidence / "unencrypted-installation-warning.txt")
+        request_dialog_focused_activation(
+            "disk_encryption", "continue", "confirm-unencrypted-installation",
+        )
+        event("unencrypted-installation-confirmed")
+
+
 def configure_manual_small_disk(config: dict[str, object], evidence: Path) -> None:
     """Exercise the intentionally undisclosed expert escape hatch on 23 GiB."""
     assert_toggle("btrfs", sensitive=False, active=False)
@@ -606,6 +624,7 @@ def install(config: dict[str, object], evidence: Path) -> None:
         confirm_supported_disk_capacity(config, evidence)
         assert_automatic_disk_layout(config, evidence)
         click("next")
+        confirm_unencrypted_installation(evidence)
         wait_page("user")
     set_text("full_name", str(config["full_name"]))
     set_text("username", str(config["username"]))

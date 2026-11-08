@@ -82,6 +82,13 @@ ALIASES = {
         "Configure storage and swap",
         "配置存储和交换空间",
     ),
+    "disk_encryption": ("Disk encryption", "磁盘加密"),
+    "unencrypted_installation_warning": (
+        "Anyone with physical access to this computer will be able to access "
+        "your data. Set a disk password to protect your data.",
+        "任何能物理接触到电脑的人都将可以访问你的数据。"
+        "建议设置硬盘密码以保护数据。",
+    ),
     "recommended_swap": (
         "✓ Best performance — AnduinOS recommended Swap size.",
         "✓ 最佳性能 — AnduinOS 建议的交换空间大小。",
