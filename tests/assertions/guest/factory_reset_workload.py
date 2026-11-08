@@ -10,10 +10,11 @@ import shutil
 import subprocess
 import sys
 
-# This workload is also invoked with python -c. The existing power-control
-# setup installs the common read-only oracle before any snapshot is created.
-sys.path.insert(0, str(Path(__file__).parent) if "__file__" in globals()
-                else "/usr/local/lib/anduinos-acceptance")
+# Direct execution imports the sibling oracle. For python -c, the controller
+# supplies this boot's /run fixture through PYTHONPATH: a factory restore must
+# not depend on test helpers surviving in the restored root or Home.
+if "__file__" in globals():
+    sys.path.insert(0, str(Path(__file__).parent))
 from btrfs_rollback_oracle import validate_restart
 
 
