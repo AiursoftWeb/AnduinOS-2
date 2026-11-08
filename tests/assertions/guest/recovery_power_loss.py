@@ -46,7 +46,11 @@ def main():
         start = next(i for i, line in enumerate(lines) if line.startswith("menuentry "))
         linux = next(i for i in range(start + 1, len(lines))
                      if re.match(r"\s*linux\s", lines[i]))
-        print(f"target-editor-kernel-line={linux - start}")
+        # GRUB prepends setparams to the entry body in its editor. The body
+        # still starts with the newline after the opening brace, so its linux
+        # command is one Down beyond the offset in grub.cfg. Without this,
+        # the one-boot fault parameters are appended to search, not linux.
+        print(f"target-editor-kernel-line={linux - start + 1}")
         return
     if mode not in ("prepare", "restore"):
         raise ValueError("Unknown instrumentation mode")

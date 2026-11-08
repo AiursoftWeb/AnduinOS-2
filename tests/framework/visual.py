@@ -299,19 +299,48 @@ def _hyperfluent_menu_layout(width: int, height: int, rgb: bytes) -> GrubMenuLay
 def _hyperfluent_editor_layout(width: int, height: int, rgb: bytes) -> GrubEditorLayout | None:
     """Recognize GRUB's editor overlay, whether centered or left-anchored."""
 
-    border_rows: list[tuple[int, int, int]] = []
+    gray_rows: list[tuple[int, int, int]] = []
+    blue_rows: list[tuple[int, int, int]] = []
     # At 1440x900 the left-anchored editor's lower border is near 76% of the
     # screen. The previous 75% cutoff saw only the upper border.
     for y in range(height // 4, height * 83 // 100):
-        pixels: list[int] = []
+        gray_pixels: list[int] = []
+        blue_pixels: list[int] = []
         for x in range(width // 40, width - width // 40):
             offset = (y * width + x) * 3
             red, green, blue = rgb[offset : offset + 3]
-            if min(red, green, blue) >= 145 and max(red, green, blue) - min(red, green, blue) <= 20:
-                pixels.append(x)
-        if len(pixels) >= width * 2 // 5:
-            border_rows.append((y, pixels[0], pixels[-1]))
+            gray = (
+                min(red, green, blue) >= 145
+                and max(red, green, blue) - min(red, green, blue) <= 20
+            )
+            # Installed GRUB can use its blue terminal palette for the editor
+            # instead of the Live menu's gray. The complete frame geometry
+            # and command rows below still distinguish it from menu artwork.
+            blue_border = blue >= 150 and red <= 65 and green <= 110
+            if gray:
+                gray_pixels.append(x)
+            if blue_border:
+                blue_pixels.append(x)
+        if len(gray_pixels) >= width * 2 // 5:
+            gray_rows.append((y, gray_pixels[0], gray_pixels[-1]))
+        if blue_pixels:
+            # The wallpaper is blue too. Require one continuous box edge,
+            # rather than extending its bounds to unrelated artwork pixels.
+            left, right = max(
+                _integer_bands(blue_pixels, maximum_gap=0),
+                key=lambda band: band[1] - band[0],
+            )
+            if right - left + 1 >= width * 2 // 5:
+                blue_rows.append((y, left, right))
+    # Keep palette candidates separate: mixing gray edges with blue artwork
+    # can reject an otherwise complete gray editor. Prefer the original path.
+    border_rows = gray_rows
     border_bands = _integer_bands([row[0] for row in border_rows], maximum_gap=0)
+    # GRUB's blue box has two strokes separated by two raster rows. Treat
+    # those strokes as one edge, while keeping the top and bottom distinct.
+    if len(border_bands) != 2:
+        border_rows = blue_rows
+        border_bands = _integer_bands([row[0] for row in border_rows], maximum_gap=2)
     if len(border_bands) != 2:
         return None
     top, bottom = border_bands[0][0], border_bands[1][1]

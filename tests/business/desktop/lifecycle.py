@@ -8,6 +8,27 @@ from .context import *  # noqa: F403
 from framework.grub import boot_iso_with_debug_shell, _GraphicalGrubMenuEditor
 
 
+def _unconfirmed_checkpoint_probe_command() -> str:
+    # The v3 target boots its normal initrd: dracut's checkpoint reaches this
+    # boot's journal, but is not guaranteed to be forwarded to the UART.
+    # Require both the exact journal event and the durable transaction for
+    # this boot before cutting power. Confirmation remains masked meanwhile.
+    transaction = "/.snapshots/anduinos-btrfs-snapshots-manager/transactions/pending-rollback.json"
+    return (
+        "set -e; "
+        "sudo -n journalctl -b -t dracut-pre-mount -o cat --no-pager "
+        "| grep -Fx 'SNAPSHOTS-MANAGER-CHECKPOINT booted-unconfirmed-recorded'; "
+        "sudo -n jq -e --arg boot \"$(cat /proc/sys/kernel/random/boot_id)\" "
+        + shlex.quote(
+            '.phase == "booted-unconfirmed" and '
+            '.checkpoint == "booted-unconfirmed-recorded" and .target_boot_id == $boot'
+        ) + " " + shlex.quote(transaction) + " >/dev/null; "
+        "test \"$(systemctl show anduinos-btrfs-snapshots-manager-confirm.service "
+        "-p LoadState --value)\" = masked; "
+        "printf 'unconfirmed-current-boot=verified\\n'"
+    )
+
+
 def _revert_checkpoint_probe_command(protocol=2) -> str:
     history_probe = (
         "jq -e '.phase == \"reverted\" and "
@@ -1129,13 +1150,19 @@ class LifecycleChecks:
                     vm, artifacts,
                     int(_last_value(observation.stdout, "target-editor-kernel-line")),
                 )
-            assert vm.serial is not None
-            vm.serial.wait_for_text(
-                "SNAPSHOTS-MANAGER-CHECKPOINT booted-unconfirmed-recorded",
-                timeout=self.options.boot_timeout_seconds,
-            )
+                checkpoint = self._ssh_password_eventually(
+                    vm, _unconfirmed_checkpoint_probe_command(),
+                    timeout=self.options.boot_timeout_seconds,
+                )
+                (artifacts / "power-loss-unconfirmed-evidence.txt").write_text(checkpoint)
+            else:
+                assert vm.serial is not None
+                vm.serial.wait_for_text(
+                    "SNAPSHOTS-MANAGER-CHECKPOINT booted-unconfirmed-recorded",
+                    timeout=self.options.boot_timeout_seconds,
+                )
             (artifacts / "factory-reset-power-loss.txt").write_text(
-                "QEMU stopped immediately after the durable "
+                "QEMU stopped after verifying the durable "
                 "booted-unconfirmed-recorded checkpoint.\n",
                 encoding="utf-8",
             )
