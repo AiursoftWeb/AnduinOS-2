@@ -984,7 +984,8 @@ class LifecycleChecks:
             / "assertions/guest/factory_reset_workload.py"
         ).read_text(encoding="utf-8") if workloads is not None else ""
         mutation = (
-            "python3 -c " + shlex.quote(workload_source)
+            "PYTHONPATH=" + shlex.quote(remote) + " python3 -c "
+            + shlex.quote(workload_source)
             + " prepare --home " + shlex.quote(home_sentinel + ".d")
             + ' --factory-root "$root_factory"\n'
             if workloads is not None else ""
@@ -1243,7 +1244,17 @@ class LifecycleChecks:
             )
             # History browsing requires the real active local user, not the
             # remote control session used to check boot/recovery health.
-            verify = "sudo -n python3 -c " + shlex.quote(workload_source)
+            # Factory recovery correctly removes helpers added to /usr/local
+            # after the factory snapshot. Refresh only the read-only observer
+            # in this boot's /run, after product health has already passed.
+            vm.serial.run(f"install -d -m 0755 {shlex.quote(remote)}")
+            vm.serial.upload(
+                self.btrfs_rollback_oracle,
+                f"{remote}/btrfs_rollback_oracle.py",
+                0o644,
+            )
+            verify = ("sudo -n env PYTHONPATH=" + shlex.quote(remote)
+                      + " python3 -c " + shlex.quote(workload_source))
             verify += " verify --workloads " + shlex.quote(json.dumps(workloads))
             if erase_home:
                 verify += " --erase-home"
