@@ -6,6 +6,43 @@ from contextlib import nullcontext
 from unit.support import *  # noqa: F403
 
 
+class InstalledTestMirrorTests(unittest.TestCase):
+    def test_only_online_cases_prepare_the_mirror_after_product_contracts(self):
+        matrix = TestMatrix.load(ROOT / "cases/install.json")
+        for scenario in matrix.scenarios:
+            with self.subTest(case=scenario.id):
+                checks = scenario_check_ids(scenario)
+                if scenario.network is Network.OFFLINE:
+                    self.assertNotIn("apt.test-mirror", checks)
+                else:
+                    self.assertLess(
+                        checks.index("factory-recovery-baselines"),
+                        checks.index("apt.test-mirror"),
+                    )
+                    self.assertLess(
+                        checks.index("apt.test-mirror"),
+                        checks.index("regional.installed-zh-cn"),
+                    )
+
+    def test_failed_refresh_preserves_output_and_fails_preparation(self):
+        result = SimpleNamespace(returncode=100, stdout="APT refresh failed\n")
+        console = SimpleNamespace(run=lambda *args, **kwargs: result)
+        runner = object.__new__(ScenarioRunner)
+        runner.status = lambda *args: None
+        with tempfile.TemporaryDirectory() as directory:
+            artifacts = Path(directory)
+            with self.assertRaisesRegex(TestFailure, "mirror preparation failed"):
+                runner._prepare_installed_test_mirror(
+                    SimpleNamespace(serial=console),
+                    SimpleNamespace(id="online"),
+                    artifacts,
+                )
+            self.assertIn(
+                result.stdout,
+                (artifacts / "installed-test-mirror.txt").read_text(),
+            )
+
+
 class SystemReleaseContractTests(unittest.TestCase):
     def test_media_contract_is_independent_of_suite_and_architecture(self):
         from framework.iso import _parse_release
