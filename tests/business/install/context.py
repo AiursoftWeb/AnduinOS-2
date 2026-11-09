@@ -79,7 +79,8 @@ def scenario_check_ids(scenario: Scenario) -> tuple[str, ...]:
     )
     installed_index = checks.index("installed-contracts") + 1
     checks[installed_index:installed_index] = RELEASE_CONTRACT_CHECKS
-    if scenario.network is not Network.OFFLINE:
+    # The Wi-Fi lab verifies local connectivity without DNS or Internet access.
+    if scenario.network is Network.ONLINE:
         checks.insert(checks.index("factory-recovery-baselines") + 1, "apt.test-mirror")
     if scenario.mok_enrollment:
         checks.append("secure-boot.first-boot-green")
