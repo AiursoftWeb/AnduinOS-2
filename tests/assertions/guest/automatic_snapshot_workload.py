@@ -61,6 +61,10 @@ def activate():
 def exercise_pair(policy, label, evidence, *, paused):
     """Use the real oneshot twice; never mask it or replace its executable."""
     save_policy(policy)
+    # Each policy scenario has its own activation burst. Clear systemd's
+    # accumulated start counter between scenarios, never between the pair.
+    # Otherwise six independent probes hit StartLimitBurst before recovery.
+    run("systemctl", "reset-failed", SERVICE)
     run("systemctl", "restart", HELPER)
     before = snapshot_ids()
     first = activate()
