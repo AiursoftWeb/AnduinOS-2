@@ -470,6 +470,9 @@ fi
                 "Verifying installed factory recovery baselines",
             )
             assert_factory_recovery_contract(vm.serial, scenario, artifacts)
+        if scenario.network is not Network.OFFLINE:
+            with self._check(scenario, "apt.test-mirror"):
+                self._prepare_installed_test_mirror(vm, scenario, artifacts)
         desktop_failures: list[str] = []
         with self._check(scenario, _passwordless_sudo_check_id(scenario)):
             self.status(
@@ -661,6 +664,49 @@ fi
             # debug command line needed by later feature overlays. Only after
             # that gate passes, use Live to prepare the now-stopped base.
             self._prepare_feature_base_after_passive(vm, scenario, artifacts)
+
+    def _prepare_installed_test_mirror(self, vm, scenario, artifacts):
+        """Normalize online test inputs after checking the installer's output."""
+
+        self.status(scenario.id, "Preparing the installed-system test APT mirror")
+        assert vm.serial is not None
+        # Third-party mirrors can serve valid indexes but reject package GETs.
+        # Keep the real installer/source contracts above, then use our mirror
+        # for subsequent online workloads and the immutable feature base.
+        # Only Ubuntu URIs change: suites, components, keys and add-on sources
+        # still come from the tested ISO. Offline cases never enter this step.
+        result = vm.serial.run(
+            r"""
+set -euo pipefail
+python3 - <<'MIRROR'
+from pathlib import Path
+import re
+
+source = Path('/etc/apt/sources.list.d/ubuntu.sources')
+before = source.read_text()
+after, count = re.subn(
+    r'(?m)^URIs:[^\n]*(?:\n[ \t]+[^\n]+)*',
+    'URIs: https://mirror.aiursoft.com/ubuntu/', before,
+)
+if count == 0:
+    raise RuntimeError('Ubuntu source has no URIs field')
+print('--- Installer Ubuntu source ---\n' + before)
+source.write_text(after)
+print('--- Test Ubuntu source ---\n' + after)
+MIRROR
+apt-get -o APT::Update::Error-Mode=any update
+""",
+            timeout=180,
+            check=False,
+        )
+        (artifacts / "installed-test-mirror.txt").write_text(
+            result.stdout + "\n", encoding="utf-8"
+        )
+        if result.returncode:
+            raise TestFailure(
+                "Installed test mirror preparation failed; "
+                "inspect installed-test-mirror.txt"
+            )
 
     def _prepare_feature_base_after_passive(self, vm, scenario, artifacts):
         self.status(scenario.id, "Preparing feature control after unmodified boot checks")
