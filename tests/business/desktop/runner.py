@@ -43,6 +43,7 @@ class FeatureSuiteRunner(
     """Run a declared suite without ever mutating its verified base image."""
 
     IMPLEMENTATION_METHODS = {
+        "storage.automatic-snapshot-timer": "_exercise_automatic_snapshot_timer",
         "storage.recovery-kernel-rollback": "_exercise_recovery_kernel_rollback",
         "voice.install-login-calibration-cache": "_exercise_voice_typing",
         "input.super-space-rime": "_exercise_rime_input",
