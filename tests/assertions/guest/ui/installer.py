@@ -315,6 +315,24 @@ def confirm_unencrypted_installation(evidence: Path) -> None:
         event("unencrypted-installation-confirmed")
 
 
+def confirm_manual_partition_notice(evidence: Path) -> None:
+    """Acknowledge the known advisory before the separate destructive dialog."""
+
+    # Older installers go straight to manual-layout confirmation. Observe the
+    # actual modal; never press Return in an unknown dialog or skip confirmation.
+    next_dialog = find_candidates(
+        aliases("manual_layout_confirmation") + aliases("optional_partition_review"),
+        label="manual-layout confirmation or optional-partition review",
+    )
+    if matches(next_dialog, aliases("optional_partition_review")):
+        dump_accessibility(evidence / "manual-optional-partitions.txt")
+        request_dialog_focused_activation(
+            "optional_partition_review", "continue_optional_partitions",
+            "confirm-manual-optional-partitions",
+        )
+        event("manual-optional-partitions-confirmed")
+
+
 def configure_manual_small_disk(config: dict[str, object], evidence: Path) -> None:
     """Exercise the intentionally undisclosed expert escape hatch on 23 GiB."""
     assert_toggle("btrfs", sensitive=False, active=False)
@@ -654,6 +672,8 @@ def install(config: dict[str, object], evidence: Path) -> None:
         or str(config.get("storage_mode", "")).startswith("coexistence-")
         else "erase_disk_confirmation"
     )
+    if confirmation_dialog == "manual_layout_confirmation":
+        confirm_manual_partition_notice(evidence)
     request_dialog_focused_activation(
         confirmation_dialog,
         "confirm",
