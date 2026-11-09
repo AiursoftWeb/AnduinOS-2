@@ -142,8 +142,9 @@ remain separate evidence until those journeys are in the executable matrix.
 `automatic-snapshot-timer` uses an independent overlay of the offline Btrfs
 installation on both architectures. It starts the actual automatic-snapshot
 oneshot twice in succession, first under a deliberately higher free-space floor
-and then with that additional floor disabled. Normal runs must succeed without
-duplicate snapshots. The same journey checks that invalid automation policy
+and then with that additional floor disabled. On the fresh factory-only base,
+the first healthy run must create one System and one Home snapshot; the second
+must add neither. The same journey checks that invalid automation policy
 still fails and that interactive snapshot throttling remains active. Policy and
 timer state are restored; the deliberately invalid-policy phase is recorded
 separately from normal timer activations, without a journal-policy waiver.

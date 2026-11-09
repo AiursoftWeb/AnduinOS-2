@@ -79,8 +79,11 @@ def exercise_pair(policy, label, evidence, *, paused):
     for scope in before:
         require(set(before[scope]) <= set(after_first[scope]),
                 f"{label}: existing {scope} history was removed")
-        require(len(set(after_first[scope]) - set(before[scope])) <= 1,
-                f"{label}: one activation created duplicate {scope} snapshots")
+        created = len(set(after_first[scope]) - set(before[scope]))
+        # The fresh install has only factory baselines, which do not satisfy
+        # scheduled freshness. A permanently disabled scheduler must not pass.
+        require(created == (0 if paused else 1),
+                f"{label}: expected {'no' if paused else 'one'} new {scope} snapshot, got {created}")
     require(after_second == after_first, f"{label}: repeated activation added snapshots")
     if paused:
         require(after_first == before, "Low-space policy still created a snapshot")
