@@ -470,7 +470,7 @@ fi
                 "Verifying installed factory recovery baselines",
             )
             assert_factory_recovery_contract(vm.serial, scenario, artifacts)
-        if scenario.network is not Network.OFFLINE:
+        if scenario.network is Network.ONLINE:
             with self._check(scenario, "apt.test-mirror"):
                 self._prepare_installed_test_mirror(vm, scenario, artifacts)
         desktop_failures: list[str] = []

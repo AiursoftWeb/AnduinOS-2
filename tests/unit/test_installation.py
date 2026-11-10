@@ -12,7 +12,7 @@ class InstalledTestMirrorTests(unittest.TestCase):
         for scenario in matrix.scenarios:
             with self.subTest(case=scenario.id):
                 checks = scenario_check_ids(scenario)
-                if scenario.network is Network.OFFLINE:
+                if scenario.network is not Network.ONLINE:
                     self.assertNotIn("apt.test-mirror", checks)
                 else:
                     self.assertLess(

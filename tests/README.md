@@ -196,17 +196,19 @@ tests/
 
 The JSON files under `cases/` are the executable inventory. Declared checks without implementations fail unit tests. Every selected installation and suite must produce a verdict.
 
-Online installations retain the installer's real mirror selection and original
-installed-system checks. After those contracts and the factory baselines pass,
+Internet-connected (`Network.ONLINE`) installations retain the installer's real
+mirror selection and original installed-system checks. After those contracts and the factory baselines pass,
 `apt.test-mirror` replaces only Ubuntu's `URIs` in `ubuntu.sources` with
 `https://mirror.aiursoft.com/ubuntu/` and requires a successful signed APT index
 refresh. Suites, components, signing keys and AnduinOS sources stay unchanged.
 Subsequent online workloads inherit this test setup through their immutable
 installation base; it is not a product default. The original and test sources
 and refresh output are retained in `installed-test-mirror.txt`. Setup failures
-fail the case and block its dependent suites. Offline installations and offline
-recovery workloads remain offline; restoring a factory snapshot still restores
-the product's original source configuration.
+fail the case and block its dependent suites. The local-only Wi-Fi lab provides
+neither DNS nor an Internet gateway, so it does not run this APT refresh; its
+connection and installed-profile migration checks remain unchanged.
+Offline installations and offline recovery workloads remain offline; restoring
+a factory snapshot still restores the product's original source configuration.
 
 Test outcomes, not incidental UI timing or source layout. A VM is paused until
 its control channels are ready; GRUB input is acknowledged by observed menu
