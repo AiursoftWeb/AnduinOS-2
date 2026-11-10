@@ -101,9 +101,6 @@ ALSA/PipeWire fallback can block the client's main loop and stop display events.
 The null device isolates these silent observers from host audio hardware without
 changing the host configuration or guest system. Real SPICE resizing, Mutter
 resolution readback, cursor movement and their existing deadlines remain required.
-Each changed guest mode must be observed twice consecutively before the next
-resize gesture. This lets the viewer finish reacting to the first desktop change
-instead of overwriting the next window request with its pending resize callback.
 
 ## Restarting snapshot recovery
 
