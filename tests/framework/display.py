@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -70,6 +71,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._xvfb_log,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
             preexec_fn=parent_death_preexec(),
         )
         display_number = self.display.removeprefix(":")
@@ -105,6 +107,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._viewer_log,
             stderr=subprocess.STDOUT,
+            start_new_session=True,
             preexec_fn=parent_death_preexec(),
         )
         deadline = time.monotonic() + 30
@@ -157,14 +160,25 @@ class SpiceDisplayController:
 
     def stop(self) -> None:
         for process in (self.viewer, self.xvfb):
-            if process is None or process.poll() is not None:
+            if process is None:
                 continue
-            process.terminate()
+            # Killing dbus-run-session alone orphans its bus and activated
+            # services. Each client owns a process group; reap its helpers even
+            # if the launcher has already exited.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+                pass
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.wait(timeout=5)
         self.viewer = None
         self.xvfb = None
         for stream_name in ("_viewer_log", "_xvfb_log"):

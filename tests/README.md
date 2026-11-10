@@ -101,6 +101,9 @@ ALSA/PipeWire fallback can block the client's main loop and stop display events.
 The null device isolates these silent observers from host audio hardware without
 changing the host configuration or guest system. Real SPICE resizing, Mutter
 resolution readback, cursor movement and their existing deadlines remain required.
+The external viewer and its X server own separate process groups. Teardown stops
+the whole group, including D-Bus-activated helpers, so repeated clients do not
+exhaust the host's system-bus connection limit.
 
 ## Restarting snapshot recovery
 
