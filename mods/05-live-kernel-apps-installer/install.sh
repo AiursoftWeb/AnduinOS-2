@@ -40,6 +40,7 @@ apt install -y \
     anduinos-live-layers \
     anduinos-desktop \
     anduinos-desktop-apps \
+    malcontent \
     anduinos-gnome-extensions \
     anduinos-appstore \
     anduinos-theme \
