@@ -206,6 +206,13 @@ tests/
 
 The JSON files under `cases/` are the executable inventory. Declared checks without implementations fail unit tests. Every selected installation and suite must produce a verdict.
 
+Manual-installation journeys acknowledge the known, localized optional-partition
+advisory before the separate destructive layout confirmation. Installers that
+present the destructive dialog directly remain supported. Both dialogs are
+activated through verified keyboard focus inside the exact named modal; all
+shared-ESP rejection, partition-preservation and final boot assertions remain
+mandatory.
+
 Internet-connected (`Network.ONLINE`) installations retain the installer's real
 mirror selection and original installed-system checks. After those contracts and the factory baselines pass,
 `apt.test-mirror` replaces only Ubuntu's `URIs` in `ubuntu.sources` with

@@ -107,6 +107,8 @@ ALIASES = {
         "Apply this manual disk layout?",
         "应用此手动磁盘布局？",
     ),
+    "optional_partition_review": ("Review optional partitions", "查看可选分区"),
+    "continue_optional_partitions": ("Force continue", "强制继续"),
     "erase_disk_confirmation": (
         "Erase the entire selected disk?",
         "要擦除整个所选磁盘吗？",
