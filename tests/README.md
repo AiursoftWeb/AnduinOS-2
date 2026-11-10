@@ -105,6 +105,9 @@ The external viewer and its X server own separate process groups inside the
 worker's private Unix session. Teardown stops the whole group, including
 D-Bus-activated helpers, so repeated clients do not exhaust the host's system-bus
 connection limit. The supervisor also cleans these groups after a worker crash.
+Each changed guest mode must be observed twice consecutively before the next
+resize gesture. This lets the viewer finish reacting to the first desktop change
+instead of overwriting the next window request with its pending resize callback.
 
 ## Restarting snapshot recovery
 
