@@ -71,7 +71,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._xvfb_log,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            process_group=0,
             preexec_fn=parent_death_preexec(),
         )
         display_number = self.display.removeprefix(":")
@@ -107,7 +107,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._viewer_log,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
+            process_group=0,
             preexec_fn=parent_death_preexec(),
         )
         deadline = time.monotonic() + 30
