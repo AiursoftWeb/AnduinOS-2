@@ -255,20 +255,39 @@ def _terminate_process_group(worker: subprocess.Popen) -> None:
 
 
 def _signal_group(process_group: int, requested: signal.Signals) -> None:
-    try:
-        os.killpg(process_group, requested)
-    except ProcessLookupError:
-        pass
+    for group in _worker_process_groups(process_group):
+        try:
+            os.killpg(group, requested)
+        except ProcessLookupError:
+            pass
 
 
 def _group_exists(process_group: int) -> bool:
-    try:
-        os.killpg(process_group, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
+    for group in _worker_process_groups(process_group):
+        try:
+            os.killpg(group, 0)
+        except ProcessLookupError:
+            continue
+        except PermissionError:
+            return True
         return True
-    return True
+    return False
+
+
+def _worker_process_groups(session: int) -> set[int]:
+    """Include isolated client groups in the worker's private Unix session."""
+    # The worker is launched with start_new_session=True. Clients may isolate
+    # their process groups for local teardown, but must retain that session so
+    # the supervisor can still clean their helpers after a worker/native crash.
+    groups = {session}
+    for status in Path("/proc").glob("[0-9]*/stat"):
+        try:
+            fields = status.read_text().rsplit(") ", 1)[1].split()
+            if int(fields[3]) == session:
+                groups.add(int(fields[2]))
+        except (OSError, IndexError, ValueError):
+            continue
+    return groups
 
 
 def _cleanup_persistent_disks(root: Path, preexisting: bool) -> None:

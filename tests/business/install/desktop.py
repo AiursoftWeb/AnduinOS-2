@@ -225,6 +225,7 @@ class DesktopIntegrationChecks:
         assert vm.serial is not None
         deadline = time.monotonic() + 45
         last = ""
+        changed_mode: tuple[int, int] | None = None
         while time.monotonic() < deadline:
             result = vm.serial.run(
                 _desktop_command(
@@ -238,8 +239,16 @@ class DesktopIntegrationChecks:
             match = re.search(r"Current mode.*?([0-9]{3,5})x([0-9]{3,5})@", last, re.DOTALL)
             if result.returncode == 0 and match is not None:
                 mode = (int(match.group(1)), int(match.group(2)))
-                if previous is None or mode != previous:
+                if previous is None:
                     return mode, last
+                # The client's desktop-resize callback also resizes its window.
+                # Let the first change settle before issuing the next gesture,
+                # otherwise that callback can overwrite the second window size.
+                if mode != previous and mode == changed_mode:
+                    return mode, last
+                changed_mode = mode if mode != previous else None
+            else:
+                changed_mode = None
             time.sleep(1)
         raise TestFailure(
             "Mutter did not report a changed current mode after SPICE resize:\n"
