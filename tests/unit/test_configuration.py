@@ -233,6 +233,7 @@ class MatrixTests(unittest.TestCase):
         )
         self.assertEqual(
             (
+                "automatic-snapshot-timer",
                 "voice-typing",
                 "input-and-appearance",
                 "system-lifecycle",

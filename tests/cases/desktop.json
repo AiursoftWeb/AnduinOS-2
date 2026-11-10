@@ -2,6 +2,16 @@
   "schema_version": 1,
   "suites": [
     {
+      "id": "automatic-snapshot-timer",
+      "source_cases": {
+        "amd64": "uefi-nosb-offline-btrfs",
+        "arm64": "uefi-nosb-offline-btrfs"
+      },
+      "checks": ["storage.automatic-snapshot-timer"],
+      "isolation": "overlay",
+      "observation_modes": ["controlled"]
+    },
+    {
       "id": "voice-typing",
       "source_cases": {
         "amd64": "uefi-nosb-online-btrfs-ssh-toggle",

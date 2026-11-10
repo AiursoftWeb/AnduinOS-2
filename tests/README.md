@@ -139,6 +139,16 @@ or a complete four-ISO release matrix. Legacy record acceptance is retained;
 real old-package upgrade compatibility and encrypted lifecycle qualification
 remain separate evidence until those journeys are in the executable matrix.
 
+`automatic-snapshot-timer` uses an independent overlay of the offline Btrfs
+installation on both architectures. It starts the actual automatic-snapshot
+oneshot twice in succession, first under a deliberately higher free-space floor
+and then with that additional floor disabled. On the fresh factory-only base,
+the first healthy run must create one System and one Home snapshot; the second
+must add neither. The same journey checks that invalid automation policy
+still fails and that interactive snapshot throttling remains active. Policy and
+timer state are restored; the deliberately invalid-policy phase is recorded
+separately from normal timer activations, without a journal-policy waiver.
+
 ## ISO acceptance boundary
 
 Each `make test` run judges the supplied ISO against the common matrix in
@@ -203,17 +213,19 @@ activated through verified keyboard focus inside the exact named modal; all
 shared-ESP rejection, partition-preservation and final boot assertions remain
 mandatory.
 
-Online installations retain the installer's real mirror selection and original
-installed-system checks. After those contracts and the factory baselines pass,
+Internet-connected (`Network.ONLINE`) installations retain the installer's real
+mirror selection and original installed-system checks. After those contracts and the factory baselines pass,
 `apt.test-mirror` replaces only Ubuntu's `URIs` in `ubuntu.sources` with
 `https://mirror.aiursoft.com/ubuntu/` and requires a successful signed APT index
 refresh. Suites, components, signing keys and AnduinOS sources stay unchanged.
 Subsequent online workloads inherit this test setup through their immutable
 installation base; it is not a product default. The original and test sources
 and refresh output are retained in `installed-test-mirror.txt`. Setup failures
-fail the case and block its dependent suites. Offline installations and offline
-recovery workloads remain offline; restoring a factory snapshot still restores
-the product's original source configuration.
+fail the case and block its dependent suites. The local-only Wi-Fi lab provides
+neither DNS nor an Internet gateway, so it does not run this APT refresh; its
+connection and installed-profile migration checks remain unchanged.
+Offline installations and offline recovery workloads remain offline; restoring
+a factory snapshot still restores the product's original source configuration.
 
 Test outcomes, not incidental UI timing or source layout. A VM is paused until
 its control channels are ready; GRUB input is acknowledged by observed menu
