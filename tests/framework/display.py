@@ -4,12 +4,28 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
 
 from .errors import ConfigurationError, TestFailure
 from .process_lifecycle import parent_death_preexec
+
+
+def headless_spice_environment(
+    artifacts: Path, environment: dict[str, str]
+) -> dict[str, str]:
+    """Keep SPICE's implicit volume probes away from the host sound server."""
+
+    # spice-gtk 0.42 probes host volume even with enable-audio=false. In a
+    # headless session, ALSA's PipeWire fallback can block its main loop and
+    # prevent display/cursor events. Give only this client a null PCM device;
+    # the guest display, input and resolution assertions remain unchanged.
+    artifacts.mkdir(parents=True, exist_ok=True)
+    configuration = artifacts / "spice-alsa.conf"
+    configuration.write_text("pcm.!default { type null }\n", encoding="utf-8")
+    return {**environment, "ALSA_CONFIG_PATH": str(configuration)}
 
 
 class SpiceDisplayController:
@@ -40,7 +56,7 @@ class SpiceDisplayController:
 
     def start(self) -> None:
         self.validate_dependencies()
-        self.artifacts.mkdir(parents=True, exist_ok=True)
+        self.environment = headless_spice_environment(self.artifacts, self.environment)
         self._xvfb_log = (self.artifacts / "spice-xvfb.log").open("wb")
         self.xvfb = subprocess.Popen(
             (
@@ -55,6 +71,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._xvfb_log,
             stderr=subprocess.STDOUT,
+            process_group=0,
             preexec_fn=parent_death_preexec(),
         )
         display_number = self.display.removeprefix(":")
@@ -90,6 +107,7 @@ class SpiceDisplayController:
             stdin=subprocess.DEVNULL,
             stdout=self._viewer_log,
             stderr=subprocess.STDOUT,
+            process_group=0,
             preexec_fn=parent_death_preexec(),
         )
         deadline = time.monotonic() + 30
@@ -142,14 +160,25 @@ class SpiceDisplayController:
 
     def stop(self) -> None:
         for process in (self.viewer, self.xvfb):
-            if process is None or process.poll() is not None:
+            if process is None:
                 continue
-            process.terminate()
+            # Killing dbus-run-session alone orphans its bus and activated
+            # services. Each client owns a process group; reap its helpers even
+            # if the launcher has already exited.
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             try:
                 process.wait(timeout=5)
             except subprocess.TimeoutExpired:
-                process.kill()
-                process.wait(timeout=5)
+                pass
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            process.wait(timeout=5)
         self.viewer = None
         self.xvfb = None
         for stream_name in ("_viewer_log", "_xvfb_log"):

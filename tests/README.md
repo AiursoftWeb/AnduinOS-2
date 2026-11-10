@@ -92,6 +92,23 @@ an explicit GUI rejection with all previous EFI files preserved. Neither suite
 installs repair packages into Live or repairs the target outside the GUI. Fault,
 repair-result and final desktop screenshots accompany signature and boot evidence.
 
+## Headless SPICE clients
+
+The external resize viewer and cursor observer receive a client-only ALSA null
+device configuration, retained as `spice-alsa.conf` in their artifacts. SPICE can
+probe playback/recording volume even when audio is disabled; a headless host's
+ALSA/PipeWire fallback can block the client's main loop and stop display events.
+The null device isolates these silent observers from host audio hardware without
+changing the host configuration or guest system. Real SPICE resizing, Mutter
+resolution readback, cursor movement and their existing deadlines remain required.
+The external viewer and its X server own separate process groups inside the
+worker's private Unix session. Teardown stops the whole group, including
+D-Bus-activated helpers, so repeated clients do not exhaust the host's system-bus
+connection limit. The supervisor also cleans these groups after a worker crash.
+Each changed guest mode must be observed twice consecutively before the next
+resize gesture. This lets the viewer finish reacting to the first desktop change
+instead of overwriting the next window request with its pending resize callback.
+
 ## Restarting snapshot recovery
 
 Desktop system/Home rollback and factory reset read the armed transaction's

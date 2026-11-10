@@ -6,6 +6,7 @@ import time
 from pathlib import Path
 
 from .errors import ConfigurationError, ProtocolError
+from .display import headless_spice_environment
 
 
 _POINTER_MAPPING_SETTLE_SECONDS = 1.0
@@ -492,7 +493,7 @@ class SpiceCursorObserver:
         import sys
         from .process_lifecycle import parent_death_preexec
 
-        environment = dict(os.environ)
+        environment = headless_spice_environment(self.artifacts, dict(os.environ))
         environment["PYTHONPATH"] = os.pathsep.join(
             filter(None, (str(Path(__file__).resolve().parents[1]),
                           environment.get("PYTHONPATH", "")))
