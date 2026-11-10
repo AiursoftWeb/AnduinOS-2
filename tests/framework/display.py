@@ -12,6 +12,21 @@ from .errors import ConfigurationError, TestFailure
 from .process_lifecycle import parent_death_preexec
 
 
+def headless_spice_environment(
+    artifacts: Path, environment: dict[str, str]
+) -> dict[str, str]:
+    """Keep SPICE's implicit volume probes away from the host sound server."""
+
+    # spice-gtk 0.42 probes host volume even with enable-audio=false. In a
+    # headless session, ALSA's PipeWire fallback can block its main loop and
+    # prevent display/cursor events. Give only this client a null PCM device;
+    # the guest display, input and resolution assertions remain unchanged.
+    artifacts.mkdir(parents=True, exist_ok=True)
+    configuration = artifacts / "spice-alsa.conf"
+    configuration.write_text("pcm.!default { type null }\n", encoding="utf-8")
+    return {**environment, "ALSA_CONFIG_PATH": str(configuration)}
+
+
 class SpiceDisplayController:
     """Run a real SPICE GTK client on a private X server and resize it."""
 
@@ -40,7 +55,7 @@ class SpiceDisplayController:
 
     def start(self) -> None:
         self.validate_dependencies()
-        self.artifacts.mkdir(parents=True, exist_ok=True)
+        self.environment = headless_spice_environment(self.artifacts, self.environment)
         self._xvfb_log = (self.artifacts / "spice-xvfb.log").open("wb")
         self.xvfb = subprocess.Popen(
             (
