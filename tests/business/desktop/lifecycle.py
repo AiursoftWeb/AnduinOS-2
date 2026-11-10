@@ -74,6 +74,23 @@ def _validate_rescue_pointer_trace(path: Path, *, required=None) -> None:
 
 
 class LifecycleChecks:
+    def _exercise_automatic_snapshot_timer(self, vm, base, artifacts):
+        assert vm.serial is not None
+        remote = "/run/anduinos-automatic-snapshot-test"
+        vm.serial.run(f"install -d -m 0755 {remote}/evidence")
+        vm.serial.upload(
+            self.framework_root / "assertions/guest/automatic_snapshot_workload.py",
+            f"{remote}/workload.py", 0o644,
+        )
+        result = vm.serial.run(
+            f"python3 {remote}/workload.py {remote}/evidence", timeout=300, check=False,
+        )
+        (artifacts / "automatic-snapshots-output.txt").write_text(result.stdout + "\n")
+        _retrieve_tree(vm.serial, remote, artifacts / "guest-automation-evidence")
+        vm.screenshot("automatic-snapshot-timer")
+        if result.returncode:
+            raise TestFailure("Automatic snapshot timer checks failed:\n" + result.stdout[-8000:])
+
     def _armed_recovery_protocol(self, vm, artifacts):
         """Read the armed transaction rather than guessing from the ISO suite."""
         result = vm.serial.run(
