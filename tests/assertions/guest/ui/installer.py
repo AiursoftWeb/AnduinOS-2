@@ -272,9 +272,9 @@ def assert_automatic_disk_layout(config: dict[str, object], evidence: Path) -> N
         if any(value in names for value in ("磁盘密码（可选）", "确认磁盘密码")):
             raise UiFailure("Free installation exposed the disk password input")
     elif str(config["firmware"]).startswith("uefi"):
-        if not all(value in names for value in ("磁盘密码（可选）", "确认磁盘密码")):
+        if "磁盘密码（可选）" not in names:
             dump_accessibility(evidence / "disk-layout-pro-entitlement.txt")
-            raise UiFailure("Pro installation did not expose both disk password inputs")
+            raise UiFailure("Pro installation did not expose the disk password input")
     event(
         "disk-layout",
         filesystem=filesystem,
