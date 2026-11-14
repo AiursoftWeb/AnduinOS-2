@@ -131,6 +131,7 @@
     },
     {
       "id": "uefi-nosb-online-btrfs-japanese-live-chinese-rime",
+      "pro_entitlement": false,
       "architectures": [
         "amd64",
         "arm64"

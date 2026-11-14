@@ -315,6 +315,9 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
             "hostname": self.defaults.hostname,
             "password": self.defaults.password,
             "install_timeout_seconds": self.options.install_timeout_seconds,
+            # Existing recovery acceptance cases exercise the Pro installation
+            # path until the activation UI is available.
+            "bypass_payment": scenario.pro_entitlement,
         }
         if wifi_lab is not None:
             config["wifi_ssid"] = wifi_lab.ssid

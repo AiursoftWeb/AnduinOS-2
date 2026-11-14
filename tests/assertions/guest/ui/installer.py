@@ -265,6 +265,12 @@ def assert_automatic_disk_layout(config: dict[str, object], evidence: Path) -> N
         )
     find("recommended_swap", timeout=10)
     find("zram_swap_contract", timeout=10)
+    if not config.get("bypass_payment", False):
+        if "磁盘加密功能正在开发……" not in names:
+            dump_accessibility(evidence / "disk-layout-free-entitlement.txt")
+            raise UiFailure("Free installation did not show the encryption development message")
+        if any("磁盘密码（可选）" in value for value in names):
+            raise UiFailure("Free installation exposed the disk password input")
     event(
         "disk-layout",
         filesystem=filesystem,
@@ -381,14 +387,26 @@ def wait_application(candidates: tuple[str, ...], timeout: float = 90) -> str:
     raise UiFailure(f"AT-SPI did not discover application {candidates!r}")
 
 
-def launch_installer() -> subprocess.Popen | None:
+def launch_installer(bypass_payment: bool = False) -> subprocess.Popen | None:
     shell = wait_application(("gnome-shell", "GNOME Shell"))
     event("desktop", application=shell)
     process = None
     welcome = find_optional("welcome", 2)
+    if welcome is not None and bypass_payment:
+        pid = welcome.get_application().get_process_id()
+        command = Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0")
+        if b"--bypass-payment" not in command:
+            if not any(b"anduinos-installer-beta" in arg for arg in command):
+                raise UiFailure("Welcome window is not the expected installer")
+            os.kill(pid, 15)
+            deadline = time.monotonic() + 15
+            while find_optional("welcome", 0.25) is not None:
+                if time.monotonic() >= deadline:
+                    raise UiFailure("Existing installer did not close")
+            welcome = None
     if welcome is None:
         process = subprocess.Popen(
-            ["anduinos-installer-beta"],
+            ["anduinos-installer-beta"] + (["--bypass-payment"] if bypass_payment else []),
             stdin=subprocess.DEVNULL,
             stdout=open("/tmp/anduinos-installer-ui.stdout", "wb"),
             stderr=subprocess.STDOUT,
@@ -530,7 +548,7 @@ def install(config: dict[str, object], evidence: Path) -> None:
         (evidence / "installer-output.txt").write_text(output, encoding="utf-8")
         return output
 
-    launch_installer()
+    launch_installer(bool(config.get("bypass_payment", False)))
     choose_chinese()
     click("next")
 
