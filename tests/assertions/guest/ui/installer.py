@@ -266,11 +266,15 @@ def assert_automatic_disk_layout(config: dict[str, object], evidence: Path) -> N
     find("recommended_swap", timeout=10)
     find("zram_swap_contract", timeout=10)
     if not config.get("bypass_payment", False):
-        if "磁盘加密功能正在开发……" not in names:
+        if "磁盘加密是专业版独有的功能 请去 https://www.anduinos.com/pro" not in names:
             dump_accessibility(evidence / "disk-layout-free-entitlement.txt")
             raise UiFailure("Free installation did not show the encryption development message")
-        if any("磁盘密码（可选）" in value for value in names):
+        if any(value in names for value in ("磁盘密码（可选）", "确认磁盘密码")):
             raise UiFailure("Free installation exposed the disk password input")
+    elif str(config["firmware"]).startswith("uefi"):
+        if not all(value in names for value in ("磁盘密码（可选）", "确认磁盘密码")):
+            dump_accessibility(evidence / "disk-layout-pro-entitlement.txt")
+            raise UiFailure("Pro installation did not expose both disk password inputs")
     event(
         "disk-layout",
         filesystem=filesystem,

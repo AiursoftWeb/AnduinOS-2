@@ -930,6 +930,10 @@ def assert_factory_recovery_contract(
     if not scenario.pro_entitlement and scenario.storage_mode is StorageMode.AUTOMATIC:
         _record(console, "set -e; ! blkid -t LABEL=AOS_RECOVERY -o device | grep -q .\n",
                 evidence / "installed-no-recovery-partition.txt")
+        _record(console, "set -eu; rootdev=$(findmnt -n -o SOURCE / | sed 's/\\[.*//'); "
+                "test -n \"$rootdev\"; types=$(lsblk -s -n -o TYPE \"$rootdev\"); "
+                "! printf '%s\\n' \"$types\" | grep -qx crypt\n",
+                evidence / "installed-unencrypted-root.txt")
 
 
 def _recovery_volume_contract_script(supported: bool) -> str:
