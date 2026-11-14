@@ -925,8 +925,11 @@ def assert_factory_recovery_contract(
 ) -> None:
     script = _snapshots_manager_contract_script(scenario.snapshots_manager)
     _record(console, script, evidence / "installed-snapshots-manager.txt")
-    supported = scenario.filesystem is Filesystem.BTRFS and scenario.storage_mode is StorageMode.AUTOMATIC
+    supported = scenario.pro_entitlement and scenario.storage_mode is StorageMode.AUTOMATIC
     _record(console, _recovery_volume_contract_script(supported), evidence / "installed-recovery-volume.txt")
+    if not scenario.pro_entitlement and scenario.storage_mode is StorageMode.AUTOMATIC:
+        _record(console, "set -e; ! blkid -t LABEL=AOS_RECOVERY -o device | grep -q .\n",
+                evidence / "installed-no-recovery-partition.txt")
 
 
 def _recovery_volume_contract_script(supported: bool) -> str:

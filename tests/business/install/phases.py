@@ -315,6 +315,9 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
             "hostname": self.defaults.hostname,
             "password": self.defaults.password,
             "install_timeout_seconds": self.options.install_timeout_seconds,
+            # Existing recovery acceptance cases exercise the Pro installation
+            # path until the activation UI is available.
+            "bypass_payment": scenario.pro_entitlement,
         }
         if wifi_lab is not None:
             config["wifi_ssid"] = wifi_lab.ssid
@@ -724,7 +727,7 @@ set -euo pipefail
 # The debug shell can precede coldplug; lsblk reads filesystem types from udev.
 systemctl start systemd-udev-trigger.service
 udevadm settle --timeout=60
-root_device=$(lsblk -pnro NAME,FSTYPE,TYPE | awk '$2 == "{filesystem}" && $3 == "part" {{ print $1 }}')
+root_device=$(lsblk -pnro NAME,FSTYPE,TYPE,LABEL | awk '$2 == "{filesystem}" && $3 == "part" && $4 != "AOS_RECOVERY" {{ print $1 }}')
 test "$(printf '%s\\n' "$root_device" | grep -c .)" = 1
 test -b "$root_device"
 mountpoint=$(mktemp -d /run/anduinos-target.XXXXXX)

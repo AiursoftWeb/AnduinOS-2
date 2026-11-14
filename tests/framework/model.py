@@ -115,6 +115,7 @@ class Scenario:
     storage_mode: StorageMode = StorageMode.AUTOMATIC
     disk_gib: int | None = None
     boot_entry_loss: bool = False
+    pro_entitlement: bool = True
 
     def supports(self, architecture: Architecture) -> bool:
         return architecture in self.architectures
@@ -239,12 +240,14 @@ def _load_scenario(value: object) -> Scenario:
         "snapshots_manager",
         "mok_enrollment",
     }
-    optional = {"live_region", "storage_mode", "disk_gib", "boot_entry_loss"}
+    optional = {"live_region", "storage_mode", "disk_gib", "boot_entry_loss", "pro_entitlement"}
     if not required <= set(value) or not set(value) <= required | optional:
         raise ConfigurationError("A test case has an invalid shape")
     identifier = value["id"]
     if not isinstance(identifier, str) or not identifier:
         raise ConfigurationError("Test case ID must be a non-empty string")
+    if type(value.get("pro_entitlement", True)) is not bool:
+        raise ConfigurationError(f"{identifier}: pro_entitlement must be boolean")
     raw_architectures = value["architectures"]
     if not isinstance(raw_architectures, list) or not raw_architectures:
         raise ConfigurationError(f"{identifier}: architectures must be a list")
@@ -341,6 +344,7 @@ def _load_scenario(value: object) -> Scenario:
         storage_mode=storage_mode,
         disk_gib=disk_gib,
         boot_entry_loss=boot_entry_loss,
+        pro_entitlement=value.get("pro_entitlement", True),
     )
 
 

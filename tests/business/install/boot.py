@@ -249,7 +249,7 @@ certificate=/var/lib/shim-signed/mok/MOK.der
 test -s "$certificate"
 expected=$(openssl x509 -inform DER -in "$certificate" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':' | tr '[:lower:]' '[:upper:]')
 normalized=$(mokutil --list-enrolled | tr -d ':' | tr '[:lower:]' '[:upper:]')
-printf '%s' "$normalized" | grep -Fq "$expected"
+grep -Fq "$expected" <<< "$normalized"
 printf 'MOK_SECURE_BOOT=enabled\n'
 printf 'MOK_PENDING=none\n'
 printf 'MOK_ENROLLED_FINGERPRINT=%s\n' "$expected"
@@ -284,7 +284,7 @@ printf 'MOK_ENROLLED_FINGERPRINT=%s\n' "$expected"
         )
         script = f"""
 set -euo pipefail
-root_device=$(lsblk -pnro NAME,FSTYPE,TYPE | awk '$2 == "{scenario.filesystem.value}" && $3 == "part" {{ print $1; exit }}')
+root_device=$(lsblk -pnro NAME,FSTYPE,TYPE,LABEL | awk '$2 == "{scenario.filesystem.value}" && $3 == "part" && $4 != "AOS_RECOVERY" {{ print $1; exit }}')
 test -b "$root_device"
 mountpoint=$(mktemp -d /run/anduinos-target.XXXXXX)
 cleanup() {{ umount "$mountpoint" 2>/dev/null || true; rmdir "$mountpoint" 2>/dev/null || true; }}
@@ -312,7 +312,7 @@ if [ "{scenario.firmware.value}" = "uefi-sb" ]; then
     test -n "$pending"
     expected=$(openssl x509 -inform DER -in "$certificate" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':' | tr '[:lower:]' '[:upper:]')
     normalized=$(printf '%s' "$pending" | tr -d ':' | tr '[:lower:]' '[:upper:]')
-    printf '%s' "$normalized" | grep -Fq "$expected"
+    grep -Fq "$expected" <<< "$normalized"
     printf 'MOK_PENDING_FINGERPRINT=%s\n' "$expected"
 elif [ "{scenario.firmware.value}" = "uefi-nosb" ]; then
     test -z "$(mokutil --list-new 2>/dev/null)"

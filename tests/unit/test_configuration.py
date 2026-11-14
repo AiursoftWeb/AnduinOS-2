@@ -2,6 +2,13 @@
 
 from unit.support import *  # noqa: F403
 class MatrixTests(unittest.TestCase):
+    def test_install_matrix_covers_default_and_pro_sessions(self):
+        matrix = TestMatrix.load(ROOT / "cases/install.json")
+        for architecture in (Architecture.AMD64, Architecture.ARM64):
+            selected = matrix.select(architecture)
+            self.assertTrue(any(not case.pro_entitlement for case in selected))
+            self.assertTrue(any(case.pro_entitlement for case in selected))
+
     def test_installer_driver_requires_the_executor_to_start(self):
         installer = (ROOT / "assertions/guest/ui/installer.py").read_text(
             encoding="utf-8"
