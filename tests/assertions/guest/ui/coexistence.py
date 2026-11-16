@@ -86,7 +86,22 @@ def selected_esp_dropdown(expected_path: str):
     raise UiFailure(f"Cannot identify the ESP selector reusing {expected_path}: {diagnostic!r}")
 
 
-def focus_esp_dropdown(expected_path: str):
+def focus_partition_creator() -> None:
+    for attempt in range(80):
+        if any(
+            role(node) == "spin button"
+            and matches(node, aliases("partition_size"))
+            and in_storage_editor(node)
+            and focus_within(node)
+            for node in visible_nodes()
+        ):
+            return
+        event("qmp-key", request=f"focus-partition-size-{attempt}", key="tab")
+        time.sleep(0.3)
+    raise UiFailure("Could not focus/scroll the partition size input")
+
+
+def select_new_esp(expected_path: str) -> None:
     dropdown = selected_esp_dropdown(expected_path)
     # Existing partition rows can put this selector below the scroll viewport.
     # Follow keyboard focus until GTK scrolls the real selector into view.
@@ -98,11 +113,6 @@ def focus_esp_dropdown(expected_path: str):
         dropdown = selected_esp_dropdown(expected_path)
     else:
         raise UiFailure("Could not focus/scroll the existing ESP dropdown")
-    return dropdown
-
-
-def select_new_esp(expected_path: str) -> None:
-    dropdown = focus_esp_dropdown(expected_path)
     # GTK4/Wayland may expose widget-local (0, 0) as SCREEN coordinates.
     # The exact dropdown already owns keyboard focus; use its normal keyboard
     # interaction and verify the selected value instead of guessing pixels.
@@ -216,7 +226,7 @@ def configure_coexistence(config: dict[str, object], evidence: Path) -> bool:
         if stage == "b-separate":
             select_new_esp(expected_esp)
         else:
-            focus_esp_dropdown(expected_esp)
+            focus_partition_creator()
     # Ordinary coexistence leaves room for B. The shrink case deliberately
     # makes A 96 GiB so B cannot fit until the declared 40 GiB shrink executes.
     root_mib = 96 * 1024 if shrinking and stage == "a" else 50 * 1024
