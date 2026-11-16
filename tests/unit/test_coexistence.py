@@ -530,6 +530,7 @@ class CoexistenceUiTests(unittest.TestCase):
         spec.loader.exec_module(self.ui)
         self.select_new_esp = self.ui.select_new_esp
         self.ui.selected_esp_dropdown = Mock()
+        self.ui.focus_esp_dropdown = Mock()
         self.ui.select_new_esp = Mock()
         self.core = core
         self.installer = installer
