@@ -122,7 +122,7 @@ make test ISO=/path/to/AnduinOS.iso ARCH=amd64
 See [tests/README.md](tests/README.md) for prerequisites, execution details,
 and generated evidence.
 
-`make` can install host build dependencies and creates a real ISO; `make test` runs disposable VM acceptance and requires an image and the prerequisites documented in `tests/README.md`. Neither is a Markdown preview command. The Python unit tests additionally require Pillow (`PIL`) in the selected Python environment. For those existing unit tests alone, use the command invoked by the make target:
+`make` can install host build dependencies and creates a real ISO; `make test` runs disposable VM acceptance and requires an image and the prerequisites documented in `tests/README.md`. Neither is a Markdown preview command. The Python unit tests additionally require Pillow (`PIL`), PyGObject (`gi`) and the AT-SPI 2.0 introspection library in the selected Python environment. For those existing unit tests alone, use the command invoked by the make target:
 
 ```bash
 PYTHONPATH=tests python3 -m unittest discover -s tests/unit -p 'test_*.py' -q
