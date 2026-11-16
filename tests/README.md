@@ -21,6 +21,10 @@ Pass `ISO=/path/to/image.iso` and `ARCH=amd64|arm64` only when the newest image
 cannot be selected automatically. `TEST_ARGS=--no-tui` switches to persistent
 plain output without changing which tests run.
 
+When the installer presents the mainland China software-source page, the UI
+driver verifies that global AnduinOS is selected and continues to the install
+summary. Older installers that go directly to the summary remain supported.
+
 For a targeted regression, repeat `--case` with exact installation case IDs:
 
 ```bash

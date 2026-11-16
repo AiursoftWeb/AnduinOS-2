@@ -684,6 +684,17 @@ def install(config: dict[str, object], evidence: Path) -> None:
 
     wait_page("timezone")
     click("next")
+    next_page = find_candidates(
+        ALIASES["software_sources"] + ALIASES["summary"],
+        label="software source selection or installation summary", timeout=90,
+    )
+    if matches(next_page, ALIASES["software_sources"]):
+        event("page", page="software_sources", accessible_name=name(next_page))
+        assert_toggle("global_sources", sensitive=True, active=True)
+        assert_toggle("mainland_sources", sensitive=True, active=False)
+        dump_accessibility(evidence / "software-sources.txt")
+        event("software-source", selection="global", method="default-verified")
+        click("next")
     wait_page("summary")
     assert_summary_plan(config)
     dump_accessibility(evidence / "summary.txt")
