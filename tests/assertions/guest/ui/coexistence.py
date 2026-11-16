@@ -225,13 +225,12 @@ def configure_coexistence(config: dict[str, object], evidence: Path) -> bool:
             plan_ext4_shrink(str(config["resize_ext4_path"]))
         if stage == "b-separate":
             select_new_esp(expected_esp)
-        else:
-            focus_partition_creator()
     # Ordinary coexistence leaves room for B. The shrink case deliberately
     # makes A 96 GiB so B cannot fit until the declared 40 GiB shrink executes.
     root_mib = 96 * 1024 if shrinking and stage == "a" else 50 * 1024
     sizes = (root_mib, 3072) if stage == "b-shared" else (1024, root_mib, 3072)
     for size in sizes:
+        focus_partition_creator()
         set_numeric_value("partition_size", size)
         click_button("add_partition")
     if shrinking:
