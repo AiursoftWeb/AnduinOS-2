@@ -342,6 +342,7 @@ printf 'mode=persistent-second-boot\nsentinel=survived\ndevice=%s\nupperdir=%s\n
                 "--evidence",
                 f"{remote_root}/evidence",
             ),
+            managed=True,
         )
         result = _run_with_qmp_key_requests(
             vm,
