@@ -1411,6 +1411,7 @@ class LifecycleChecks:
                         vm,
                         command,
                         timeout=max(1.0, min(20.0, deadline - time.monotonic())),
+                        capture_serial=False,
                     )
                 except (TestFailure, subprocess.TimeoutExpired) as error:
                     last = f"{type(error).__name__}: {error}"
@@ -1425,6 +1426,7 @@ class LifecycleChecks:
         command: str,
         *,
         timeout: float = 60,
+        capture_serial: bool = True,
     ) -> str:
         invocation = (
             "ssh",
@@ -1449,7 +1451,10 @@ class LifecycleChecks:
             f"{self.username}@127.0.0.1",
             command,
         )
-        with tempfile.TemporaryDirectory(prefix="anduinos-factory-askpass-") as directory:
+        assert vm.serial is not None
+        with tempfile.TemporaryDirectory(prefix="anduinos-factory-askpass-") as directory, (
+            vm.serial.capture_output() if capture_serial else nullcontext()
+        ):
             askpass = Path(directory) / "askpass"
             askpass.write_text(
                 "#!/bin/sh\nprintf '%s\\n' \"$ANDUINOS_ACCEPTANCE_SSH_PASSWORD\"\n",
