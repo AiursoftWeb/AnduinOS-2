@@ -209,7 +209,10 @@ class DesktopLifecycleOracleTests(FeatureOracleCase):
             send_key=Mock(),
             type_text=Mock(),
         )
-        vm = SimpleNamespace(qmp=qmp, serial=None)
+        # The UART remains connected after its debug shell disappears.
+        vm = SimpleNamespace(
+            qmp=qmp, serial=SimpleNamespace(capture_output=nullcontext)
+        )
         with patch("business.desktop.lifecycle.time.sleep"):
             runner._login_gdm_over_ssh(vm, Path("/tmp/key"), timeout=120)
         qmp.send_key.assert_any_call("ret")
