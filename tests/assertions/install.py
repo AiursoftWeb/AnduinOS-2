@@ -824,8 +824,9 @@ curl --fail --location --silent --show-error --max-time 45 --output /dev/null "$
 installer_endpoint=$(PYTHONPATH=/usr/lib/anduinos-installer-beta python3 - <<'PY'
 from installer_core.network import _codename, probe_ubuntu_archive
 from pathlib import Path
+import sys
 
-endpoint = probe_ubuntu_archive(_codename(Path('/etc/os-release')))
+endpoint = probe_ubuntu_archive(_codename(Path('/etc/os-release')), log=lambda message: print(message, file=sys.stderr))
 if endpoint is None:
     raise SystemExit(1)
 print(endpoint)

@@ -102,6 +102,15 @@ ALIASES = {
     "user": ("User Account", "用户账户"),
     "advanced": ("Advanced Options", "高级选项"),
     "timezone": ("Select Timezone", "选择时区"),
+    "software_sources": ("Are you in mainland China?", "您在中国大陆吗？"),
+    "global_sources": (
+        "Continue with global AnduinOS operated by AIURSOFT LIMITED",
+        "继续使用由AIURSOFT LIMITED运营的全球版AnduinOS",
+    ),
+    "mainland_sources": (
+        "Use mainland China AnduinOS operated by Suzhou Aiursoft Technology",
+        "使用由苏州艾软科技有限公司运营的中国大陆版AnduinOS",
+    ),
     "summary": ("Ready to Install", "准备安装"),
     "manual_layout_confirmation": (
         "Apply this manual disk layout?",

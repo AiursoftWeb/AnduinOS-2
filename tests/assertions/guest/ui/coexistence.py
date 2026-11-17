@@ -86,6 +86,21 @@ def selected_esp_dropdown(expected_path: str):
     raise UiFailure(f"Cannot identify the ESP selector reusing {expected_path}: {diagnostic!r}")
 
 
+def focus_partition_creator() -> None:
+    for attempt in range(80):
+        if any(
+            role(node) == "spin button"
+            and matches(node, aliases("partition_size"))
+            and in_storage_editor(node)
+            and focus_within(node)
+            for node in visible_nodes()
+        ):
+            return
+        event("qmp-key", request=f"focus-partition-size-{attempt}", key="tab")
+        time.sleep(0.3)
+    raise UiFailure("Could not focus/scroll the partition size input")
+
+
 def select_new_esp(expected_path: str) -> None:
     dropdown = selected_esp_dropdown(expected_path)
     # Existing partition rows can put this selector below the scroll viewport.
@@ -215,6 +230,7 @@ def configure_coexistence(config: dict[str, object], evidence: Path) -> bool:
     root_mib = 96 * 1024 if shrinking and stage == "a" else 50 * 1024
     sizes = (root_mib, 3072) if stage == "b-shared" else (1024, root_mib, 3072)
     for size in sizes:
+        focus_partition_creator()
         set_numeric_value("partition_size", size)
         click_button("add_partition")
     if shrinking:
