@@ -533,7 +533,7 @@ class LifecycleChecks:
     def _login_gdm_over_ssh(self, vm: QemuVm, key: Path, *, timeout: float) -> None:
         """Verify the restored graphical session without a debug serial shell."""
 
-        assert vm.qmp is not None
+        assert vm.qmp is not None and vm.serial is not None
         ready = (
             "set -e; "
             "uid=$(id -u); runtime=/run/user/$uid; "
@@ -546,24 +546,27 @@ class LifecycleChecks:
         deadline = time.monotonic() + timeout
         next_input = 0.0
         attempts = 0
-        while time.monotonic() < deadline:
-            if "graphical-user=ready" in self._ssh(
-                vm, key, ready, timeout=15, check=False
-            ):
-                return
-            now = time.monotonic()
-            if now >= next_input and attempts < 3:
-                if attempts == 0:
+        # Keep one UART reader through keyboard input and polling gaps, too:
+        # unread PL011 output can block both the guest and QMP requests.
+        with vm.serial.capture_output():
+            while time.monotonic() < deadline:
+                if "graphical-user=ready" in self._ssh(
+                    vm, key, ready, timeout=15, check=False, capture_serial=False
+                ):
+                    return
+                now = time.monotonic()
+                if now >= next_input and attempts < 3:
+                    if attempts == 0:
+                        vm.qmp.send_key("ret")
+                        time.sleep(2)
+                    else:
+                        vm.qmp.send_key("ctrl-a")
+                        time.sleep(1)
+                    vm.qmp.type_text(self.password, interval=0.06)
                     vm.qmp.send_key("ret")
-                    time.sleep(2)
-                else:
-                    vm.qmp.send_key("ctrl-a")
-                    time.sleep(1)
-                vm.qmp.type_text(self.password, interval=0.06)
-                vm.qmp.send_key("ret")
-                attempts += 1
-                next_input = time.monotonic() + 15
-            time.sleep(2)
+                    attempts += 1
+                    next_input = time.monotonic() + 15
+                time.sleep(2)
         raise TestFailure(
             "The Rescue Center restored the system, but a GNOME user session "
             f"did not start after GDM login; attempts={attempts}"
