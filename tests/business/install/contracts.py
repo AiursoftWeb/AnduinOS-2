@@ -57,7 +57,7 @@ class InstallationContracts:
         scenario: Scenario,
         artifacts: Path,
     ):
-        """Retain the exact 28-entry ISO contract before QEMU can boot it."""
+        """Retain the exact 29-entry ISO contract before QEMU can boot it."""
 
         region = scenario_live_region(self.defaults, scenario)
         entry = self._live_grub_entry(scenario)
@@ -71,8 +71,8 @@ class InstallationContracts:
             }
             for candidate in self.inspection.live_entries
         ]
-        if len(values) != 28 or len({value["name"] for value in values}) != 28:
-            raise TestFailure("ISO GRUB regional contract is not 28 unique entries")
+        if len(values) != 29 or len({value["name"] for value in values}) != 29:
+            raise TestFailure("ISO GRUB regional contract is not 29 unique entries")
         selected = [
             value for value in values if value["name"] == region.grub_entry
         ]
