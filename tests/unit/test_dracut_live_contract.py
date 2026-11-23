@@ -32,7 +32,7 @@ class DracutLiveContractTests(unittest.TestCase):
         self.assertNotIn("ANDUINOS-PERSISTENCE", generated.stdout)
         self.assertIn("rd.live.overlay.cowfs=ext4", generated.stdout)
         self.assertNotIn("rd.live.check=1", generated.stdout)
-        self.assertEqual(generated.stdout.count("rd.anduinos.media-check=1"), 31)
+        self.assertEqual(generated.stdout.count("rd.anduinos.media-check=1"), 32)
         self.assertEqual(build.count("-partition_offset 16"), 2)
         self.assertIn("implantisomd5 --force", build)
         self.assertNotIn("Check installation media for defects", generated.stdout)
@@ -143,7 +143,7 @@ class DracutLiveContractTests(unittest.TestCase):
         entries = [
             f"linux /LiveOS/vmlinuz {common} rd.overlay locale=l{index}\n"
             "initrd /LiveOS/initrd"
-            for index in range(28)
+            for index in range(29)
         ]
         entries.extend(
             (

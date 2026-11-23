@@ -1,6 +1,7 @@
 """Installation, firmware, storage, and Wi-Fi tests."""
 
 import ast
+import subprocess
 from contextlib import nullcontext
 
 from unit.support import *  # noqa: F403
@@ -1609,10 +1610,10 @@ runuser() {{ printf '0\\n'; }}
             f'''menuentry "Language {index}" {{
  linux /LiveOS/vmlinuz root=live:CDLABEL=anduinos rd.live.dir=LiveOS rd.live.squashimg=rootfs.squashfs rd.overlay rd.anduinos.live=1 locale=l{index}_XX.UTF-8 timezone=Zone/{index} systemd.timezone=Zone/{index} rd.anduinos.keyboard=k{index} quiet splash ---
 }}'''
-            for index in range(28)
+            for index in range(29)
         )
         entries = _parse_live_entries(grub)
-        self.assertEqual(28, len(entries))
+        self.assertEqual(29, len(entries))
         self.assertEqual("l2_XX.UTF-8", entries[2].locale)
         self.assertEqual("Zone/2", entries[2].timezone)
         self.assertEqual("k2", entries[2].keyboard)
@@ -1626,9 +1627,19 @@ runuser() {{ printf '0\\n'; }}
         )
         self.assertIsNotNone(match)
         rows = [line.split("|") for line in match["rows"].splitlines()]
-        self.assertEqual(28, len(rows))
+        self.assertEqual(29, len(rows))
         self.assertTrue(all(len(row) == 4 and all(row) for row in rows))
         by_locale = {row[0]: tuple(row[1:]) for row in rows}
+        self.assertEqual(("Hrvatski", "Europe/Zagreb", "hr"), by_locale["hr_HR"])
+        packs = subprocess.check_output(
+            ("bash", "-c", 'source ./args.sh; printf "%s" "$LANGUAGE_PACKS"'),
+            cwd=ROOT.parent,
+            text=True,
+        ).split()
+        self.assertTrue({
+            "language-pack-hr", "language-pack-hr-base",
+            "language-pack-gnome-hr", "language-pack-gnome-hr-base",
+        } <= set(packs))
         self.assertEqual(
             ("French", "Europe/Paris", "fr"),
             by_locale["fr_FR"],

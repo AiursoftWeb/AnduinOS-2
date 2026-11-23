@@ -373,8 +373,8 @@ function generate_live_grub_config() {
         initrd  /LiveOS/initrd
     }"
     done <<< "$SUPPORTED_LIVE_REGIONS"
-    if ((region_count != 28)); then
-        printf 'Live regional policy must contain exactly 28 entries\n' >&2
+    if ((region_count != 29)); then
+        printf 'Live regional policy must contain exactly 29 entries\n' >&2
         return 1
     fi
 

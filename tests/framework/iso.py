@@ -347,9 +347,9 @@ def _validate_dracut_live_contract(content: str, *, expected_label: str | None =
     initrd_lines = re.findall(
         r"^\s*initrd\s+(\S+)\s*$", content, re.MULTILINE
     )
-    if len(linux_lines) != 32 or len(initrd_lines) != len(linux_lines):
+    if len(linux_lines) != 33 or len(initrd_lines) != len(linux_lines):
         raise ConfigurationError(
-            "ISO GRUB must contain 28 regional and 4 advanced Live entries"
+            "ISO GRUB must contain 29 regional and 4 advanced Live entries"
         )
     if "Check installation media for defects" in content:
         raise ConfigurationError("ISO GRUB retains a redundant manual media-check entry")
@@ -388,7 +388,7 @@ def _validate_dracut_live_contract(content: str, *, expected_label: str | None =
         raise ConfigurationError("ISO GRUB must not invoke the legacy blocking media checker")
     checks = [tuple(arg for arg in arguments if arg.split("=", 1)[0] == "rd.anduinos.media-check")
               for arguments in parsed]
-    if checks.count(("rd.anduinos.media-check=1",)) != 31 or checks.count(()) != 1:
+    if checks.count(("rd.anduinos.media-check=1",)) != 32 or checks.count(()) != 1:
         raise ConfigurationError("Only one Live entry may omit explicit media verification")
     if sum("nomodeset" in arguments for arguments in parsed) != 1:
         raise ConfigurationError("ISO GRUB must contain exactly one safe-graphics entry")
@@ -430,9 +430,9 @@ def _parse_live_entries(content: str) -> tuple[LiveGrubEntry, ...]:
                 keyboard=values["rd.anduinos.keyboard"],
             )
         )
-    if len(entries) != 28:
+    if len(entries) != 29:
         raise ConfigurationError(
-            "ISO GRUB must declare 28 locale/timezone/keyboard Live entries; "
+            "ISO GRUB must declare 29 locale/timezone/keyboard Live entries; "
             f"found {len(entries)}"
         )
     if len({entry.name for entry in entries}) != len(entries):

@@ -161,7 +161,11 @@ class HyperfluentVisualTests(unittest.TestCase):
         generated = render_live_grub()
         self.assertEqual(0, generated.returncode, generated.stderr)
         content = generated.stdout
-        self.assertEqual(28, len(_parse_live_entries(content)))
+        entries = _parse_live_entries(content)
+        self.assertEqual(29, len(entries))
+        croatian = next(entry for entry in entries if entry.locale == "hr_HR.UTF-8")
+        self.assertEqual(("Hrvatski", "Europe/Zagreb", "hr"),
+                         (croatian.name, croatian.timezone, croatian.keyboard))
         self.assertEqual(
             "AnduinOS To Go (Persistent on USB)",
             _parse_persistent_entry(content).name,
@@ -205,7 +209,7 @@ class HyperfluentVisualTests(unittest.TestCase):
         generated = render_live_grub("en_US|English|UTC|us")
         self.assertNotEqual(0, generated.returncode)
         self.assertEqual("", generated.stdout)
-        self.assertIn("exactly 28 entries", generated.stderr)
+        self.assertIn("exactly 29 entries", generated.stderr)
 
 
 if __name__ == "__main__":

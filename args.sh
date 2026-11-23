@@ -29,7 +29,7 @@ export LANGUAGE=en_US:en
 
 # ── Language pack codes ────────────────────────────────────────────────────
 #
-# 28 website languages map to 25 language-pack codes.
+# 29 Live languages map to 26 language-pack codes.
 # (e.g., en-US/en-GB share 'en', pt-PT/pt-BR share 'pt', zh-TW/zh-HK share 'zh-hant')
 #
 #   en-US English (US)    zh-CN 中文 (CN)       de-DE Deutsch
@@ -42,9 +42,10 @@ export LANGUAGE=en_US:en
 #   tr-TR Türkçe           ro-RO Română          da-DK Dansk
 #   uk-UA Українська       id-ID Bahasa Indonesia
 #   fi-FI Suomi            hi-IN हिन्दी          el-GR Ελληνικά
+#   hr-HR Hrvatski
 #
 # All verified present in Ubuntu apt repos.
-export LANG_PACK_CODES="en de es fr it pt ru zh-hans ja zh-hant ko vi th ar nl sv pl tr ro da uk id fi hi el"
+export LANG_PACK_CODES="en de es fr it pt ru zh-hans ja zh-hant ko vi th ar nl sv pl tr ro da uk id fi hi el hr"
 _LP=""
 for _c in $LANG_PACK_CODES; do
     _LP="$_LP language-pack-$_c language-pack-$_c-base language-pack-gnome-$_c language-pack-gnome-$_c-base"
@@ -58,7 +59,7 @@ unset _LP _c
 # installer's data/languages.json is an independent policy for the system that
 # will be installed, so users may boot one region and install another.
 #
-# 28 entries — one per Live boot language.
+# 29 entries — one per Live boot language.
 # Format: locale_code|GRUB label|timezone|XKB layout
 export SUPPORTED_LIVE_REGIONS="
 en_US|English (United States)|America/New_York|us
@@ -89,6 +90,7 @@ id_ID|Indonesian|Asia/Jakarta|id
 fi_FI|Finnish|Europe/Helsinki|fi
 hi_IN|Hindi|Asia/Kolkata|us
 el_GR|Greek|Europe/Athens|gr
+hr_HR|Hrvatski|Europe/Zagreb|hr
 "
 
 #==========================
