@@ -30,7 +30,7 @@ get() {
         # changes (HOME, locale, etc.) into the menuconfig process.
         # shellcheck disable=SC1090
         source "$ARGS_FILE"
-        printf '%s\n' "${!key}"
+        printf '%s\n' "${!key-}"
     )
 }
 set_val() {
@@ -38,7 +38,12 @@ set_val() {
     # Escape forward slashes for sed
     local escaped
     escaped=$(printf '%s\n' "$val" | sed 's/[\/&]/\\&/g')
-    sed -i "s|^export ${key}=.*|export ${key}=\"${escaped}\"|" "$ARGS_FILE"
+    if grep -q "^export ${key}=" "$ARGS_FILE"; then
+        sed -i "s|^export ${key}=.*|export ${key}=\"${escaped}\"|" "$ARGS_FILE"
+    else
+        # Support newly introduced keys that are absent from older args.sh.
+        printf '\nexport %s="%s"\n' "$key" "$val" >> "$ARGS_FILE"
+    fi
 }
 
 # ---------------------------------------------------------------------------
@@ -129,6 +134,7 @@ edit_build() {
         result=""
         menubox "Build Options" "Select to edit:" \
             "arch" "Target architecture   [$(get TARGET_ARCH)]" \
+            "deb"  "Keep downloaded debs [$(get KEEP_DOWNLOADED_DEBS)]" \
             "back" "< Back"
         case "$result" in
             arch)
@@ -136,6 +142,23 @@ edit_build() {
                 choice=$($DIALOG --title "Target Architecture" --menu "Choose CPU architecture:" 0 0 2 \
                     "amd64" "Intel / AMD 64-bit (x86_64)" \
                     "arm64" "ARM 64-bit (Snapdragon, Apple Silicon, Raspberry Pi)" 3>&1 1>&2 2>&3) && set_val TARGET_ARCH "$choice"
+                ;;
+            deb)
+                local current default_opt
+                current=$(get KEEP_DOWNLOADED_DEBS)
+                if [[ "$current" == "true" ]]; then
+                    default_opt=""
+                else
+                    default_opt="--defaultno"
+                fi
+                # shellcheck disable=SC2086
+                if $DIALOG --title "Keep downloaded .deb packages" --yesno \
+                    "Keep downloaded .deb packages between builds?\n\nWhen enabled, packages are cached under .cache/apt-archives and reused after a network failure, instead of being deleted at cleanup." \
+                    12 62 $default_opt; then
+                    set_val KEEP_DOWNLOADED_DEBS "true"
+                else
+                    set_val KEEP_DOWNLOADED_DEBS "false"
+                fi
                 ;;
             back|"") return ;;
         esac

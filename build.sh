@@ -12,6 +12,14 @@ export SCRIPT_DIR
 source "$SCRIPT_DIR/shared.sh"
 source "$SCRIPT_DIR/args.sh"
 
+# Persistent host-side cache for downloaded .deb packages.
+# When KEEP_DOWNLOADED_DEBS=true, the chroot's /var/cache/apt/archives is
+# bind-mounted to this directory so that retries after a network failure
+# reuse packages that were already downloaded. It is excluded from the
+# SquashFS, so the final ISO size is unaffected.
+APT_CACHE_DIR="$SCRIPT_DIR/.cache/apt-archives"
+export APT_CACHE_DIR
+
 # Do NOT derive this label from TARGET_NAME. Rufus ISO mode replaces the old
 # volume-label substring across matching boot command lines, not just CDLABEL
 # values. With label "anduinos", FAT label uppercasing also turns
@@ -44,8 +52,114 @@ function clean() {
     sudo umount new_building_os/proc || sudo umount -lf new_building_os/proc || true
     sudo umount new_building_os/dev || sudo umount -lf new_building_os/dev || true
     sudo umount new_building_os/run || sudo umount -lf new_building_os/run || true
+    # The persistent deb cache lives in .cache/ and is intentionally kept.
+    sudo umount new_building_os/var/cache/apt/archives || sudo umount -lf new_building_os/var/cache/apt/archives || true
     sudo rm -rf new_building_os official_ubuntu_os image || true
     judge "Clean up build artifacts"
+}
+
+# Prepare the persistent host-side apt cache. Kept outside new_building_os so
+# that clean() does not delete downloaded .deb packages between builds.
+function prepare_apt_cache() {
+    if [[ "${KEEP_DOWNLOADED_DEBS:-false}" != "true" ]]; then
+        print_ok "Deb cache disabled (KEEP_DOWNLOADED_DEBS != true); apt cache will be discarded at cleanup."
+        return 0
+    fi
+    print_ok "Preparing persistent deb cache at $APT_CACHE_DIR ..."
+    mkdir -p "$APT_CACHE_DIR/partial"
+    judge "Prepare persistent deb cache"
+}
+
+# Bind-mount the persistent cache into the chroot so apt writes downloaded
+# packages to the host directory instead of the disposable rootfs.
+function mount_apt_cache() {
+    [[ "${KEEP_DOWNLOADED_DEBS:-false}" == "true" ]] || return 0
+    print_ok "Mounting persistent deb cache into chroot..."
+    mkdir -p "$APT_CACHE_DIR/partial"
+    sudo mount --bind "$APT_CACHE_DIR" "$SCRIPT_DIR/new_building_os/var/cache/apt/archives"
+    judge "Mount persistent deb cache"
+}
+
+function umount_apt_cache() {
+    [[ "${KEEP_DOWNLOADED_DEBS:-false}" == "true" ]] || return 0
+    sudo umount "$SCRIPT_DIR/new_building_os/var/cache/apt/archives" || \
+        sudo umount -lf "$SCRIPT_DIR/new_building_os/var/cache/apt/archives" || true
+}
+
+# ---------------------------------------------------------------------------
+# Staged build / resume support
+# ---------------------------------------------------------------------------
+STATE_DIR="$SCRIPT_DIR/.cache/build-state"
+RESUME=false
+
+function stage_done() {
+    mkdir -p "$STATE_DIR"
+    touch "$STATE_DIR/$1.ok"
+}
+
+function stage_is_done() {
+    [[ -f "$STATE_DIR/$1.ok" ]]
+}
+
+function run_stage() {
+    local name="$1"
+    shift
+    if [[ "$RESUME" == "true" ]] && stage_is_done "$name"; then
+        print_ok "Skipping completed stage: $name"
+        return 0
+    fi
+    print_ok "Running stage: $name"
+    "$@"
+    stage_done "$name"
+}
+
+# Generate the package lists consumed by mods/05 from packages.json.
+function prepare_build_config() {
+    print_ok "Generating package lists from packages.json..."
+    python3 "$SCRIPT_DIR/gui/packages_config.py" --generate --root "$SCRIPT_DIR"
+    judge "Generate package lists"
+}
+
+# Custom script running inside the chroot after all mods, before unmount.
+function run_custom_chroot_hook() {
+    local hook="$SCRIPT_DIR/custom_hooks.sh"
+    if [[ -s "$hook" ]]; then
+        print_ok "Running custom chroot hook..."
+        sudo cp "$hook" new_building_os/root/custom_hooks.sh
+        sudo chroot new_building_os /bin/bash /root/custom_hooks.sh
+        judge "Run custom chroot hook"
+    else
+        print_ok "No custom chroot hook; skipping."
+    fi
+}
+
+# Custom script running on the host after image/ is ready, before xorriso.
+function run_pre_iso_hook() {
+    local hook="$SCRIPT_DIR/custom_pre_iso.sh"
+    if [[ -s "$hook" ]]; then
+        print_ok "Running custom pre-ISO hook..."
+        ( cd "$SCRIPT_DIR" && bash "$hook" )
+        judge "Run custom pre-ISO hook"
+    else
+        print_ok "No custom pre-ISO hook; skipping."
+    fi
+}
+
+function stage_prepare() {
+    prepare_iso_directory
+    download_base_system
+}
+
+function stage_mount_apt() {
+    mount_folders
+    setup_apt
+}
+
+function stage_export() {
+    umount_folders
+    prepare_live_grub_font
+    prepare_live_grub_theme
+    export_anduinos_payload
 }
 
 function prepare_iso_directory() {
@@ -147,6 +261,12 @@ function mount_folders() {
     sudo cp -r "$SCRIPT_DIR/mods" new_building_os/root/mods
     sudo cp "$SCRIPT_DIR/args.sh" new_building_os/root/mods/args.sh
     sudo cp "$SCRIPT_DIR/shared.sh" new_building_os/root/mods/shared.sh
+    # Package selection from packages.json (generated on the host by
+    # gui/packages_config.py); chroot itself does not need python3.
+    sudo cp "$SCRIPT_DIR/.cache/build/core_packages.txt" new_building_os/root/mods/core_packages.txt
+    sudo cp "$SCRIPT_DIR/.cache/build/desktop_packages.txt" new_building_os/root/mods/desktop_packages.txt
+
+    mount_apt_cache
 }
 
 function setup_apt() {
@@ -209,6 +329,8 @@ function apply_anduinos_mods() {
 }
 
 function umount_folders() {
+    umount_apt_cache
+
     print_ok "Cleaning mods from chroot /root/mods..."
     sudo rm -rf new_building_os/root/mods
     judge "Clean up chroot /root/mods"
@@ -480,6 +602,9 @@ function prepare_live_efi() (
 function build_iso() {
     print_ok "Building ISO image..."
 
+    # Custom host-side hook: image/ is ready but ISO is not yet assembled.
+    run_pre_iso_hook
+
     print_ok "Generating grub.cfg..."
     touch "image/$TARGET_NAME"
     cp "$SCRIPT_DIR/args.sh" "image/$TARGET_NAME"
@@ -668,6 +793,7 @@ EOF
 function umount_on_exit() {
     sleep 2
     print_ok "Unmounting filesystems before exit..."
+    umount_apt_cache
     sudo umount "$SCRIPT_DIR/new_building_os/sys" || sudo umount -lf "$SCRIPT_DIR/new_building_os/sys" || true
     sudo umount "$SCRIPT_DIR/new_building_os/proc" || sudo umount -lf "$SCRIPT_DIR/new_building_os/proc" || true
     sudo umount "$SCRIPT_DIR/new_building_os/dev" || sudo umount -lf "$SCRIPT_DIR/new_building_os/dev" || true
@@ -675,39 +801,52 @@ function umount_on_exit() {
     judge "Unmount filesystems before exit"
 }
 
-# Business call tree (in execution order; shell commands and logging omitted):
+# Business call tree (staged). Each stage writes a .ok marker under
+# .cache/build-state/ so `build.sh --resume` can skip completed stages:
 # main
-# ├── bind_signal
-# │   └── umount_on_exit [registered EXIT callback, runs on exit]
-# ├── clean
-# ├── prepare_iso_directory
-# ├── run_chroot_anduinos -> image/LiveOS payload + GRUB font/theme
-# │   ├── download_base_system
-# │   │   └── bootstrap_ubuntu_root -> new_building_os/
-# │   ├── mount_folders
-# │   ├── setup_apt
-# │   │   └── configure_ubuntu_sources
-# │   ├── apply_anduinos_mods
-# │   │   └── /root/mods/install_all_mods.sh [inside AnduinOS chroot]
-# │   ├── umount_folders
-# │   ├── prepare_live_grub_font
-# │   ├── prepare_live_grub_theme
-# │   └── export_anduinos_payload -> squashfs, kernel, initrd, manifest, size
-# ├── run_chroot_ubuntu -> image/isolinux/live-efi/ official signed bootloaders
-# │   ├── bootstrap_ubuntu_root -> official_ubuntu_os/
-# │   ├── configure_ubuntu_sources
-# │   └── download_live_efi
-# └── build_iso -> dist/*.iso + *.sha256
-#     ├── generate_live_grub_config
-#     └── prepare_live_efi -> efiboot.img
+# ├── bind_signal -> umount_on_exit [EXIT callback]
+# ├── clean / prepare_apt_cache / prepare_build_config
+# ├── stage prepare      -> prepare_iso_directory + download_base_system
+# ├── stage mount_apt    -> mount_folders (+ mount_apt_cache) + setup_apt
+# ├── stage mods         -> apply_anduinos_mods [chroot, packages.json filtered]
+# ├── stage custom_chroot -> custom_hooks.sh [chroot]
+# ├── stage export       -> umount_folders + GRUB font/theme + export payload
+# ├── stage efi          -> run_chroot_ubuntu (official signed bootloaders)
+# └── stage iso          -> run_pre_iso_hook + build_iso -> dist/*.iso
 # =============   main  ================
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
     cd "$SCRIPT_DIR"
+
+    if [[ "${1:-}" == "--resume" ]]; then
+        RESUME=true
+        print_ok "Resume mode: completed stages will be skipped."
+        if [[ ! -d "$SCRIPT_DIR/new_building_os" ]]; then
+            print_warn "new_building_os is missing; starting from scratch."
+            RESUME=false
+            rm -rf "$STATE_DIR"
+        elif stage_is_done mount_apt && ! mountpoint -q new_building_os/proc 2>/dev/null; then
+            # 进程重启后 chroot 挂载已丢失：重新挂载并重跑其后的阶段。
+            print_warn "chroot mounts are gone; re-running mount and later stages."
+            rm -f "$STATE_DIR/mount_apt.ok" "$STATE_DIR/mods.ok" \
+                  "$STATE_DIR/custom_chroot.ok" "$STATE_DIR/export.ok"
+        fi
+    fi
+
     bind_signal
-    clean
-    prepare_iso_directory
-    run_chroot_anduinos
-    run_chroot_ubuntu
-    build_iso
+    if [[ "$RESUME" != "true" ]]; then
+        clean
+        rm -rf "$STATE_DIR"
+    fi
+    prepare_apt_cache
+    prepare_build_config
+
+    run_stage prepare stage_prepare
+    run_stage mount_apt stage_mount_apt
+    run_stage mods apply_anduinos_mods
+    run_stage custom_chroot run_custom_chroot_hook
+    run_stage export stage_export
+    run_stage efi run_chroot_ubuntu
+    run_stage iso build_iso
+
     echo "$0 - Build completed."
 fi

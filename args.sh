@@ -144,3 +144,15 @@ export APKG_SERVER="https://packages.anduinos.com"
 # GPG certificate name on the APKG server (used to download and verify the repo).
 # The cert is fetched from: $APKG_SERVER/artifacts/certs/$APKG_CERT_NAME
 export APKG_CERT_NAME="anduinos"
+
+#==============================
+# Deb package cache (added by AnduinOS Config UI)
+#==============================
+# Keep downloaded .deb packages between builds. When enabled, the chroot's
+# /var/cache/apt/archives is bind-mounted to <repo>/.cache/apt-archives on the
+# host, so a retry after a network failure reuses already downloaded packages
+# instead of downloading them again. The cache directory is excluded from the
+# final SquashFS/ISO, so the image size is unaffected.
+#   true  — keep and reuse downloaded .deb packages (recommended)
+#   false — clear the apt cache at the end of each build (original behaviour)
+export KEEP_DOWNLOADED_DEBS="true"

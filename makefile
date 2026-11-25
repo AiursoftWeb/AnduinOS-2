@@ -37,12 +37,14 @@ DEPS_CROSS += qemu-user-binfmt
 endif
 DEPS := $(DEPS_COMMON) $(DEPS_$(TARGET_ARCH)) $(DEPS_CROSS)
 
-.PHONY: current clean bootstrap menuconfig buildtorrent test help
+.PHONY: current clean bootstrap menuconfig gui resume buildtorrent test help
 
 help:
 	@echo "Usage:"
 	@echo "  make          (or make current)   Build current language"
 	@echo "  make menuconfig                   Configure build options (TUI)"
+	@echo "  make gui                          Configure build options (Graphical UI, GTK3)"
+	@echo "  make resume                       Resume an interrupted build from last stage"
 	@echo "  make clean                        Remove build artifacts"
 	@echo "  make bootstrap                    Validate environment and deps"
 	@echo "  make buildtorrent                 Generate torrents for dist/*.iso"
@@ -86,6 +88,12 @@ bootstrap:
 
 menuconfig:
 	@./menuconfig.sh
+
+gui:
+	@python3 gui/anduinos_config_ui.py --args ./args.sh
+
+resume:
+	@./build.sh --resume
 
 current: bootstrap
 	@echo "[MAKE] Building current language..."
