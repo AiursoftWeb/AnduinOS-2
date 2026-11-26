@@ -15,6 +15,17 @@ CODES = [
 
 ARCHES = ["amd64", "arm64"]
 
+# 常用 Ubuntu 镜像。最后一项是 Linux Mint 官方源，方便需要切换到 mint
+# 软件源的用户。这些仅作为下拉预设，用户始终可以输入任意自定义地址。
+APT_MIRRORS = [
+    "http://archive.ubuntu.com/ubuntu/",
+    "https://mirrors.tuna.tsinghua.edu.cn/ubuntu/",
+    "https://mirrors.aliyun.com/ubuntu/",
+    "https://mirrors.ustc.edu.cn/ubuntu/",
+    "https://mirrors.huaweicloud.com/ubuntu/",
+    "http://packages.linuxmint.com/",
+]
+
 APKG_SERVERS = [
     "https://packages.anduinos.com",
     "https://apkg-dev.aiursoft.com",
@@ -35,9 +46,12 @@ SECTIONS = [
                 "key": "TARGET_UBUNTU_VERSION",
                 "label": "Ubuntu 版本代号",
                 "label_key": "field.ubuntu_version",
-                "type": "combo",
+                "type": "combo_entry",
                 "options": CODES,
-                "help": "目标 Ubuntu 套件代号。构建主机的代号必须与之匹配。",
+                "help": (
+                    "目标 Ubuntu 套件代号。可从下拉列表选择，也可直接输入自定义代号"
+                    "（例如最新的开发版代号）。注意构建主机的代号需与之匹配。"
+                ),
                 "help_key": "help.ubuntu_version",
             },
             {
@@ -75,17 +89,24 @@ SECTIONS = [
                 "key": "APT_SOURCE",
                 "label": "Ubuntu APT 镜像",
                 "label_key": "field.apt_source",
-                "type": "text",
-                "help": "组装根文件系统所用的 Ubuntu 镜像地址，可替换为任意可用镜像。",
+                "type": "combo_entry",
+                "options": APT_MIRRORS,
+                "help": (
+                    "组装根文件系统所用的软件源地址。可从下拉列表选择常用镜像或 Linux Mint 源，"
+                    "也可直接输入任意自定义源地址。切换源时请确保其包含所选套件代号对应的仓库。"
+                ),
                 "help_key": "help.apt_source",
             },
             {
                 "key": "APKG_SERVER",
                 "label": "AnduinOS 包服务器",
                 "label_key": "field.apkg_server",
-                "type": "combo",
+                "type": "combo_entry",
                 "options": APKG_SERVERS,
-                "help": "AnduinOS 叠加包的 APT 服务器地址。",
+                "help": (
+                    "AnduinOS 叠加包的 APT 服务器地址。可从中选择预设服务器，"
+                    "也可输入自定义地址（例如自建镜像）。当前报错的包服务器若无 Release 文件，可在此切换。"
+                ),
                 "help_key": "help.apkg_server",
             },
             {

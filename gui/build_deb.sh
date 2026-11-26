@@ -44,6 +44,7 @@ install -m 0644 "$HERE/config_editor.py" "$PKGROOT/usr/lib/anduinos-config-ui/co
 install -m 0644 "$HERE/config_schema.py" "$PKGROOT/usr/lib/anduinos-config-ui/config_schema.py"
 install -m 0644 "$HERE/packages_config.py" "$PKGROOT/usr/lib/anduinos-config-ui/packages_config.py"
 install -m 0644 "$HERE/i18n.py" "$PKGROOT/usr/lib/anduinos-config-ui/i18n.py"
+install -m 0755 "$HERE/run_build.sh" "$PKGROOT/usr/lib/anduinos-config-ui/run_build.sh"
 
 # ---- 语言文件（明文 UTF-8 JSON，可任意增删，界面下拉框自动发现）----
 mkdir -p "$PKGROOT/usr/lib/anduinos-config-ui/locales"

@@ -7,10 +7,14 @@
 - **自定义脚本**：chroot 内 hook、打包 ISO 前宿主机 hook
 - **保存配置并开始构建**，脚本中途失败可**从中断处继续**
 - **i18n 多语言**：默认英文，中文以明文 JSON 存储，顶部下拉框随时切换；新增翻译文件会被自动发现
+- **sudo 提权构建**：GUI 保持普通用户运行，构建时弹出密码框，通过 `sudo -S` 提权，无需终端
+- **自定义版本代号与软件源**：Ubuntu 版本代号、软件源地址、AnduinOS 包服务器均为「预设 + 自由输入」的可编辑下拉框，可填最新开发版代号或任意自定义源（如 Linux Mint 源）
 
 ![默认英文界面](../dist/gui-preview-gtk3-en.png)
 
 ![中文界面](../dist/gui-preview-gtk3-main.png)
+
+![软件源（可编辑下拉框）](../dist/gui-preview-gtk3-repos.png)
 
 ![软件包管理](../dist/gui-preview-gtk3.png)
 
@@ -52,8 +56,8 @@ cd AnduinOS-2 && make gui
 
 | 标签页 | 内容 |
 | --- | --- |
-| 系统信息 | Ubuntu 版本代号、系统短名称、显示名称、构建版本号 |
-| 软件源 | Ubuntu APT 镜像、AnduinOS 包服务器、签名证书名、APT 配置包 |
+| 系统信息 | Ubuntu 版本代号（可选预设或自定义开发版代号）、系统短名称、显示名称、构建版本号 |
+| 软件源 | Ubuntu APT 镜像（可选预设镜像/Mint 源或自定义）、AnduinOS 包服务器（可自定义）、签名证书名、APT 配置包 |
 | 构建选项 | 目标架构、保留已下载的 .deb 包 |
 | 下载与缓存 | deb 保留开关、缓存目录/数量/大小、刷新 / 打开 / 清空 |
 | 语言与区域 | 语言包代码、Live 区域策略（29 条校验提醒） |
@@ -65,8 +69,22 @@ cd AnduinOS-2 && make gui
 
 - **保存配置**：原地保存 `args.sh`（自动备份 `.bak`），同时保存 `packages.json` 与两个 hook 脚本
 - **另存为…**：弹出 GTK 文件选择对话框，把全部配置写入新工程目录
-- **保存配置并开始构建**：保存后选择「全新构建」或「从中断处继续」，打开实时构建日志窗口
+- **保存配置并开始构建**：保存后选择「全新构建」或「从中断处继续」，弹出密码框输入当前用户密码，打开实时构建日志窗口
 - **查看构建命令**、**退出**
+
+### 构建权限说明
+
+构建 ISO 需要 root 权限。GUI 本身**不要**用 sudo 启动（GTK 需要访问你的图形会话）；点击「保存配置并开始构建」时，程序会弹出密码框，然后用 `sudo -S` 把密码从标准输入传给构建进程，因此在没有终端的环境里也能正常工作。密码只保存在内存中，不写入磁盘。若密码输错导致失败，点击「从中断处继续」会重新询问密码。
+
+实际构建入口是 `gui/run_build.sh`（由 GUI 通过 sudo 调用）：它先补装缺失的构建依赖（等价于原 `make bootstrap` 的依赖安装），再执行 `build.sh`。**不使用 `make`**，因为 `makefile` 的 `bootstrap` 会拒绝 root 身份，并带有仅允许 Ubuntu/Debian/Tuxedo/AnduinOS 的 OS 检查——在 Linux Mint 等衍生版上会被挡住；直接调用 `build.sh` 可绕过这两项限制。
+
+若想在终端中手动构建，等价命令为：
+
+```bash
+cd /path/to/AnduinOS-2
+sudo ./gui/run_build.sh            # 全新构建
+sudo ./gui/run_build.sh --resume   # 从中断处继续
+```
 
 窗口右上角有 **Language / 语言** 下拉框，切换后所有标签页、按钮、帮助文本、提示对话框与构建日志窗口的文字会立即刷新，无需重启。
 
@@ -166,9 +184,13 @@ cd /workspace && tar -czf AnduinOS-2-source.tar.gz --exclude=AnduinOS-2/dist --e
 - 脚本语法检查：build.sh、mods/05、打包脚本均通过 `bash -n`
 - deb 包结构与元数据正确（Architecture: all，依赖 python3-gi / gir1.2-gtk-3.0）
 - i18n 测试（Xvfb）：默认英文、中英实时切换、自动发现新增 `fr.json`、词条缺失回退英文、切换后保存流程不受影响，均通过
+- sudo 提权测试：用假的 `sudo` 验证 `sudo -S` 包装、stdin 密码注入与结果回读；对话框中文渲染正常；root 身份下不加 sudo 前缀
+- 可编辑下拉框测试（Xvfb）：预设选择与自定义输入均可被正确收集、切换语言后值不丢失、中英文帮助文本显示正常，均通过
 
 ## 6. 注意事项
 
 - 构建 ISO 仍需满足原工程要求：普通用户 + sudo、主机代号与 `TARGET_UBUNTU_VERSION` 一致、已安装 `make bootstrap` 依赖。
+- 软件源仅影响**目标 ISO 内**的系统源；宿主机自身 apt 源损坏（例如提示 `... adrien-addon Release 没有 Release 文件`）需在宿主机执行 `sudo rm /etc/apt/sources.list.d/anduinos*.sources && sudo apt update` 修复。`run_build.sh` 已对该类错误做容错，不会因此中断依赖安装。
+- 将 `APT_SOURCE` 改为 Linux Mint 源时，若其不含所选 `TARGET_UBUNTU_VERSION` 对应的套件，debootstrap 仍会失败；请同时确认套件代号与源匹配。
 - 本工具只修改构建配置并启动构建，不会在宿主机安装生成的 ISO。
 - 构建日志窗口的「停止」会向进程组发送 SIGTERM；未完成阶段不会写入标记，可直接续跑。

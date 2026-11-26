@@ -73,14 +73,114 @@ def add_dim_label(text: str) -> Gtk.Label:
 
 
 # ===========================================================================
+# sudo 凭据管理
+# ===========================================================================
+class SudoCredential:
+    """在没有终端的 GUI 子进程中为 sudo 提供密码。
+
+    * 若 GUI 本身已以 root 运行（例如用 sudo 启动），则无需 sudo 前缀。
+    * 否则通过 GUI 密码对话框取得密码，用 ``sudo -S`` 从 stdin 送入。
+    * 密码仅保存在内存中，不写入磁盘。
+    """
+
+    def __init__(self, i18n: I18n, parent: Gtk.Window):
+        self.i18n = i18n
+        self.parent = parent
+        self.is_root = os.geteuid() == 0
+        self.password: str | None = None
+
+    def acquire(self, force: bool = False) -> bool:
+        """确保已有可用凭据；返回 False 表示用户取消。"""
+        if self.is_root:
+            return True
+        if not force and self.password:
+            return True
+        password = self._prompt()
+        if password is None:
+            return False
+        self.password = password
+        return True
+
+    def _prompt(self) -> str | None:
+        dialog = Gtk.Dialog(
+            title=self.i18n.tr("dialog.password.title"),
+            parent=self.parent,
+            flags=Gtk.DialogFlags.MODAL,
+        )
+        dialog.add_button(self.i18n.tr("btn.cancel"), Gtk.ResponseType.CANCEL)
+        dialog.add_button(self.i18n.tr("btn.ok"), Gtk.ResponseType.OK)
+        dialog.set_default_response(Gtk.ResponseType.OK)
+
+        box = dialog.get_content_area()
+        box.set_spacing(8)
+        box.set_margin_top(12)
+        box.set_margin_bottom(12)
+        box.set_margin_left(12)
+        box.set_margin_right(12)
+        label = Gtk.Label(label=self.i18n.tr("dialog.password.text"), xalign=0.0,
+                          wrap=True, max_width_chars=60)
+        box.pack_start(label, False, False, 0)
+
+        entry = Gtk.Entry()
+        entry.set_visibility(False)
+        entry.set_activates_default(True)
+        entry.set_width_chars(32)
+        box.pack_start(entry, False, False, 0)
+        dialog.show_all()
+
+        response = dialog.run()
+        text = entry.get_text()
+        dialog.destroy()
+        if response != Gtk.ResponseType.OK:
+            return None
+        if not text.strip():
+            self._show_error(self.i18n.tr("err.password_empty"))
+            return self._prompt()
+        return text.rstrip("\r\n")
+
+    def _show_error(self, message: str) -> None:
+        dialog = Gtk.MessageDialog(
+            parent=self.parent,
+            flags=Gtk.DialogFlags.MODAL,
+            type=Gtk.MessageType.ERROR,
+            buttons=Gtk.ButtonsType.OK,
+            message_format=message,
+        )
+        dialog.run()
+        dialog.destroy()
+
+    def wrap(self, command: list[str]) -> list[str]:
+        """返回实际执行的命令（必要时加 sudo -S）。"""
+        if self.is_root:
+            return list(command)
+        return ["sudo", "-S", "-p", "", *command]
+
+    def feed(self, proc: subprocess.Popen) -> None:
+        """把密码写入 sudo 的 stdin，随后关闭 stdin。"""
+        if self.is_root or not self.password:
+            return
+        if proc.stdin is None:
+            return
+        try:
+            proc.stdin.write(self.password + "\n")
+            proc.stdin.flush()
+            proc.stdin.close()
+        except (BrokenPipeError, OSError, ValueError):
+            # sudo 可能已提前退出（例如认证失败或无需密码）。
+            pass
+
+
+# ===========================================================================
 # 构建日志窗口
 # ===========================================================================
 class BuildLogWindow(Gtk.Window):
     """显示构建过程的实时输出，并提供失败后续跑入口。"""
 
     def __init__(self, root_dir: str, command: list[str], i18n: I18n,
+                 credential: SudoCredential | None = None,
                  title: str | None = None):
         self.i18n = i18n
+        self.credential = credential
         Gtk.Window.__init__(self, title=title or self.tr("log.title"))
         self.set_default_size(820, 560)
         self.set_position(Gtk.WindowPosition.CENTER)
@@ -158,16 +258,23 @@ class BuildLogWindow(Gtk.Window):
         self.resume_btn.set_sensitive(False)
         self.set_status("log.executing", command=" ".join(command))
         self._append("\n>>> " + " ".join(command) + "\n")
+
+        # 通过 sudo -S 提权时，需要把密码送入子进程 stdin。
+        actual = self.credential.wrap(command) if self.credential else list(command)
+        need_stdin = self.credential is not None and not self.credential.is_root
         try:
             self.proc = subprocess.Popen(
-                command,
+                actual,
                 cwd=self.root_dir,
+                stdin=subprocess.PIPE if need_stdin else None,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
                 bufsize=1,
                 preexec_fn=os.setsid,
             )
+            if need_stdin:
+                self.credential.feed(self.proc)
         except OSError as exc:
             self._append(self.tr("log.start_failed", error=exc) + "\n")
             self.set_status("log.status_start_failed")
@@ -199,8 +306,11 @@ class BuildLogWindow(Gtk.Window):
     def on_resume(self, _widget: Gtk.Widget) -> None:
         if self.proc and self.proc.poll() is None:
             return
+        # 上次失败可能是密码错误，强制重新询问以便用户更正。
+        if self.credential is not None and not self.credential.acquire(force=True):
+            return
         self._append("\n>>> " + self.tr("log.resume_append") + "\n")
-        resume_cmd = [os.path.join(self.root_dir, "build.sh"), "--resume"]
+        resume_cmd = [os.path.join(self.root_dir, "gui", "run_build.sh"), "--resume"]
         self.start(resume_cmd)
 
     def on_stop(self, _widget: Gtk.Widget) -> None:
@@ -244,6 +354,7 @@ class ConfigWindow(Gtk.Window):
         self.cfg = ArgsConfig(self.args_path)
         self.widgets: dict[str, Gtk.Widget] = {}
         self.bool_vars: dict[str, Gtk.CheckButton] = {}
+        self.editable_combo_keys: set[str] = set()
         self.dirty = False
         self.cache_dir = cache_directory(self.args_path)
         self.packages_path = os.path.join(self.repo_root, "packages.json")
@@ -252,6 +363,8 @@ class ConfigWindow(Gtk.Window):
         self.package_store: dict[str, Gtk.ListStore] = {}
         self.extra_store: dict[str, Gtk.ListStore] = {}
         self.log_window: BuildLogWindow | None = None
+        # 构建需要 root 权限：GUI 保持普通用户运行，通过 sudo -S 提权。
+        self.credential = SudoCredential(self.i18n, self)
 
         self._build_ui()
         self.reload_config(show_message=False)
@@ -426,6 +539,20 @@ class ConfigWindow(Gtk.Window):
                 for option in item["options"]:
                     widget.append_text(option)
                 widget.connect("changed", lambda _w: self._mark_dirty())
+            elif kind == "combo_entry":
+                # 可编辑下拉框：预设选项 + 自由输入（自定义版本代号 / 软件源）。
+                widget = Gtk.ComboBox.new_with_entry()
+                store = Gtk.ListStore(str)
+                for option in item["options"]:
+                    store.append([option])
+                widget.set_model(store)
+                widget.set_entry_text_column(0)
+                widget.set_size_request(440, -1)
+                entry = widget.get_child()
+                entry.set_width_chars(56)
+                entry.connect("changed", lambda _e: self._mark_dirty())
+                widget.connect("changed", lambda _w: self._mark_dirty())
+                self.editable_combo_keys.add(key)
             elif kind == "text":
                 widget = Gtk.Entry()
                 widget.set_width_chars(64)
@@ -600,7 +727,12 @@ class ConfigWindow(Gtk.Window):
         for key in ALL_KEYS:
             widget = self.widgets[key]
             value = values.get(key, "")
-            if isinstance(widget, Gtk.ComboBoxText):
+            if key in self.editable_combo_keys:
+                # 预设中存在则定位到该项；自定义值则保持下拉未选中、填入输入框。
+                options = [row[0] for row in widget.get_model()]
+                widget.set_active(options.index(value) if value in options else -1)
+                widget.get_child().set_text(value)
+            elif isinstance(widget, Gtk.ComboBoxText):
                 texts = [row[0] for row in widget.get_model()]
                 if value in texts:
                     widget.set_active(texts.index(value))
@@ -657,7 +789,9 @@ class ConfigWindow(Gtk.Window):
         values: dict[str, str] = {}
         for key in ALL_KEYS:
             widget = self.widgets[key]
-            if isinstance(widget, Gtk.ComboBoxText):
+            if key in self.editable_combo_keys:
+                values[key] = widget.get_child().get_text().strip()
+            elif isinstance(widget, Gtk.ComboBoxText):
                 values[key] = widget.get_active_text() or ""
             elif isinstance(widget, Gtk.Entry):
                 values[key] = widget.get_text().strip()
@@ -783,18 +917,29 @@ class ConfigWindow(Gtk.Window):
         dialog.show_all()
         response = dialog.run()
         dialog.destroy()
+        # 通过 gui/run_build.sh 启动：它先补装构建依赖，再调用 build.sh。
+        # 不使用 make：makefile 的 bootstrap 会拒绝 root 身份，并带有仅允许
+        # Ubuntu/Debian/Tuxedo/AnduinOS 的 OS 检查（Linux Mint 会被挡住）。
+        launcher = os.path.join(self.repo_root, "gui", "run_build.sh")
         if response == Gtk.ResponseType.ACCEPT:
-            command = ["make"]
+            command = [launcher]
         elif response == Gtk.ResponseType.APPLY:
-            command = [os.path.join(self.repo_root, "build.sh"), "--resume"]
+            command = [launcher, "--resume"]
         else:
             self.set_status(self.tr("msg.build_cancelled"))
             return
 
+        # 在启动子进程前取得 sudo 凭据（GUI 本身无需以 root 运行）。
+        if not self.credential.acquire():
+            self.set_status(self.tr("status.sudo_required"))
+            return
+
         self.log_window = BuildLogWindow(
-            self.repo_root, command, self.i18n, title=self.tr("log.title")
+            self.repo_root, command, self.i18n,
+            credential=self.credential, title=self.tr("log.title"),
         )
-        self.set_status(self.tr("msg.build_started", command=" ".join(command)))
+        display = " ".join(self.credential.wrap(command))
+        self.set_status(self.tr("msg.build_started", command=display))
 
     # ------------------------------------------------------------------
     # 软件包页回调
