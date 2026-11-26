@@ -122,6 +122,7 @@ buildtorrent:
 	echo "[MAKE] Torrent generation complete."
 
 test:
+	@python3 -c 'import gi; gi.require_version("Atspi", "2.0"); from gi.repository import Atspi' || { echo "[TEST] Install python3-gi and gir1.2-atspi-2.0 to run the acceptance tests." >&2; exit 1; }
 	@python3 tests/run.py clean-disks --root test-results
 	@PYTHONPATH=tests python3 -m unittest discover -s tests/unit -p 'test_*.py' -q
 	@iso='$(ISO)'; arch='$(ARCH)'; \

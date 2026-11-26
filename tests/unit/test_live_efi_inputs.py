@@ -49,6 +49,7 @@ shutil.copyfile(work / "fixture.deb", "download.deb")
         self.payload = self.work / "package"
         control = self.payload / "DEBIAN/control"
         control.parent.mkdir(parents=True)
+        control.parent.chmod(0o755)
         control.write_text("Package: test-live-efi\nVersion: 1\nArchitecture: amd64\n"
                            "Maintainer: Test <test@example.com>\nDescription: EFI fixture\n")
         for name in ("usr/lib/grub/x86_64-efi-signed/gcdx64.efi.signed",

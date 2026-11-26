@@ -127,9 +127,9 @@ def build_file_integration_fixtures(destination: Path) -> FileIntegrationFixture
         encoding="utf-8",
     )
     fixture_epoch = 1_700_000_000
-    for path in sorted(package_root.rglob("*"), reverse=True):
+    for path in [package_root, *package_root.rglob("*")]:
+        path.chmod(0o755 if path.is_dir() else 0o644)
         os.utime(path, (fixture_epoch, fixture_epoch), follow_symlinks=False)
-    os.utime(package_root, (fixture_epoch, fixture_epoch))
     deb.unlink(missing_ok=True)
     packaged = subprocess.run(
         ("dpkg-deb", "--build", "--root-owner-group", str(package_root), str(deb)),

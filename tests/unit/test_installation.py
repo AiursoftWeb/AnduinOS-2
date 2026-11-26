@@ -1,6 +1,7 @@
 """Installation, firmware, storage, and Wi-Fi tests."""
 
 import ast
+import os
 import subprocess
 from contextlib import nullcontext
 
@@ -1703,9 +1704,13 @@ runuser() {{ printf '0\\n'; }}
 
     def test_file_integration_fixtures_are_deterministic_and_harmless(self):
         digests = []
-        for _iteration in range(2):
-            with tempfile.TemporaryDirectory() as directory:
-                fixtures = build_file_integration_fixtures(Path(directory))
+        for mask in (0o022, 0o077):
+            with self.subTest(umask=oct(mask)), tempfile.TemporaryDirectory() as directory:
+                previous_mask = os.umask(mask)
+                try:
+                    fixtures = build_file_integration_fixtures(Path(directory))
+                finally:
+                    os.umask(previous_mask)
                 paths = (
                     fixtures.image,
                     fixtures.video,
