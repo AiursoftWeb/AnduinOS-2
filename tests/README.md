@@ -6,6 +6,8 @@ Run the complete release test below; `make test TEST_ARGS="--live-usb-only --no-
 make test
 ```
 
+On the test host install `python3-gi` and `gir1.2-atspi-2.0` for the desktop accessibility checks.
+
 After the unit tests, the dashboard shows cases, suites and checks from startup.
 The ISO media case runs three suites once per ISO; installation cases follow.
 Every assertion is a third-level check, including USB, install and desktop.
