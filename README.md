@@ -59,7 +59,7 @@ included, built, or maintained by AnduinOS.
 
 ## Configuration
 
-Use `make menuconfig` or edit [args.sh](args.sh) before building. The build sources that file; it is not an executable installer. Keep the variable names and structure intact. The current inputs are:
+Use `make menuconfig` (text UI), `make gui` (GTK3 graphical UI), or edit [args.sh](args.sh) directly before building. The build sources that file; it is not an executable installer. Keep the variable names and structure intact. A prebuilt GTK3 `.deb` package is provided under `dist/`; see [gui/README.md](gui/README.md). The current inputs are:
 
 | Setting | Meaning |
 | --- | --- |
@@ -71,8 +71,11 @@ Use `make menuconfig` or edit [args.sh](args.sh) before building. The build sour
 | `LANG_PACK_CODES`, `LANGUAGE_PACKS`, `SUPPORTED_LIVE_REGIONS` | Language packages and the locale/timezone/keyboard options offered in the live environment. |
 | `LC_ALL`, `LANG`, `LANGUAGE` | The declared English build-process locale, distinct from installed/live user locale choices. |
 | `DEBIAN_FRONTEND`, `SCRIPT_DIR` | Noninteractive package setup and the derived repository directory used by the build scripts. |
+| `KEEP_DOWNLOADED_DEBS` | Keep downloaded `.deb` packages in `.cache/apt-archives/` between builds so a retry after a network failure reuses them instead of re-downloading; the cache is excluded from the final ISO. |
 
 [args.sh](args.sh) contains the authoritative current values and comments. Review the complete file when changing suite, architecture or package sources; a source configuration change is not a request to install the resulting image on the host.
+
+The graphical UI additionally manages `packages.json` (which packages are installed or skipped), `custom_hooks.sh` (chroot hook), and `custom_pre_iso.sh` (host hook before ISO assembly). An interrupted build can be resumed from its last completed stage with `make resume` (equivalently `./build.sh --resume`). The UI is internationalized: English is the default, Chinese translations are stored as plain-text JSON under `gui/locales/`, and any additional `*.json` file placed there is automatically listed in the language selector.
 
 ## Development
 
@@ -96,11 +99,14 @@ The ISO and its SHA-256 checksum are written to `dist/`.
 Use the configuration menu before building:
 
 ```bash
-make menuconfig
+make menuconfig   # text UI
+make gui          # GTK3 graphical UI
 ```
 
-The same settings can be edited directly in `args.sh`. They include the Ubuntu
-release, package sources, AnduinOS version, and target architecture.
+The graphical UI can also select which packages are installed, define custom
+chroot / pre-ISO hooks, start a build and resume an interrupted one. The same
+settings can be edited directly in `args.sh`. They include the Ubuntu release,
+package sources, AnduinOS version, and target architecture.
 
 <a name="testing"></a>
 **Testing.**

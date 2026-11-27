@@ -11,11 +11,19 @@ rm -rf /root/.local/share/gnome-shell/extensions || true
 rm -rf /root/.cache || true
 judge "Clean up /root/"
 
-# Clean up apt cache
-print_ok "Cleaning up apt cache..."
-find /var/cache/apt/archives -mindepth 1 -delete 2>/dev/null || true
+# Clean up apt cache.
+# When KEEP_DOWNLOADED_DEBS=true, /var/cache/apt/archives is a bind mount of
+# the host-side persistent cache. Deleting it here would wipe the host cache
+# too. The SquashFS export already excludes var/cache/apt/archives/*, so
+# skipping this deletion does not increase the final ISO size.
+print_ok "Handling apt cache..."
+if [[ "${KEEP_DOWNLOADED_DEBS:-false}" == "true" ]]; then
+    print_ok "Keeping downloaded .deb packages (KEEP_DOWNLOADED_DEBS=true)."
+else
+    find /var/cache/apt/archives -mindepth 1 -delete 2>/dev/null || true
+fi
 rm -f /var/cache/apt/pkgcache.bin /var/cache/apt/srcpkgcache.bin || true
-judge "Clean up apt cache"
+judge "Handle apt cache"
 
 # Clean up apt lists (save ~50-80MB in the squashfs; the installed system
 # will re-fetch them on first apt update anyway)

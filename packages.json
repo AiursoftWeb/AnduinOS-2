@@ -1,0 +1,42 @@
+{
+  "version": 1,
+  "core": {
+    "anduinos-core-system": true,
+    "anduinos-grub": true,
+    "anduinos-shim-signed": true,
+    "dracut": true,
+    "dracut-core": true,
+    "dracut-install": true,
+    "discover": true,
+    "laptop-detect": true,
+    "os-prober": true,
+    "keyutils": true
+  },
+  "desktop": {
+    "anduinos-live-layers": true,
+    "anduinos-desktop": true,
+    "anduinos-desktop-apps": true,
+    "anduinos-gnome-extensions": true,
+    "anduinos-appstore": true,
+    "anduinos-theme": true,
+    "anduinos-wallpapers": true,
+    "anduinos-fonts": true,
+    "anduinos-no-snapd": true,
+    "anduinos-session": true,
+    "anduinos-software-properties-common": true,
+    "anduinos-system-tweaks": true,
+    "firefox-anduinos": true,
+    "gnome-shell-extension-appindicator-anduinos": true,
+    "gnome-shell-extension-dash-to-panel-anduinos": true,
+    "plymouth-anduinos": true,
+    "alsa-ucm-conf-anduinos": true,
+    "firmware-sof-anduinos": true,
+    "anduinos-hyperfluent-grub-theme": true,
+    "anduinos-installer-beta": true,
+    "anduinos-btrfs-snapshots-manager": true,
+    "anduinos-recovery-env": true,
+    "open-vm-tools-desktop": true
+  },
+  "extra_core": [],
+  "extra_desktop": []
+}
