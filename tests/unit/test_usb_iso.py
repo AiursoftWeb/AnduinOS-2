@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from framework.dashboard import AcceptanceDashboard
 from framework.errors import ProtocolError, TestFailure
@@ -18,7 +18,18 @@ from framework.model import Architecture, Firmware, TestMatrix
 from framework.usb_iso import rewrite_config, assert_preserved_arguments
 from business.acceptance import _parser, main
 from business.install import scenario_check_ids
-from business.live_usb import USB_CASE_ID, live_usb_suite_checks, run_live_usb
+from business.live_usb import USB_CASE_ID, _optical_warning_visible, live_usb_suite_checks, run_live_usb
+
+
+def draw_optical_warning(image, lines=(
+        'AnduinOS To Go requires a USB drive written in DD mode with unallocated space after the image.',
+        'This boot medium is not supported. Powering off in 15 seconds.')):
+    draw = ImageDraw.Draw(image)
+    for row, line in enumerate(lines):
+        for column, character in enumerate(line):
+            if character != ' ':
+                x, y = 76 + 8 * column, 219 + 16 * row
+                draw.rectangle((x + 1, y, x + 6, y + 10), fill=(168, 168, 168))
 
 
 class RufusIsoModeTests(unittest.TestCase):
@@ -124,6 +135,14 @@ class RufusIsoModeTests(unittest.TestCase):
             with self.subTest(architecture=architecture):
                 self._assert_usb_workflows(architecture)
 
+    def test_grub_menu_and_incomplete_warning_are_rejected(self):
+        image = Image.new('RGB', (1280, 800))
+        draw_optical_warning(image, ('Choose an operating system', 'Select an OS to boot'))
+        self.assertFalse(_optical_warning_visible(image))
+        image = Image.new('RGB', (1280, 800))
+        draw_optical_warning(image, ('AnduinOS To Go requires a USB drive written in DD mode with unallocated space after the image.',))
+        self.assertFalse(_optical_warning_visible(image))
+
     def test_optical_guest_that_never_powers_off_fails(self):
         self._assert_usb_workflows(Architecture.ARM64, shutdown_timeout=True)
 
@@ -162,7 +181,7 @@ class RufusIsoModeTests(unittest.TestCase):
             def screenshot(self, name):
                 path = self.config.artifacts / f'{name}.png'
                 image = Image.new('RGB', (1920, 1080))
-                image.paste((160, 160, 160), (250, 295, 450, 305))
+                draw_optical_warning(image)
                 image.save(path)
                 return path
 
