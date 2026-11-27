@@ -4,21 +4,32 @@ import tempfile
 import io
 import json
 import xml.etree.ElementTree as ET
-from contextlib import redirect_stdout, nullcontext
+from contextlib import contextmanager, redirect_stdout
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from framework.dashboard import AcceptanceDashboard
-from framework.errors import TestFailure
+from framework.errors import ProtocolError, TestFailure
 from framework.feature_model import FeatureSuiteRegistry
 from framework.model import Architecture, Firmware, TestMatrix
 from framework.usb_iso import rewrite_config, assert_preserved_arguments
 from business.acceptance import _parser, main
 from business.install import scenario_check_ids
-from business.live_usb import USB_CASE_ID, live_usb_suite_checks, run_live_usb
+from business.live_usb import USB_CASE_ID, _optical_warning_visible, live_usb_suite_checks, run_live_usb
+
+
+def draw_optical_warning(image, lines=(
+        'AnduinOS To Go requires a USB drive written in DD mode with unallocated space after the image.',
+        'This boot medium is not supported. Powering off in 15 seconds.')):
+    draw = ImageDraw.Draw(image)
+    for row, line in enumerate(lines):
+        for column, character in enumerate(line):
+            if character != ' ':
+                x, y = 76 + 8 * column, 219 + 16 * row
+                draw.rectangle((x + 1, y, x + 6, y + 10), fill=(168, 168, 168))
 
 
 class RufusIsoModeTests(unittest.TestCase):
@@ -124,8 +135,30 @@ class RufusIsoModeTests(unittest.TestCase):
             with self.subTest(architecture=architecture):
                 self._assert_usb_workflows(architecture)
 
-    def _assert_usb_workflows(self, architecture):
+    def test_grub_menu_and_incomplete_warning_are_rejected(self):
+        image = Image.new('RGB', (1280, 800))
+        draw_optical_warning(image, ('Choose an operating system', 'Select an OS to boot'))
+        self.assertFalse(_optical_warning_visible(image))
+        image = Image.new('RGB', (1280, 800))
+        draw_optical_warning(image, ('AnduinOS To Go requires a USB drive written in DD mode with unallocated space after the image.',))
+        self.assertFalse(_optical_warning_visible(image))
+
+    def test_optical_guest_that_never_powers_off_fails(self):
+        self._assert_usb_workflows(Architecture.ARM64, shutdown_timeout=True)
+
+    def _assert_usb_workflows(self, architecture, *, shutdown_timeout=False):
         configurations = []
+        capturing = False
+
+        @contextmanager
+        def capture_output():
+            nonlocal capturing
+            capturing = True
+            try:
+                yield
+            finally:
+                capturing = False
+
         class FakeVm:
             def __init__(self, config):
                 configurations.append(config)
@@ -133,7 +166,7 @@ class RufusIsoModeTests(unittest.TestCase):
                 self.qmp = object()
                 self.spice_socket = Path("/test/spice.sock")
                 self.serial = SimpleNamespace(
-                    capture_output=nullcontext,
+                    capture_output=capture_output,
                     wait_for_shell=lambda _timeout: None,
                     run=lambda *_args, **_kwargs: SimpleNamespace(
                         returncode=0, stdout='ISO_USB_DESKTOP_PASSED'))
@@ -148,11 +181,15 @@ class RufusIsoModeTests(unittest.TestCase):
             def screenshot(self, name):
                 path = self.config.artifacts / f'{name}.png'
                 image = Image.new('RGB', (1920, 1080))
-                image.paste((160, 160, 160), (250, 295, 450, 305))
+                draw_optical_warning(image)
                 image.save(path)
                 return path
 
             def wait(self, *, timeout):
+                if not capturing or timeout != 45:
+                    raise AssertionError('Optical power-off requires an active serial reader and the 45s deadline')
+                if shutdown_timeout:
+                    raise ProtocolError('QEMU did not stop before the timeout')
                 return 0
 
             def stop(self):
@@ -183,6 +220,12 @@ class RufusIsoModeTests(unittest.TestCase):
                 dashboard.close()
             summary = json.loads((root / 'run-live-usb' / 'summary.json').read_text())
             junit = ET.parse(root / 'run-live-usb' / 'junit.xml').getroot()
+        if shutdown_timeout:
+            self.assertFalse(passed)
+            optical = summary['results'][0]['suites'][-1]
+            self.assertEqual(optical['status'], 'failed')
+            self.assertIn('QEMU did not stop before the timeout', optical['error'])
+            return
         self.assertTrue(passed)
         self.assertEqual(len(configurations), 3)
         self.assertTrue(all(config.architecture is architecture for config in configurations))

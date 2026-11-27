@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
+from itertools import groupby
 import contextlib
 import shutil
 import tempfile
 import time
 from pathlib import Path
 
-from PIL import Image
+from PIL import Image, ImageChops, ImageFilter
 
 from framework.errors import TestFailure
 from framework.firmware import resolve_firmware
@@ -21,6 +22,48 @@ from framework.usb_iso import prepare_iso_usb
 
 
 USB_CASE_ID = 'iso-media'
+
+
+_OPTICAL_WARNING = (
+    'AnduinOS To Go requires a USB drive written in DD mode with unallocated space after the image.',
+    'This boot medium is not supported. Powering off in 15 seconds.',
+)
+
+
+def _matches_console_line(line: Image.Image, message: str) -> bool:
+    # GRUB uses fixed-width cells. Match the word boundaries across the
+    # entire line without depending on the font's glyphs or a host OCR tool.
+    left, _, right, _ = line.getbbox()
+    cell = round((right - left) / len(message))
+    if cell < 2 or abs(right - left - cell * len(message)) >= cell:
+        return False
+    columns, _ = line.getprojection()
+    for start in range(max(0, left - cell + 1), left + 1):
+        if all(bool(any(columns[start + i * cell:start + (i + 1) * cell])) == (c != ' ')
+               for i, c in enumerate(message)):
+            return True
+    return False
+
+
+def _optical_warning_visible(image: Image.Image) -> bool:
+    # Console letters sit on black even in the graphical theme. Menu titles
+    # and highlights must never satisfy the warning check on their own.
+    gray = image.convert('L')
+    dark = gray.point(lambda value: 255 if value <= 5 else 0)
+    light = gray.point(lambda value: 255 if value >= 128 else 0)
+    ink = ImageChops.multiply(light, dark.filter(ImageFilter.MaxFilter(3)))
+    _, occupied = ink.getprojection()
+    bands = groupby(range(ink.height), key=lambda y: bool(occupied[y]))
+    lines = [list(rows) for present, rows in bands if present]
+    for upper, lower in zip(lines, lines[1:]):
+        if lower[0] - upper[-1] > 2 * len(upper):
+            continue
+        first = ink.crop((0, upper[0], ink.width, upper[-1] + 1))
+        second = ink.crop((0, lower[0], ink.width, lower[-1] + 1))
+        if (_matches_console_line(first, _OPTICAL_WARNING[0])
+                and _matches_console_line(second, _OPTICAL_WARNING[1])):
+            return True
+    return False
 
 
 def _labels(inspection) -> tuple[str, str]:
@@ -187,25 +230,16 @@ echo ISO_USB_DESKTOP_PASSED
                             raise TestFailure('QEMU stopped before the To Go rejection was recognized on the display')
                         warning_frame = vm.screenshot('unsupported-media')
                         with Image.open(warning_frame) as image:
-                            screen = image.convert('RGB')
-                            width, height = screen.size
-                            # Exclude both the EFI/AnduinOS splash logos in the
-                            # middle and the tiny HyperFluent icon at top left.
-                            # A real text-VT warning starts in this upper band.
-                            text_area = screen.crop((width * 12 // 100, 0,
-                                                     width * 90 // 100, height * 30 // 100))
-                            # The GRUB console renders this warning in gray (RGB
-                            # 160 on the release ISO), not bright white.
-                            if sum(min(pixel) >= 150 for pixel in text_area.get_flattened_data()) >= 100:
+                            if _optical_warning_visible(image):
                                 break
                         if time.monotonic() >= display_deadline:
                             raise TestFailure('To Go rejection is not visible on the display')
                         time.sleep(0.4)
-                dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'passed')
-                dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'running')
-                dashboard.suite_phase(USB_CASE_ID, record['id'], 'Waiting for expected power-off')
-                if vm.wait(timeout=45) != 0:
-                    raise TestFailure('To Go rejection did not power off QEMU cleanly')
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'passed')
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'running')
+                    dashboard.suite_phase(USB_CASE_ID, record['id'], 'Waiting for expected power-off')
+                    if vm.wait(timeout=45) != 0:
+                        raise TestFailure('To Go rejection did not power off QEMU cleanly')
                 dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'passed')
                 record['status'] = 'passed'
             finally:
