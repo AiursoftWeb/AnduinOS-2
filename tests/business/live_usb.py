@@ -201,11 +201,11 @@ echo ISO_USB_DESKTOP_PASSED
                         if time.monotonic() >= display_deadline:
                             raise TestFailure('To Go rejection is not visible on the display')
                         time.sleep(0.4)
-                dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'passed')
-                dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'running')
-                dashboard.suite_phase(USB_CASE_ID, record['id'], 'Waiting for expected power-off')
-                if vm.wait(timeout=45) != 0:
-                    raise TestFailure('To Go rejection did not power off QEMU cleanly')
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'warning-visible', 'passed')
+                    dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'running')
+                    dashboard.suite_phase(USB_CASE_ID, record['id'], 'Waiting for expected power-off')
+                    if vm.wait(timeout=45) != 0:
+                        raise TestFailure('To Go rejection did not power off QEMU cleanly')
                 dashboard.suite_check(USB_CASE_ID, record['id'], 'power-off', 'passed')
                 record['status'] = 'passed'
             finally:
